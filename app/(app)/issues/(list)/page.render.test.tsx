@@ -116,6 +116,27 @@ describe("issue list layout", () => {
     expect(html).not.toContain('href="/issues/new"');
   });
 
+  it("welcomes a new, empty project even when the workspace has issues elsewhere", async () => {
+    // Other projects in tenant-acme have 5 issues; project-acme has none.
+    count.mockImplementation(async (args: { where?: { projectId?: unknown } }) =>
+      args?.where?.projectId === "project-acme" ? 0 : 5,
+    );
+    findMany.mockResolvedValue([]);
+    const html = await renderList();
+    expect(html).toContain("No issues yet");
+    expect(html).not.toContain("No issues match these filters.");
+    const firstRunCount = count.mock.calls.find(([args]) => args?.where?.isDeleted === false && !args?.where?.status);
+    expect(firstRunCount?.[0].where).toMatchObject({ tenantId: "tenant-acme", projectId: "project-acme" });
+  });
+
+  it("says no issues match when the project has issues but the filters hide them", async () => {
+    count.mockImplementation(async (args: { where?: { severity?: unknown } }) => (args?.where?.severity ? 0 : 3));
+    findMany.mockResolvedValue([]);
+    const html = await renderList({ severity: "critical" });
+    expect(html).toContain("No issues match these filters.");
+    expect(html).not.toContain("No issues yet");
+  });
+
   it("has no stage sidebar beside the list (#1054)", async () => {
     const html = await renderList();
     expect(html).not.toContain('aria-label="Issue stages"');
@@ -146,19 +167,33 @@ describe("issue list layout", () => {
     const html = await renderList({ platform: "cat-web", page: "2", q: "login" });
 
     const nav = html.match(/<nav aria-label="Platforms"[\s\S]*?<\/nav>/)?.[0] ?? "";
-    const tabs = [...nav.matchAll(/<a [^>]*>([^<]+)<span[^>]*>(\d+)<\/span><\/a>/g)].map((m) => `${m[1]} ${m[2]}`);
-    // Active platforms only (not the inactive Desktop), and No platform because some have none.
-    expect(tabs).toEqual(["All 7", "Web 4", "Mobile 2", "No platform 1"]);
+    const tabs = [...nav.matchAll(/<a [^>]*>(?:<svg[\s\S]*?<\/svg>)?([^<]+)<span[^>]*>(\d+)<\/span><\/a>/g)].map((m) => `${m[1].trim()} ${m[2]}`);
+    // Active platforms only (not the inactive Desktop), and Resolved tab with count.
+    expect(tabs).toEqual(["All 7", "Web 4", "Mobile 2", "Resolved 1"]);
     expect(nav).toMatch(/aria-current="page"[^>]*href="\/issues\?q=login&amp;platform=cat-web"/);
     // Choosing a tab keeps the search, drops paging, and swaps the platform.
     expect(nav).toContain('href="/issues?q=login&amp;platform=cat-mobile"');
     expect(nav).toContain('href="/issues?q=login"');
+    expect(nav).toContain('href="/issues?q=login&amp;status=resolved"');
+    expect(nav).not.toContain("No platform");
 
     // The counts ignore the current platform, so every tab is honest.
     const tabQuery = (groupBy.mock.calls as unknown as [{ where: Record<string, unknown> }][]).at(-1)![0];
     expect(tabQuery.where).not.toHaveProperty("categoryId");
     // The list itself is still narrowed to the chosen platform.
     expect(findMany.mock.calls.at(-1)![0].where.categoryId).toBe("cat-web");
+  });
+
+  it("activates the Resolved tab when filtering by status=resolved (#473)", async () => {
+    groupBy.mockResolvedValue([
+      { categoryId: "cat-web", _count: { _all: 4 } },
+      { categoryId: "cat-mobile", _count: { _all: 2 } },
+    ] as never);
+    const html = await renderList({ status: "resolved" });
+    const nav = html.match(/<nav aria-label="Platforms"[\s\S]*?<\/nav>/)?.[0] ?? "";
+    expect(nav).toMatch(/aria-current="page"[^>]*href="\/issues\?status=resolved"/);
+    expect(nav).toContain('href="/issues"');
+    expect(nav).toContain('href="/issues?platform=cat-web"');
   });
 
   it("shows no tabs when the project has no platforms to choose between (#1055)", async () => {

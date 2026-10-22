@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { confirmationCount, isConfirmedCount, issueStage, parseIssueStageView } from "./issue-stage";
+import { confirmationCount, intakeKind, isConfirmedCount, issueStage, parseIssueStageView } from "./issue-stage";
 
 const bug = { beneficiaryUserId: "beneficiary", reporterId: "reporter", createdByAgent: null, claims: [] };
 
@@ -56,11 +56,24 @@ describe("confirmationCount", () => {
   });
 });
 
+describe("intake", () => {
+  it("keeps an open report an idea until it is confirmed and upvoted", () => {
+    expect(intakeKind({ status: "open", voteCount: 5, confirmed: false })).toBe("idea");
+    expect(intakeKind({ status: "open", voteCount: 2, confirmed: true })).toBe("idea");
+    expect(intakeKind({ status: "open", voteCount: 3, confirmed: true })).toBe("issue");
+  });
+
+  it("keeps a started or finished report an issue", () => {
+    expect(intakeKind({ status: "in_progress", voteCount: 4, confirmed: true })).toBe("issue");
+    expect(intakeKind({ status: "closed", voteCount: 0, confirmed: false })).toBe("idea");
+  });
+});
+
 describe("parseIssueStageView", () => {
-  it("keeps the two sidebar views and ignores ready", () => {
+  it("keeps the idea filters and the issue filter", () => {
     expect(parseIssueStageView("reported")).toBe("reported");
     expect(parseIssueStageView("confirmed")).toBe("confirmed");
-    expect(parseIssueStageView("ready")).toBeNull();
+    expect(parseIssueStageView("ready")).toBe("ready");
     expect(parseIssueStageView(undefined)).toBeNull();
   });
 });

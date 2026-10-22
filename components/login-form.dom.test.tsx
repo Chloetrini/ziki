@@ -3,7 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loginAction } from "@/app/actions/auth";
+import { googleSignInAction, loginAction } from "@/app/actions/auth";
 import { LoginForm } from "./login-form";
 
 vi.mock("@/app/actions/auth", () => ({ loginAction: vi.fn(), googleSignInAction: vi.fn() }));
@@ -58,5 +58,14 @@ describe("LoginForm second step (#648)", () => {
     await user.click(screen.getByRole("button", { name: "Verify and sign in" }));
     await waitFor(() => expect(screen.queryByLabelText("Authentication code")).toBeNull());
     expect(screen.getByRole("alert")).toHaveTextContent("Invalid email or password");
+  });
+});
+
+describe("LoginForm Google sign-in (#457)", () => {
+  it("sends the requested page as the callback", async () => {
+    const user = userEvent.setup();
+    render(<LoginForm callbackUrl="/issues/ZE-12?comment=c9" googleEnabled />);
+    await user.click(screen.getByRole("button", { name: "Continue with Google" }));
+    await waitFor(() => expect(googleSignInAction).toHaveBeenCalledWith("/issues/ZE-12?comment=c9"));
   });
 });

@@ -1,18 +1,22 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth-helpers";
 import { bugInTenant, currentTenantIdFor } from "@/lib/tenant-context";
 import { canDeleteTicket } from "@/lib/ticket-deletion";
 import { currentTenantAccess } from "@/lib/tenant-access";
 import { formatIssueNumber } from "@/lib/issue-number";
+import { issuePath, parseIssueRef, queryString, resolveIssueRef } from "@/lib/issue-ref";
 import { buildVersions } from "@/lib/issue-revisions";
 import { LocalTime } from "@/components/local-time";
 import { RichText } from "@/components/rich-text";
 import { TextDiffView } from "@/components/text-diff-view";
 import { wordDiff } from "@/lib/text-diff";
 
-type Props = { params: Promise<{ id: string }> };
+type Props = {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
 
 export const metadata = { title: "Edit history" };
 
@@ -20,13 +24,22 @@ export const metadata = { title: "Edit history" };
  * Every version of an issue's title and description (#303). Visible to
  * anyone who can see the issue, on the same rule as the issue page.
  */
-export default async function IssueHistoryPage({ params }: Props) {
-  const { id } = await params;
+export default async function IssueHistoryPage({ params, searchParams }: Props) {
+  const { id: rawId } = await params;
   const user = await requireUser();
   const access = await currentTenantAccess(user.id, user.role);
+  const scope = bugInTenant(await currentTenantIdFor(user.id));
+  // #457: readable numbers resolve here; an old id redirects to the number,
+  // keeping its query parameters.
+  const ref = parseIssueRef(rawId);
+  const found = await resolveIssueRef(prisma, ref, scope);
+  if (!found) notFound();
+  if (ref.kind === "id") {
+    permanentRedirect(`${issuePath(found.number, "/history")}${queryString((await searchParams) ?? {})}`);
+  }
 
   const bug = await prisma.bug.findUnique({
-    where: { id, ...bugInTenant(await currentTenantIdFor(user.id)) },
+    where: { id: found.id, ...scope },
     select: {
       id: true,
       number: true,
@@ -63,7 +76,7 @@ export default async function IssueHistoryPage({ params }: Props) {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <div>
-        <Link href={`/issues/${bug.id}`} className="text-sm text-teal-700 hover:underline">
+        <Link href={issuePath(bug.number)} className="text-sm text-teal-700 hover:underline">
           ← Back to issue
         </Link>
         <h1 className="mt-3 text-xl font-semibold text-slate-900 break-words">

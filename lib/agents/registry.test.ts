@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => {
   const mock = {
-    agent: { create: vi.fn(), findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn(), count: vi.fn(async () => 0) },
+    agent: { create: vi.fn(), findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn(), delete: vi.fn(), count: vi.fn(async () => 0) },
     agentApiKey: { create: vi.fn(), updateMany: vi.fn() },
     agentAreaPreference: { findMany: vi.fn(), deleteMany: vi.fn(), createMany: vi.fn() },
     projectArea: { findMany: vi.fn() },
@@ -20,7 +20,7 @@ vi.mock("@/lib/prisma", () => ({ prisma: db }));
 
 import { hashSecret } from "./keys";
 import { openSecret } from "@/lib/secret-box";
-import { createAgent, regenerateKey, revokeAgent, rotateKey, setAgentAreaPreferences, setAgentBurst, setAgentLevel } from "./registry";
+import { createAgent, deleteAgent, regenerateKey, revokeAgent, rotateKey, setAgentAreaPreferences, setAgentBurst, setAgentLevel } from "./registry";
 import { MAX_ACTIVE_AGENTS_PER_OWNER } from "./registry-limits";
 
 const ada = { id: "ada", role: "user" as const };
@@ -114,6 +114,19 @@ describe("revokeAgent and setAgentLevel (#427)", () => {
     db.agent.findUnique.mockResolvedValue(agentRow);
     expect(await revokeAgent({ id: "bob", role: "user" }, "agent1")).toMatchObject({ ok: false });
     expect(db.agent.update).not.toHaveBeenCalled();
+  });
+
+  it("lets the owner delete the agent after handing its work back", async () => {
+    db.agent.findUnique.mockResolvedValue(agentRow);
+    expect(await deleteAgent(ada, "agent1")).toEqual({ ok: true });
+    expect(db.issueClaim.findMany).toHaveBeenCalled();
+    expect(db.agent.delete).toHaveBeenCalledWith({ where: { id: "agent1" } });
+  });
+
+  it("refuses a delete from anyone else", async () => {
+    db.agent.findUnique.mockResolvedValue(agentRow);
+    expect(await deleteAgent({ id: "bob", role: "user" }, "agent1")).toMatchObject({ ok: false });
+    expect(db.agent.delete).not.toHaveBeenCalled();
   });
 
   it("lets the owner raise to reviewer but not merger", async () => {

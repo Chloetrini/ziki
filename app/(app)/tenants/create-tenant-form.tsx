@@ -47,7 +47,7 @@ export function CreateTenantForm({ nameMax }: { nameMax: number }) {
     <form ref={formRef} action={action} className="mt-4 space-y-4" noValidate>
       <div className="space-y-1">
         <label htmlFor="tenant-name" className="block text-sm font-medium text-slate-800">
-          Tenant name
+          Workspace name
         </label>
         <p id="tenant-name-hint" className="text-xs text-slate-500">
           Usually your company or team, such as Acme.
@@ -72,8 +72,8 @@ export function CreateTenantForm({ nameMax }: { nameMax: number }) {
           First project <span className="font-normal text-slate-500">(optional)</span>
         </label>
         <p id="tenant-project-hint" className="text-xs text-slate-500">
-          A product inside the tenant, such as Acme Web. Left blank, it&apos;s named after
-          the tenant. You can add more later.
+          One product in this workspace, such as Acme Web. A platform such as Web or Mobile
+          is a label on an issue, not a project. Left blank, the project is named after the workspace.
         </p>
         <Input
           id="tenant-project"
@@ -96,7 +96,7 @@ export function CreateTenantForm({ nameMax }: { nameMax: number }) {
       {confirmingDuplicate ? <input type="hidden" name="confirmDuplicate" value={result?.duplicateName} /> : null}
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" disabled={pending}>
-          {pending ? "Creating…" : confirmingDuplicate ? "Create anyway" : "Create tenant"}
+          {pending ? "Creating…" : confirmingDuplicate ? "Create anyway" : "Create workspace"}
         </Button>
         <p className="text-xs text-slate-500">You&apos;ll be its owner.</p>
       </div>

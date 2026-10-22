@@ -178,7 +178,8 @@ describe("IssueFilters live search (#671)", () => {
     expect(option).toBeInTheDocument();
 
     fireEvent.click(option);
-    expect(nav.push).toHaveBeenCalledWith("/issues/i1");
+    // #457: the picked issue opens at its readable number.
+    expect(nav.push).toHaveBeenCalledWith("/issues/4");
   });
 
   it("puts the real search back when a tag is picked", async () => {
@@ -408,12 +409,13 @@ describe("IssueFilters stage filter (#1054)", () => {
   });
   afterEach(cleanup);
 
-  it("offers Reported and Confirmed, with their counts, in the Filter popover", () => {
-    render(<IssueFilters stageCounts={{ reported: 7, confirmed: 2 }} />);
+  it("offers Ideas and Issues, with their counts, in the Filter popover", () => {
+    render(<IssueFilters stageCounts={{ reported: 7, confirmed: 2, ready: 4 }} />);
     fireEvent.click(screen.getByRole("button", { name: /^filter/i }));
-    const stage = within(screen.getByRole("dialog", { name: "Filter issues" })).getByLabelText("Stage");
-    expect(within(stage).getByRole("option", { name: "Reported (7)" })).toBeInTheDocument();
-    expect(within(stage).getByRole("option", { name: "Confirmed (2)" })).toBeInTheDocument();
+    const stage = within(screen.getByRole("dialog", { name: "Filter issues" })).getByLabelText("Kind");
+    expect(within(stage).getByRole("option", { name: "Ideas (7)" })).toBeInTheDocument();
+    expect(within(stage).getByRole("option", { name: "Ideas awaiting upvotes (2)" })).toBeInTheDocument();
+    expect(within(stage).getByRole("option", { name: "Issues (4)" })).toBeInTheDocument();
 
     fireEvent.change(stage, { target: { value: "reported" } });
     expect(nav.push).toHaveBeenCalledWith("/issues?stage=reported");
@@ -424,7 +426,7 @@ describe("IssueFilters stage filter (#1054)", () => {
     render(<IssueFilters />);
     expect(screen.getByRole("button", { name: /filter \(1 active\)/i })).toBeInTheDocument();
     const remove = screen.getByRole("button", { name: "Remove stage filter" });
-    expect(remove.parentElement).toHaveTextContent("Stage: Confirmed");
+    expect(remove.parentElement).toHaveTextContent("Kind: Ideas awaiting upvotes");
     fireEvent.click(remove);
     expect(nav.push).toHaveBeenCalledWith("/issues");
   });
@@ -445,5 +447,16 @@ describe("IssueFilters without a platform select (#1055)", () => {
     expect(screen.queryByRole("button", { name: "Remove platform filter" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^filter/i }));
     expect(within(screen.getByRole("dialog", { name: "Filter issues" })).queryByLabelText("Platform")).not.toBeInTheDocument();
+  });
+
+  it("allows filtering by untagged platform when platforms are provided (#473)", () => {
+    const platforms = [{ id: "cat-web", name: "Web" }];
+    nav.params = new URLSearchParams("platform=none");
+    render(<IssueFilters platforms={platforms} />);
+    expect(screen.getByRole("button", { name: /filter \(1 active\)/i })).toBeInTheDocument();
+    const remove = screen.getByRole("button", { name: "Remove platform filter" });
+    expect(remove.parentElement).toHaveTextContent("Platform: No platform");
+    fireEvent.click(remove);
+    expect(nav.push).toHaveBeenCalledWith("/issues");
   });
 });

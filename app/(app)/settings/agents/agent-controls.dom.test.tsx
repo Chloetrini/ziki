@@ -11,6 +11,7 @@ const otherAction = vi.hoisted(() => vi.fn());
 vi.mock("./actions", () => ({
   regenerateAgentKeyAction: otherAction,
   revokeAgentAction: otherAction,
+  deleteAgentAction: otherAction,
   setAgentAreaPreferencesAction: otherAction,
   setAgentBurstAction,
   setAgentLevelAction: otherAction,

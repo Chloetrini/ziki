@@ -38,6 +38,31 @@ function makeUploadRequest(file?: File | string | null, contentLength?: number) 
   return request;
 }
 
+/** A chunked body (no Content-Length) that records how much of it was pulled. */
+function chunkedUpload(totalBytes: number, chunkSize = 512 * 1024) {
+  let sent = 0;
+  let pulls = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulls++;
+      if (sent >= totalBytes) {
+        controller.close();
+        return;
+      }
+      const size = Math.min(chunkSize, totalBytes - sent);
+      sent += size;
+      controller.enqueue(new Uint8Array(size));
+    },
+  });
+  const init = {
+    method: "POST",
+    body: stream,
+    headers: { "content-type": "multipart/form-data; boundary=test" },
+    duplex: "half",
+  } as unknown as ConstructorParameters<typeof NextRequest>[1];
+  return { request: new NextRequest("http://localhost:3000/api/uploads", init), pulls: () => pulls };
+}
+
 describe("POST /api/uploads", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -87,6 +112,29 @@ describe("POST /api/uploads", () => {
 
     expect(res.status).toBe(413);
     expect(await res.json()).toEqual({ error: "File is too large (max 5 MB)." });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("stops a chunked body over the cap instead of buffering all of it (#485)", async () => {
+    const { request, pulls } = chunkedUpload(8 * 1024 * 1024);
+
+    const res = await POST(request);
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: "File is too large (max 5 MB)." });
+    // 8 MB in 512 KB chunks is 16 pulls; reading stopped near the 5 MB cap.
+    expect(pulls()).toBeLessThan(16);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 for a non-numeric content-length (#485)", async () => {
+    const req = makeUploadRequest(new File(["content"], "test.txt", { type: "text/plain" }));
+    req.headers.set("content-length", "abc");
+
+    const res = await POST(req);
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Send a valid Content-Length header." });
     expect(create).not.toHaveBeenCalled();
   });
 

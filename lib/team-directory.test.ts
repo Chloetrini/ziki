@@ -24,11 +24,12 @@ describe("team directory metrics", () => {
         name: "Ada's agent",
         model: "Claude",
         level: "reviewer",
+        apiKeys: [{ lastUsedAt: null }],
         claims: [
           {
             claimedAt: new Date(now.getTime() - 5 * 60 * 1000),
             lastHeartbeatAt: null,
-            bug: { id: "issue-current", title: "Current work", categoryId: "area-1", category: { name: "Web" } },
+            bug: { id: "issue-current", title: "Current work", categoryId: "area-1", category: { name: "Web" }, areaId: "pa-checkout", area: { name: "Checkout" } },
           },
         ],
       },
@@ -38,6 +39,7 @@ describe("team directory metrics", () => {
         name: "Ada's second agent",
         model: null,
         level: "observer",
+        apiKeys: [],
         claims: [],
       },
     ]);
@@ -55,6 +57,7 @@ describe("team directory metrics", () => {
     expect(agentFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { tenantId: "tenant-1", ownerUserId: { in: ["person-1"] }, revokedAt: null },
       select: expect.objectContaining({
+        apiKeys: { where: { revokedAt: null }, select: { lastUsedAt: true } },
         claims: expect.objectContaining({
           where: expect.objectContaining({
             status: "active",
@@ -92,7 +95,7 @@ describe("team directory metrics", () => {
         level: "reviewer",
         online: true,
         acceptedFixes: 1,
-        currentWork: [{ id: "issue-current", title: "Current work", categoryId: "area-1", categoryName: "Web" }],
+        currentWork: [{ id: "issue-current", title: "Current work", categoryId: "area-1", categoryName: "Web", areaId: "pa-checkout", areaName: "Checkout" }],
       },
       {
         id: "agent-2",
@@ -104,6 +107,39 @@ describe("team directory metrics", () => {
         currentWork: [],
       },
     ]);
+  });
+
+  it("counts recent API use as online, without a claim (#1123)", async () => {
+    const minutesAgo = (minutes: number) => new Date(now.getTime() - minutes * 60 * 1000);
+    const agent = (id: string, apiKeys: { lastUsedAt: Date | null }[], claims: unknown[] = []) => ({
+      id, ownerUserId: "person-1", name: id, model: null, level: "reviewer", apiKeys, claims,
+    });
+    const db = {
+      agent: {
+        findMany: vi.fn().mockResolvedValue([
+          // Polling and reviewing, no claim: the case #1123 reported.
+          agent("polling", [{ lastUsedAt: minutesAgo(1) }]),
+          // Idle for longer than the window.
+          agent("idle", [{ lastUsedAt: minutesAgo(20) }]),
+          // An old key, but a fresh claim heartbeat still counts.
+          agent("heartbeat", [{ lastUsedAt: minutesAgo(60) }], [
+            { claimedAt: minutesAgo(90), lastHeartbeatAt: minutesAgo(2), bug: { id: "i1", title: "Work", categoryId: null, category: null } },
+          ]),
+          // Never used, nothing claimed.
+          agent("unused", [{ lastUsedAt: null }]),
+        ]),
+      },
+      issueClaim: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+
+    const result = await teamAgentsForMembers(db as never, "tenant-1", ["person-1"], now);
+
+    expect(Object.fromEntries((result.get("person-1") ?? []).map((a) => [a.id, a.online]))).toEqual({
+      polling: true,
+      idle: false,
+      heartbeat: true,
+      unused: false,
+    });
   });
 
   it("does not query claims when a member has no active agents", async () => {

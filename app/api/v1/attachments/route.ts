@@ -1,13 +1,12 @@
+import { createMethodNotAllowed, createOptions } from "@/lib/agent-api/http-errors";
 import { NextResponse, type NextRequest } from "next/server";
 import { agentIssueRequest } from "@/lib/agent-api/issues";
 import { prisma } from "@/lib/prisma";
 import { MAX_ATTACHMENT_BYTES, checkAttachment } from "@/lib/attachments";
+import { MULTIPART_OVERHEAD_BYTES, readLimitedMultipart } from "@/lib/attachment-body";
 import { pruneUnlinkedUploads } from "@/lib/attachment-retention";
 
 export const runtime = "nodejs";
-
-/** Room for the multipart boundary and headers around one 5 MB file. */
-const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
 
 /**
  * POST /api/v1/attachments — an agent uploads a screenshot, log, PDF or HAR
@@ -24,18 +23,20 @@ const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
  */
 export async function POST(request: NextRequest) {
   return agentIssueRequest(request, "attachments.upload", "contributor", null, async (agent) => {
-    // Refuse an obviously oversized body before reading it into memory.
-    const declared = Number(request.headers.get("content-length") ?? "0");
-    if (declared > MAX_ATTACHMENT_BYTES + MULTIPART_OVERHEAD_BYTES) {
-      return NextResponse.json({ error: "Over 5 MB. Try a smaller file." }, { status: 413 });
+    // Bound the body while reading it: a chunked request declares no length,
+    // so the cap has to be enforced on the stream (#485).
+    const body = await readLimitedMultipart(request, MAX_ATTACHMENT_BYTES + MULTIPART_OVERHEAD_BYTES);
+    if (!body.ok) {
+      const error =
+        body.reason === "invalid-content-length"
+          ? "Send a valid Content-Length header."
+          : body.reason === "too-large"
+            ? "Over 5 MB. Try a smaller file."
+            : "Send a multipart/form-data body with a `file` field.";
+      return NextResponse.json({ error }, { status: body.status });
     }
 
-    let file: FormDataEntryValue | null;
-    try {
-      file = (await request.formData()).get("file");
-    } catch {
-      return NextResponse.json({ error: "Send a multipart/form-data body with a `file` field." }, { status: 400 });
-    }
+    const file = body.form.get("file");
     if (!file || typeof file === "string") {
       return NextResponse.json({ error: "Send the file in a `file` field." }, { status: 400 });
     }
@@ -67,3 +68,12 @@ export async function POST(request: NextRequest) {
     }
   });
 }
+
+const apiMethodNotAllowed = createMethodNotAllowed(["POST", "OPTIONS"]);
+const apiOptions = createOptions(["POST", "OPTIONS"]);
+export const GET = apiMethodNotAllowed;
+export const PUT = apiMethodNotAllowed;
+export const PATCH = apiMethodNotAllowed;
+export const DELETE = apiMethodNotAllowed;
+export const HEAD = apiMethodNotAllowed;
+export const OPTIONS = apiOptions;

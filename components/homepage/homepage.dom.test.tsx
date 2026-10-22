@@ -44,8 +44,9 @@ describe("ZikiHomepage (#487)", () => {
 
     // 6. Contribution Rewards
     expect(screen.getByRole("heading", { level: 2, name: /transparent contribution rewards/i })).toBeInTheDocument();
-    expect(screen.getAllByText("+5 pts")).toHaveLength(2);
-    expect(screen.getByText("+10 pts")).toBeInTheDocument();
+    expect(screen.getAllByText("+5 pts")).toHaveLength(1);
+    expect(screen.getByText("5, then less")).toBeInTheDocument();
+    expect(screen.getByText("10, then less")).toBeInTheDocument();
     expect(screen.getByText("15 / 25 / 40 / 60")).toBeInTheDocument();
     expect(screen.getByText("500 pts")).toBeInTheDocument();
 

@@ -21,6 +21,9 @@ type Step =
   | { name: "regenerate" }
   | { name: "disable" };
 
+/** Every two-factor change signs out the person's other sessions (Ziki #389). */
+const SIGNED_OUT_NOTICE = "You've been signed out on your other devices.";
+
 export function TwoFactorSettings({
   enabled,
   backupCodesLeft,
@@ -32,6 +35,7 @@ export function TwoFactorSettings({
   const [step, setStep] = useState<Step>({ name: "idle" });
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [signedOutOthers, setSignedOutOthers] = useState(false);
   const [pending, startTransition] = useTransition();
 
   function run<T extends { ok: boolean; error?: string }>(
@@ -40,6 +44,8 @@ export function TwoFactorSettings({
     onOk: (result: Extract<T, { ok: true }>) => void,
   ) {
     setError(null);
+    // The notice is about the last change; a new attempt starts without it.
+    setSignedOutOthers(false);
     startTransition(async () => {
       try {
         const result = await action(formData);
@@ -53,6 +59,7 @@ export function TwoFactorSettings({
 
   function cancel() {
     setError(null);
+    setSignedOutOthers(false);
     setStep({ name: "idle" });
   }
 
@@ -65,6 +72,12 @@ export function TwoFactorSettings({
   const errorLine = error ? (
     <p id="two-factor-error" className="text-sm text-red-600" role="alert">
       {error}
+    </p>
+  ) : null;
+
+  const signedOutLine = signedOutOthers ? (
+    <p className="text-sm text-slate-600" role="status">
+      {SIGNED_OUT_NOTICE}
     </p>
   ) : null;
 
@@ -81,6 +94,7 @@ export function TwoFactorSettings({
     return (
       <div className="mt-4 space-y-3">
         <p className="text-sm font-medium text-slate-900">{step.heading}</p>
+        {signedOutLine}
         <p className="text-sm text-slate-600">
           Save these backup codes somewhere safe, like a password manager. Each one works once if you
           lose your phone. <strong>They are shown only now.</strong>
@@ -119,8 +133,10 @@ export function TwoFactorSettings({
           run(
             confirmTwoFactorAction,
             new FormData(event.currentTarget),
-            (result) =>
-              setStep({ name: "codes", codes: result.codes, heading: "Two-factor sign-in is on." }),
+            (result) => {
+              setSignedOutOthers(true);
+              setStep({ name: "codes", codes: result.codes, heading: "Two-factor sign-in is on." });
+            },
           );
         }}
       >
@@ -205,11 +221,15 @@ export function TwoFactorSettings({
           event.preventDefault();
           const data = new FormData(event.currentTarget);
           if (disabling) {
-            run(disableTwoFactorAction, data, () => finish());
+            run(disableTwoFactorAction, data, () => {
+              setSignedOutOthers(true);
+              finish();
+            });
           } else {
-            run(regenerateBackupCodesAction, data, (result) =>
-              setStep({ name: "codes", codes: result.codes, heading: "New backup codes made." }),
-            );
+            run(regenerateBackupCodesAction, data, (result) => {
+              setSignedOutOthers(true);
+              setStep({ name: "codes", codes: result.codes, heading: "New backup codes made." });
+            });
           }
         }}
       >
@@ -258,6 +278,7 @@ export function TwoFactorSettings({
 
   return (
     <div className="mt-4 space-y-3">
+      {signedOutLine}
       <p className="text-sm text-slate-900">
         Status:{" "}
         <span className={enabled ? "font-semibold text-teal-800" : "font-semibold text-slate-700"}>

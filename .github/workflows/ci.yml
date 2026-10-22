@@ -70,7 +70,10 @@ jobs:
   # a production build and a freshly migrated, seeded database.
   e2e:
     name: End-to-end (Playwright)
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest is moving to 26.04, where `playwright install
+    # chromium` fails ("does not support chromium on ubuntu26.04-x64").
+    # Go back to ubuntu-latest once Playwright supports it.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
       postgres:

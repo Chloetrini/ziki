@@ -2,6 +2,7 @@ import type { Severity } from "@prisma/client";
 import { severityLabel } from "@/lib/labels";
 import { LocalTime } from "@/components/local-time";
 import { ClaimDeadline } from "@/components/claim-deadline";
+import { ExpandableText } from "@/components/expandable-text";
 
 /**
  * What agents decided on one issue, in sentences (#448). The raw audit dump
@@ -16,6 +17,16 @@ export type AgentDecision =
       /** The person the agent acted for. */
       personName: string;
       severity: Severity | null;
+    }
+  | {
+      id: string;
+      at: Date | string;
+      /** #1122: a reviewer found it isn't a real issue. Never a confirmation. */
+      kind: "rejected";
+      agentName: string;
+      personName: string;
+      /** The reviewer's reasons, usually the reproduction they tried. */
+      notes: string | null;
     }
   | {
       id: string;
@@ -50,6 +61,13 @@ function sentence(decision: AgentDecision) {
             </>
           ) : null}
           {decision.personName ? <> on behalf of {decision.personName}</> : null}.
+        </>
+      );
+    case "rejected":
+      return (
+        <>
+          <span className="font-medium text-slate-900">{decision.agentName}</span> found this isn&apos;t a real
+          issue{decision.personName ? <> on behalf of {decision.personName}</> : null}.
         </>
       );
     case "claimed":
@@ -114,6 +132,13 @@ export function IssueAgentActivity({ decisions }: { decisions: ReadonlyArray<Age
             />
             <LocalTime className="text-xs text-slate-500" date={decision.at} />
             <p className="mt-1 text-sm text-slate-800">{sentence(decision)}</p>
+            {decision.kind === "rejected" && decision.notes ? (
+              <ExpandableText maxLines={3} expandText="View more" collapseText="View less">
+                <blockquote className="mt-1 whitespace-pre-wrap break-words border-l-2 border-slate-300 pl-3 text-sm text-slate-700">
+                  {decision.notes}
+                </blockquote>
+              </ExpandableText>
+            ) : null}
           </li>
         ))}
       </ol>

@@ -17,13 +17,13 @@ import { isTenantAdminRole } from "@/lib/agents/membership";
 import { projectContextFor } from "@/lib/project-context";
 import { currentTenantIdFor } from "@/lib/tenant-context";
 import { openSecret } from "@/lib/secret-box";
-import { ensureDefaultProjectKey } from "@/lib/agents/default-key";
 import { materializeApprovedPairings } from "@/lib/agents/pairing";
 import { isAgentPlatformEnabled } from "@/lib/feature-flags";
 import { CreateAgentForm } from "./create-agent-form";
 import { AgentControls } from "./agent-controls";
 import { AgentRowKey } from "./agent-row-key";
 
+/** Decrypts a stored agent key for display; a missing or unreadable seal yields null so the row still renders. */
 function revealAgentKey(sealed: string | null): string | null {
   if (!sealed) return null;
   try {
@@ -41,6 +41,7 @@ const levelBadge = "bg-slate-100 text-slate-700";
  * A person's agents and the team's (#427). Agents work issues for the person
  * who owns them; each has a level that says what it may do.
  */
+/** The Agents settings page: registration and pairing, the person's own agents, and the team's agents. */
 export default async function AgentsSettingsPage() {
   if (!isAgentPlatformEnabled()) {
     // Feature not enabled: show a safe message instead of the agents UI.
@@ -70,17 +71,6 @@ export default async function AgentsSettingsPage() {
   // row and expired in another because the page rendered across the boundary.
   const now = new Date();
 
-  if (tenantId && context.activeProjectId) {
-    try {
-      await ensureDefaultProjectKey({
-        userId: user.id,
-        tenantId,
-        projectId: context.activeProjectId,
-      });
-    } catch (error) {
-      console.error("[agents] default agent key failed", error);
-    }
-  }
   if (tenantId) {
     try {
       await materializeApprovedPairings(user.id, tenantId);
@@ -129,7 +119,7 @@ export default async function AgentsSettingsPage() {
                   where: { tenantId, revokedAt: null },
                   orderBy: { createdAt: "asc" },
                   select: {
-                    id: true, name: true, model: true, level: true, burst: true, burstUntil: true,
+                    id: true, name: true, model: true, level: true, burst: true, burstUntil: true, defaultProjectId: true,
                     areaPreferences: { select: { projectAreaId: true, projectArea: { select: { projectId: true } } } },
                   },
                 },
@@ -217,8 +207,8 @@ export default async function AgentsSettingsPage() {
           Two ways to connect an agent. Copy Agent Key to send a key that is already an account, with
           this site. Or copy only the site: the agent opens the approval page, you approve it while
           signed in, and the key comes back to the agent. A key works in one project. Resetting your password
-          signs you out and revokes every agent key you own; the agents stay, and a new personal key
-          is ready the next time you open the app.
+          signs you out and revokes every live agent key you own; the agents stay, but no key is replaced
+          automatically — regenerate a key for the agent from this page, or add and reconnect the agent.
         </p>
       </div>
 
@@ -261,7 +251,7 @@ export default async function AgentsSettingsPage() {
             </p>
             {mine.length === 0 ? (
               <p className="mt-3 text-sm text-slate-600">
-                Your personal agent is created when you open a project. Copy Agent Key to send it, or copy the site and approve the agent&apos;s request.
+                No agents yet. Register one under “Add an agent”, or approve an agent that asked at the approval page.
               </p>
             ) : (
               <ul className="mt-3 divide-y divide-slate-100">
@@ -312,9 +302,22 @@ export default async function AgentsSettingsPage() {
                       )}
                     </div>
                     {agent.revokedAt ? (
-                      <Badge className="bg-red-50 text-red-700">Revoked</Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-red-50 text-red-700">Revoked</Badge>
+                        <AgentControls
+                          revoked
+                          personal={Boolean(agent.defaultProjectId)}
+                          agentId={agent.id}
+                          agentName={agent.name}
+                          level={agent.level}
+                          levels={ownLevels}
+                          projects={projects}
+                          now={now}
+                        />
+                      </div>
                     ) : (
                       <AgentControls
+                        personal={Boolean(agent.defaultProjectId)}
                         agentId={agent.id}
                         agentName={agent.name}
                         level={agent.level}
@@ -351,7 +354,7 @@ export default async function AgentsSettingsPage() {
                     {role !== "member" ? <Badge className={`ml-2 ${levelBadge}`}>{role === "owner" ? "Owner" : "Admin"}</Badge> : null}
                   </p>
                   {member.agents.length === 0 ? (
-                    <p className="mt-1 text-xs text-slate-500">No agents</p>
+                    <p className="mt-1 text-xs text-slate-500">No agents yet — register one or approve an agent request.</p>
                   ) : (
                     <ul className="mt-2 space-y-2">
                       {member.agents.map((agent) => (
@@ -370,6 +373,7 @@ export default async function AgentsSettingsPage() {
                           </span>
                           {isAdmin && member.id !== user.id ? (
                             <AgentControls
+                              personal={Boolean(agent.defaultProjectId)}
                               agentId={agent.id}
                               agentName={agent.name}
                               level={agent.level}

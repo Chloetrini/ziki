@@ -44,6 +44,7 @@ const openBug = {
   tenantId: "tenant",
   reporterId: "reporter",
   isDeleted: false,
+  voteCount: 3,
   assignee: null,
 };
 
@@ -52,7 +53,7 @@ beforeEach(() => {
   resetWorkflowCache();
   db.$transaction.mockImplementation((fn: (tx: typeof db) => unknown) => fn(db));
   db.$queryRaw.mockResolvedValue([{ id: "issue1" }]);
-  db.bug.findFirst.mockResolvedValue({ id: "issue1", projectId: "project", status: "open" });
+  db.bug.findFirst.mockResolvedValue({ id: "issue1", projectId: "project", status: "open", voteCount: 3 });
   db.issueClaim.findFirst.mockResolvedValue(null);
   db.issueClaim.count.mockResolvedValue(0);
   db.projectWorkflow.findUnique.mockResolvedValue(null);
@@ -89,6 +90,21 @@ describe("placeBid", () => {
     await expect(placeBid(caller, "project", "issue1")).rejects.toMatchObject({
       status: 409,
       message: expect.stringContaining("maximum number of active tasks"),
+    });
+    expect(db.issueBid.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses an idea that reviewers have not accepted or that lacks three upvotes", async () => {
+    vi.mocked(isConfirmed).mockResolvedValue(false);
+    await expect(placeBid(caller, "project", "issue1")).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining("still an idea"),
+    });
+    vi.mocked(isConfirmed).mockResolvedValue(true);
+    db.bug.findFirst.mockResolvedValue({ id: "issue1", projectId: "project", status: "open", voteCount: 2 });
+    await expect(placeBid(caller, "project", "issue1")).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining("still an idea"),
     });
     expect(db.issueBid.create).not.toHaveBeenCalled();
   });
@@ -133,6 +149,29 @@ describe("awardBid", () => {
     bug: openBug,
   };
 
+  it("preserves the dispatcher owner on an auto-awarded claim", async () => {
+    db.issueBid.findUnique.mockResolvedValue(stored);
+    db.issueClaim.create.mockResolvedValue({ id: "claim1" });
+    const dispatcher = { ...caller, ownerId: "dispatcher-owner", level: "dispatcher" as const };
+    await awardBid({ id: "reporter" }, "bid1", dispatcher);
+    expect(db.issueClaim.create.mock.calls[0][0].data).toMatchObject({
+      dispatcherUserId: "dispatcher-owner", beneficiaryUserId: "ada", status: "active",
+    });
+  });
+
+  it("rejects forged dispatcher attribution from a lower-level caller", async () => {
+    await expect(awardBid({ id: "reporter" }, "bid1", caller)).rejects.toThrow("dispatcher");
+    expect(db.issueClaim.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects dispatcher attribution from another tenant", async () => {
+    db.issueBid.findUnique.mockResolvedValue(stored);
+    await expect(awardBid({ id: "reporter" }, "bid1", {
+      ...caller, tenantId: "another-tenant", level: "dispatcher",
+    })).rejects.toMatchObject({ status: 404 });
+    expect(db.issueClaim.create).not.toHaveBeenCalled();
+  });
+
   it("lets the reporter turn one bid into the active claim", async () => {
     db.issueBid.findUnique.mockResolvedValue(stored);
     db.issueClaim.create.mockResolvedValue({ id: "claim1" });
@@ -151,6 +190,15 @@ describe("awardBid", () => {
       where: { id: "bid1", awardedAt: null, withdrawnAt: null },
       data: expect.objectContaining({ claimId: "claim1" }),
     });
+  });
+
+  it("does not award an idea that is still short of three upvotes", async () => {
+    db.issueBid.findUnique.mockResolvedValue({ ...stored, bug: { ...openBug, voteCount: 2 } });
+    await expect(awardBid({ id: "reporter" }, "bid1")).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining("still an idea"),
+    });
+    expect(db.issueClaim.create).not.toHaveBeenCalled();
   });
 
   it("refuses someone who did not report the issue and is not an admin", async () => {

@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { resumeAfterWait } from "@/lib/claim-deadline";
-import type { AgentContext } from "@/lib/agents/require-agent";
+import { assertKeyProject, type AgentContext } from "@/lib/agents/require-agent";
 import { audit } from "@/lib/agents/audit";
 import { publish } from "@/lib/agent-api/events";
 import { notifyAgentQuestion } from "@/lib/agent-notifications";
@@ -68,9 +68,12 @@ export async function askAgentQuestion(agent: AgentContext, input: AskAgentQuest
     if (input.bugId) {
       const bug = await tx.bug.findFirst({
         where: { id: input.bugId, tenantId: agent.tenantId, isDeleted: false },
-        select: { id: true, title: true },
+        select: { id: true, title: true, projectId: true },
       });
       if (!bug) throw new IssueApiError(404, "Linked issue not found.");
+      // #412: a project-scoped key may only link its own project's issues,
+      // checked before anything (like the title) goes back to the caller.
+      assertKeyProject(agent, bug.projectId);
       bugTitle = bug.title;
     }
 

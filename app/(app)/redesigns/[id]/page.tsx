@@ -17,7 +17,7 @@ export default async function RedesignPage({ params }: { params: Promise<{ id: s
   });
   if (!proposal) notFound();
   return <article className="space-y-5">
-    <Link href="/redesigns" className="text-indigo-700 underline">All redesign proposals</Link>
+    <Link href="/escalations?type=Redesign" className="text-indigo-700 underline">Escalations</Link>
     <h1 className="text-2xl font-semibold">{proposal.title}</h1>
     <p className="text-sm text-slate-600">Proposed by {proposal.authorAgent.name} for {proposal.onBehalfOf.name}.</p>
     <p className="font-medium">{proposal.status === "proposed" ? "waiting for a person" : proposal.status}</p>

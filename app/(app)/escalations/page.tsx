@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth-helpers";
+import { prisma } from "@/lib/prisma";
 import { currentTenantIdFor } from "@/lib/tenant-context";
 import { listOwnerQuestions, parseEscalationBody, type EscalationType } from "@/lib/agent-questions";
 import { LocalTime } from "@/components/local-time";
@@ -7,12 +8,13 @@ import { EscalationTypeBadge, QuickResolveButtons } from "./escalation-controls"
 
 export const metadata = { title: "Agent Escalations" };
 
-const ALL_TYPES: EscalationType[] = [
+const ALL_TYPES: Array<EscalationType | "Redesign"> = [
   "Blocker",
   "Work Authorization",
   "Question",
   "Scope Expansion",
   "Human Approval",
+  "Redesign",
 ];
 
 export default async function EscalationsPage({
@@ -23,24 +25,63 @@ export default async function EscalationsPage({
   const user = await requireUser();
   const tenantId = await currentTenantIdFor(user.id);
   const questions = tenantId ? await listOwnerQuestions(user.id, tenantId) : [];
+  const proposals = tenantId
+    ? await prisma.redesignProposal.findMany({
+        where: { tenantId },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: 50,
+        select: {
+          id: true,
+          title: true,
+          body: true,
+          status: true,
+          createdAt: true,
+          bug: { select: { id: true, title: true } },
+          authorAgent: { select: { name: true } },
+        },
+      })
+    : [];
 
   const params = searchParams ? await searchParams : {};
   const statusFilter = params.status ?? "waiting";
   const typeFilter = params.type ?? "all";
 
-  const enriched = questions.map((q) => {
+  const questionRows = questions.map((q) => {
     const parsed = parseEscalationBody(q.body);
     return {
-      ...q,
-      body: parsed.cleanBody,
+      id: q.id,
+      kind: "question" as const,
       escalationType: parsed.type,
+      title: q.agent.name,
+      body: parsed.cleanBody,
+      createdAt: q.createdAt,
       isWaiting: !q.answeredAt,
+      agentName: q.agent.name,
+      answer: q.answer,
+      bug: q.bug,
+      href: `/escalations/${q.id}`,
     };
   });
+  const redesignRows = proposals.map((proposal) => ({
+    id: proposal.id,
+    kind: "redesign" as const,
+    escalationType: "Redesign" as const,
+    title: proposal.title,
+    body: proposal.body,
+    createdAt: proposal.createdAt,
+    isWaiting: proposal.status === "proposed",
+    agentName: proposal.authorAgent.name,
+    answer: null,
+    bug: proposal.bug,
+    href: `/redesigns/${proposal.id}`,
+  }));
+  const rows = [...questionRows, ...redesignRows].sort(
+    (a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id),
+  );
 
-  const pendingCount = enriched.filter((q) => q.isWaiting).length;
+  const pendingCount = rows.filter((row) => row.isWaiting).length;
 
-  const filtered = enriched.filter((item) => {
+  const filtered = rows.filter((item) => {
     if (statusFilter === "waiting" && !item.isWaiting) return false;
     if (statusFilter === "answered" && item.isWaiting) return false;
     if (typeFilter !== "all" && item.escalationType !== typeFilter) return false;
@@ -100,7 +141,7 @@ export default async function EscalationsPage({
                   : "bg-slate-100 text-slate-700 hover:bg-slate-200"
               }`}
             >
-              Resolved ({enriched.length - pendingCount})
+              Resolved ({rows.length - pendingCount})
             </Link>
             <Link
               href={makeQuery("all", typeFilter)}
@@ -110,7 +151,7 @@ export default async function EscalationsPage({
                   : "bg-slate-100 text-slate-700 hover:bg-slate-200"
               }`}
             >
-              All ({enriched.length})
+              All ({rows.length})
             </Link>
           </div>
         </div>
@@ -146,16 +187,16 @@ export default async function EscalationsPage({
       {filtered.length > 0 ? (
         <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white shadow-xs">
           {filtered.map((item) => (
-            <li key={item.id} className="p-4 sm:p-5 space-y-3">
+            <li key={`${item.kind}-${item.id}`} className="p-4 sm:p-5 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <EscalationTypeBadge type={item.escalationType} />
-                  <Link
-                    href={`/escalations/${item.id}`}
-                    className="font-medium text-teal-800 hover:underline"
-                  >
-                    {item.agent.name}
+                  <Link href={item.href} className="font-medium text-teal-800 hover:underline">
+                    {item.kind === "redesign" ? item.title : item.agentName}
                   </Link>
+                  {item.kind === "redesign" ? (
+                    <span className="text-xs text-slate-500">{item.agentName}</span>
+                  ) : null}
                   <span className="text-xs text-slate-400">•</span>
                   <LocalTime date={item.createdAt} className="text-xs text-slate-500" />
                 </div>
@@ -184,22 +225,28 @@ export default async function EscalationsPage({
                 </div>
               ) : null}
 
-              {item.isWaiting ? (
+              {item.isWaiting && item.kind === "question" ? (
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
                   <QuickResolveButtons escalationId={item.id} />
                   <Link
-                    href={`/escalations/${item.id}`}
+                    href={item.href}
                     className="text-xs font-medium text-teal-700 hover:underline"
                   >
                     Write custom response →
                   </Link>
                 </div>
-              ) : (
+              ) : item.isWaiting ? (
+                <div className="pt-2 border-t border-slate-100">
+                  <Link href={item.href} className="text-xs font-medium text-teal-700 hover:underline">
+                    Review proposal →
+                  </Link>
+                </div>
+              ) : item.kind === "question" ? (
                 <div className="rounded-md bg-slate-50 p-3 text-xs text-slate-700 border border-slate-100 space-y-1">
                   <span className="font-semibold text-slate-600">Your resolution:</span>
                   <p className="whitespace-pre-wrap">{item.answer}</p>
                 </div>
-              )}
+              ) : null}
             </li>
           ))}
         </ul>

@@ -1,3 +1,4 @@
+import { createMethodNotAllowed, createOptions } from "@/lib/agent-api/http-errors";
 import { NextResponse, type NextRequest } from "next/server";
 import { agentIssueRequest, issueJson, issueProject } from "@/lib/agent-api/issues";
 import { readGoal, splitGoalPool } from "@/lib/goals/service";
@@ -33,3 +34,10 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     return NextResponse.json({ goal, budget: goal.budget, allocations }, { status: 201 });
   });
 }
+
+const apiMethodNotAllowed = createMethodNotAllowed(["GET", "HEAD", "POST", "OPTIONS"]);
+const apiOptions = createOptions(["GET", "HEAD", "POST", "OPTIONS"]);
+export const PUT = apiMethodNotAllowed;
+export const PATCH = apiMethodNotAllowed;
+export const DELETE = apiMethodNotAllowed;
+export const OPTIONS = apiOptions;

@@ -63,8 +63,10 @@ enum MembershipRole {
 enum AgentLevel {
   observer
   contributor
+  triager
   reviewer
   merger
+  dispatcher
 }
 
 enum MissionRole {
@@ -117,8 +119,11 @@ enum PointRole {
   solver
   reporter
   reviewer
+  /// Triager awards: 1 pt for a not-a-duplicate clearance, 5 for marking a duplicate.
+  triager
   /// Paid to the submitter's owner when a research job row is accepted (#617).
   submission
+  dispatcher
 }
 
 enum DisputeStatus {
@@ -227,6 +232,7 @@ model User {
   agentPairingsApproved AgentPairing[]
   beneficiaryBugs       Bug[]                @relation("BugBeneficiary")
   claims                IssueClaim[]
+  dispatchedClaims      IssueClaim[]         @relation("ClaimDispatcher")
   issueBids             IssueBid[]           @relation("IssueBidBeneficiary")
   interests             IssueInterest[]      @relation("IssueInterestBeneficiary")
   validations           IssueValidation[]
@@ -933,6 +939,8 @@ model AgentPairing {
   /// SHA-256 of the secret the waiting agent polls with to collect its key.
   deviceCodeHash String    @unique
   proposedModel  String?
+  /// The level the agent asked for at pairing start (#425); owner sees it on approval.
+  proposedLevel  AgentLevel?
   /// Set when the waiting agent has collected its key; single use.
   consumedAt     DateTime?
   approvedAt     DateTime?
@@ -977,6 +985,7 @@ model IssueClaim {
   bugId             String
   beneficiaryUserId String
   agentId           String
+  dispatcherUserId  String?
   status            ClaimStatus @default(active)
   offeredAt         DateTime?
   claimedAt         DateTime?
@@ -999,8 +1008,10 @@ model IssueClaim {
   bug               Bug         @relation(fields: [bugId], references: [id], onDelete: Cascade)
   beneficiary       User        @relation(fields: [beneficiaryUserId], references: [id], onDelete: Cascade)
   agent             Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  dispatcher        User?       @relation("ClaimDispatcher", fields: [dispatcherUserId], references: [id], onDelete: SetNull)
 
   awardedBid        IssueBid?
+  @@index([dispatcherUserId])
   @@index([bugId, releasedAt])
   @@index([beneficiaryUserId, releasedAt])
   @@index([agentId])

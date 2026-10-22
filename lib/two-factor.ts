@@ -85,7 +85,23 @@ export async function startEnrolment(userId: string, account: string): Promise<S
   return { ok: true, secret, uri: otpauthUri(account, secret) };
 }
 
-export type BackupCodesResult = { ok: true; codes: string[] } | { ok: false; error: string };
+/** `sessionVersion` is the person's new version: every session made before the change is signed out (Ziki #389). */
+export type BackupCodesResult = { ok: true; codes: string[]; sessionVersion: number } | { ok: false; error: string };
+
+/**
+ * Bumps User.sessionVersion so every JWT issued before this change stops
+ * working, the same way a password reset does. Turning the factor on often
+ * means the password leaked, and a session someone else holds must not
+ * outlive it (Ziki #389).
+ */
+async function signOutEverySession(tx: Pick<typeof prisma, "user">, userId: string): Promise<number> {
+  const user = await tx.user.update({
+    where: { id: userId },
+    data: { sessionVersion: { increment: 1 } },
+    select: { sessionVersion: true },
+  });
+  return user.sessionVersion;
+}
 
 async function replaceBackupCodes(tx: Pick<typeof prisma, "totpBackupCode">, userId: string): Promise<string[]> {
   const codes = Array.from({ length: BACKUP_CODE_COUNT }, generateBackupCode);
@@ -108,16 +124,16 @@ export async function confirmEnrolment(userId: string, input: string, nowMs = Da
   const step = matchTotp(openSecret(credential.secret), input, { nowMs });
   if (step === null) return { ok: false, error: "That code isn't right. Check your authenticator app and try again." };
 
-  const codes = await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     await tx.totpCredential.update({
       where: { userId },
       data: { enabledAt: new Date(nowMs), lastUsedStep: step },
     });
-    const made = await replaceBackupCodes(tx, userId);
+    const codes = await replaceBackupCodes(tx, userId);
+    const sessionVersion = await signOutEverySession(tx, userId);
     await record(userId, "totp.enabled", tx);
-    return made;
+    return { ok: true as const, codes, sessionVersion };
   });
-  return { ok: true, codes };
 }
 
 export type SecondFactorKind = "totp" | "backup";
@@ -185,21 +201,26 @@ export async function confirmIdentity(
   return { ok: true };
 }
 
-/** Turns the factor off. The caller must already have re-authenticated (confirmIdentity). */
-export async function disableTwoFactor(userId: string): Promise<void> {
-  await prisma.$transaction(async (tx) => {
+/**
+ * Turns the factor off and returns the new session version. The caller must
+ * already have re-authenticated (confirmIdentity).
+ */
+export async function disableTwoFactor(userId: string): Promise<number> {
+  return prisma.$transaction(async (tx) => {
     await tx.totpBackupCode.deleteMany({ where: { userId } });
     await tx.totpCredential.deleteMany({ where: { userId } });
+    const sessionVersion = await signOutEverySession(tx, userId);
     await record(userId, "totp.disabled", tx);
+    return sessionVersion;
   });
 }
 
 export async function regenerateBackupCodes(userId: string): Promise<BackupCodesResult> {
   if (!(await isTwoFactorEnabled(userId))) return { ok: false, error: "Two-factor sign-in is off." };
-  const codes = await prisma.$transaction(async (tx) => {
-    const made = await replaceBackupCodes(tx, userId);
+  return prisma.$transaction(async (tx) => {
+    const codes = await replaceBackupCodes(tx, userId);
+    const sessionVersion = await signOutEverySession(tx, userId);
     await record(userId, "totp.backup_codes_regenerated", tx);
-    return made;
+    return { ok: true as const, codes, sessionVersion };
   });
-  return { ok: true, codes };
 }

@@ -3,6 +3,7 @@ import {
   canDeleteTicket,
   canRestoreTicket,
   deletedSummary,
+  deletionCounts,
   deleteSummary,
   restoreSummary,
   retainedSummary,
@@ -53,6 +54,25 @@ describe("delete and restore copy (#692)", () => {
     ]) {
       expect(text.toLowerCase()).not.toContain("permanent");
     }
+  });
+});
+
+describe("deletionCounts (#1059)", () => {
+  const bucket = (count: number) => ({ count, voters: [] });
+
+  it("counts upvotes only, not the old dislike rows", () => {
+    // 3 upvotes and 2 dislikes left over from before downvotes were removed.
+    const counts = deletionCounts(4, { likes: bucket(3), dislikes: bucket(2) });
+    expect(counts).toEqual({ comments: 4, votes: 3 });
+    expect(deletedSummary(counts)).toContain("4 comments, 3 votes and history are kept.");
+  });
+
+  it("matches an issue that never had a downvote", () => {
+    expect(deletionCounts(1, { likes: bucket(1), dislikes: bucket(0) })).toEqual({ comments: 1, votes: 1 });
+  });
+
+  it("says 0 votes for an issue with only old dislikes", () => {
+    expect(deletionCounts(0, { likes: bucket(0), dislikes: bucket(5) }).votes).toBe(0);
   });
 });
 

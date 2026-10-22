@@ -72,6 +72,7 @@ const reviewedBugSelect = {
       releasedAt: true,
       agentId: true,
       beneficiaryUserId: true,
+      dispatcherUserId: true,
       agent: { select: { ownerUserId: true } },
     },
   },

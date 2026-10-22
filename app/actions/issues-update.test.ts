@@ -48,6 +48,7 @@ vi.mock("@/lib/prisma", () => ({
     projectArea: { findFirst: vi.fn() },
     milestone: { findUnique: vi.fn() },
     issueClaim: { findFirst: vi.fn() },
+    bugActivity: { findFirst: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -58,7 +59,7 @@ import { currentTenantAccess } from "@/lib/tenant-access";
 import { notifyLater } from "@/lib/notify";
 import { TICKET_ASSIGN_ERRORS } from "@/lib/ticket-assignment";
 import { TICKET_TRIAGE_ERRORS } from "@/lib/ticket-triage";
-import { assignBugAction, closeBugAction, reopenBugAction, updateBugAction } from "./issues";
+import { assignBugAction, closeBugAction, reopenAgentResolvedAction, reopenBugAction, updateBugAction } from "./issues";
 
 const db = prisma as unknown as {
   bug: { findUnique: ReturnType<typeof vi.fn> };
@@ -68,6 +69,7 @@ const db = prisma as unknown as {
   projectArea: { findFirst: ReturnType<typeof vi.fn> };
   milestone: { findUnique: ReturnType<typeof vi.fn> };
   issueClaim: { findFirst: ReturnType<typeof vi.fn> };
+  bugActivity: { findFirst: ReturnType<typeof vi.fn> };
   $transaction: ReturnType<typeof vi.fn>;
 };
 const mockUser = requireUser as unknown as ReturnType<typeof vi.fn>;
@@ -494,6 +496,82 @@ describe("agents hear about triage in the web app (#600, #656)", () => {
         payload: expect.objectContaining({ values: expect.objectContaining({ status: "open" }) }),
       }),
     );
+  });
+
+  describe("reopenAgentResolvedAction (Ziki #515)", () => {
+    const agentResolve = {
+      metadata: { field: "status", from: "in_progress", to: "resolved", via: "agent_resolve", agentName: "X", pullRequestUrl: "https://github.com/o/r/pull/1" },
+    };
+    function reopenTx(count = 1) {
+      const tx = {
+        bug: { updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => { written = data; return { count }; }) },
+        bugActivity: { create: vi.fn(async ({ data }: { data: { type: string } }) => { activities.push(data.type); }) },
+      };
+      db.$transaction.mockImplementation(async (fn: (client: unknown) => unknown) => fn(tx));
+      return tx;
+    }
+
+    it("lets the assignee undo it with no claim, back to the previous status", async () => {
+      mockUser.mockResolvedValue({ id: ME, name: "Me", role: "user" });
+      db.bug.findUnique.mockResolvedValue(issue(ME, { status: "resolved" }));
+      db.bugActivity.findFirst.mockResolvedValue(agentResolve);
+      // The agent resolve released the claim, or a person-assigned issue never had one.
+      db.issueClaim.findFirst.mockResolvedValue(null);
+      const tx = reopenTx();
+      expect(await reopenAgentResolvedAction("bug1")).toEqual({ ok: true });
+      expect(tx.bug.updateMany).toHaveBeenCalledWith({ where: { id: "bug1", status: "resolved" }, data: { status: "in_progress" } });
+      expect(activities).toEqual(["status_changed"]);
+      expect(publishWebEvent).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          bugId: "bug1",
+          type: "issue.updated",
+          payload: expect.objectContaining({ values: expect.objectContaining({ status: "in_progress" }) }),
+        }),
+      );
+    });
+
+    it("refuses someone who is neither the assignee nor an admin, and writes nothing", async () => {
+      mockUser.mockResolvedValue({ id: ME, name: "Me", role: "user" });
+      db.bug.findUnique.mockResolvedValue(issue(OTHER, { status: "resolved" }));
+      db.bugActivity.findFirst.mockResolvedValue(agentResolve);
+      expect(await reopenAgentResolvedAction("bug1")).toEqual({ error: TICKET_TRIAGE_ERRORS.statusUnauthorized });
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(written).toBeNull();
+      expect(publishWebEvent).not.toHaveBeenCalled();
+    });
+
+    it("lets an admin undo it on someone else's issue", async () => {
+      mockUser.mockResolvedValue({ id: ME, name: "Me", role: "admin" });
+      db.bug.findUnique.mockResolvedValue(issue(OTHER, { status: "resolved" }));
+      db.bugActivity.findFirst.mockResolvedValue(agentResolve);
+      reopenTx();
+      expect(await reopenAgentResolvedAction("bug1")).toEqual({ ok: true });
+      expect(written).toEqual({ status: "in_progress" });
+    });
+
+    it("refuses when the latest change wasn't an agent resolve", async () => {
+      mockUser.mockResolvedValue({ id: ME, name: "Me", role: "user" });
+      db.bug.findUnique.mockResolvedValue(issue(ME, { status: "resolved" }));
+      db.bugActivity.findFirst.mockResolvedValue({ metadata: { field: "status", from: "open", to: "resolved" } });
+      expect((await reopenAgentResolvedAction("bug1")).error).toMatch(/wasn't resolved by an agent/);
+      db.bugActivity.findFirst.mockResolvedValue(null);
+      expect((await reopenAgentResolvedAction("bug1")).error).toMatch(/wasn't resolved by an agent/);
+      db.bug.findUnique.mockResolvedValue(issue(ME, { status: "open" }));
+      db.bugActivity.findFirst.mockResolvedValue(agentResolve);
+      expect((await reopenAgentResolvedAction("bug1")).error).toMatch(/wasn't resolved by an agent/);
+      expect(db.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("records and publishes nothing when the status changed meanwhile", async () => {
+      mockUser.mockResolvedValue({ id: ME, name: "Me", role: "user" });
+      db.bug.findUnique.mockResolvedValue(issue(ME, { status: "resolved" }));
+      db.bugActivity.findFirst.mockResolvedValue(agentResolve);
+      reopenTx(0);
+      expect((await reopenAgentResolvedAction("bug1")).error).toMatch(/changed meanwhile/);
+      expect(activities).toEqual([]);
+      expect(publishWebEvent).not.toHaveBeenCalled();
+    });
   });
 
   it("assignBugAction assigns issue and emits issue.updated", async () => {

@@ -22,7 +22,11 @@ describe("tool table matches the API", () => {
     const file = routeFile(tool.route);
     expect(existsSync(file), `${file} should exist`).toBe(true);
     const source = readFileSync(file, "utf8");
-    expect(source).toMatch(new RegExp(`export\\s+(async\\s+)?function\\s+${tool.method}\\b|export\\s+const\\s+${tool.method}\\b`));
+    expect(source).toMatch(
+      new RegExp(
+        `export\\s+(async\\s+)?function\\s+${tool.method}\\b|export\\s+const\\s+${tool.method}\\b|export\\s*\\{[^}]*\\b${tool.method}\\b`,
+      ),
+    );
   });
 
   it.each(TOOLS.map((tool) => [tool.name, tool] as const))("%s is documented in the agent API reference", (_name, tool) => {
@@ -33,7 +37,14 @@ describe("tool table matches the API", () => {
 
   it.each(TOOLS.map((tool) => [tool.name, tool] as const))("%s routes every input field somewhere", (_name, tool) => {
     const pathKeys = [...tool.route.matchAll(/\{(\w+)\}/g)].map((match) => match[1]);
-    const routed = new Set<string>([...pathKeys, ...(tool.query ?? []), ...(tool.body ?? []), ...Object.values(tool.headers ?? {})]);
+    const routed = new Set<string>([
+      ...pathKeys,
+      ...(tool.query ?? []),
+      ...(tool.body ?? []),
+      ...Object.values(tool.headers ?? {}),
+      ...(tool.file ? [tool.file.filename, tool.file.data] : []),
+      ...(tool.streamSeconds ? [tool.streamSeconds] : []),
+    ]);
     if (tool.projectScoped) routed.add("projectId");
     const inputs = Object.keys(tool.input);
     for (const key of inputs) expect(routed.has(key), `${key} is not sent anywhere`).toBe(true);

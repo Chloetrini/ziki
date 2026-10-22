@@ -1,7 +1,29 @@
 import { describe, expect, it, vi } from "vitest";
-import { availableOfferCandidates, isOfferExpired, OFFER_TTL_MS } from "@/lib/agent-api/offer";
+import { availableOfferCandidates, isOfferExpired, offerNext, OFFER_TTL_MS } from "@/lib/agent-api/offer";
 
 describe("ticket offers", () => {
+  it.each(["dispatcher", "contributor"] as const)("persists reward attribution only for a dispatcher offer (%s)", async (level) => {
+    const db = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      projectWorkflow: { findUnique: vi.fn().mockResolvedValue(null) },
+      issueClaim: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        groupBy: vi.fn().mockResolvedValue([]),
+        create: vi.fn().mockImplementation(async ({ data }) => ({ id: "claim-new", ...data })),
+      },
+      membership: { findMany: vi.fn().mockResolvedValue([
+        { userId: "worker", user: { agents: [{ id: "worker-agent", areaPreferences: [] }] } },
+      ]) },
+      agentEvent: { create: vi.fn().mockResolvedValue({ id: "event-new" }) },
+      webhookSubscription: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const result = await offerNext(db as never, {
+      agentId: "caller", tenantId: "tenant", ownerId: "dispatcher-owner", level,
+    }, { id: "bug-new", projectId: "project-new", title: "Ready" });
+    expect(result?.claim).toMatchObject({ id: "claim-new", status: "offered" });
+    expect(result?.claim.dispatcherUserId).toBe(level === "dispatcher" ? "dispatcher-owner" : undefined);
+  });
+
   it("expires an offer at 60 seconds, but not before", () => {
     const offeredAt = new Date("2026-10-19T12:00:00.000Z");
     const start = offeredAt.getTime();

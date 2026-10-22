@@ -12,7 +12,7 @@ export default function ForgotPasswordPage() {
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-16">
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="rounded-2xl border border-slate-200 bg-white p-6">
         <BrandLockup href="/" size="md" />
         <h1 className="mt-3 text-lg font-medium text-slate-900">
           Forgot password

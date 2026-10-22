@@ -2,6 +2,7 @@
 
 import { fromZodError } from "@/lib/form-errors";
 import { revalidatePath } from "next/cache";
+import { revalidateIssue } from "@/lib/revalidate-issue";
 import { expireTag, TAGS } from "@/lib/lookups";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth-helpers";
@@ -171,7 +172,7 @@ export async function updateCategoryAction(
 
   revalidatePlatforms();
   for (const bugId of linkedBugIds) {
-    revalidatePath(`/issues/${bugId}`);
+    revalidateIssue(bugId);
     revalidatePath(`/bugs/${bugId}`);
   }
   return { ok: true };

@@ -2,8 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import QRCode from "qrcode";
+import { updateSession } from "@/auth";
 import { requireUser } from "@/lib/auth-helpers";
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { sessionRefreshFor } from "@/lib/session-refresh";
 import {
   confirmEnrolment,
   confirmIdentity,
@@ -16,6 +19,9 @@ import {
  * Two-factor settings (#648). Every action acts as the signed-in person and
  * re-authenticates inside the call (password, plus a code once it is on), so a
  * session left open on a shared computer cannot turn the factor off.
+ *
+ * Turning it on, turning it off and making new backup codes sign out every
+ * other session (Ziki #389). This one gets a fresh token and stays signed in.
  */
 
 export type StartTwoFactorResult =
@@ -25,6 +31,20 @@ export type BackupCodesActionResult = { ok: true; codes: string[] } | { ok: fals
 export type PlainActionResult = { ok: true } | { ok: false; error: string };
 
 const text = (value: FormDataEntryValue | null) => (typeof value === "string" ? value : "");
+
+/**
+ * Moves this session's token to the new version. If that fails, this session
+ * is signed out along with the others, which is the safe side to fail on.
+ */
+async function keepThisSession(userId: string, sessionVersion: number) {
+  // The jwt callback reads `sessionRefresh`; Auth.js types the update as a Session.
+  const data = { sessionRefresh: sessionRefreshFor(userId, sessionVersion) } as unknown as Parameters<typeof updateSession>[0];
+  try {
+    await updateSession(data);
+  } catch (error) {
+    logger.error("[security] could not keep the current session after a two-factor change", error);
+  }
+}
 
 export async function startTwoFactorAction(formData: FormData): Promise<StartTwoFactorResult> {
   const user = await requireUser();
@@ -41,8 +61,10 @@ export async function startTwoFactorAction(formData: FormData): Promise<StartTwo
 export async function confirmTwoFactorAction(formData: FormData): Promise<BackupCodesActionResult> {
   const user = await requireUser();
   const result = await confirmEnrolment(user.id, text(formData.get("code")));
-  if (result.ok) revalidatePath("/settings/security");
-  return result;
+  if (!result.ok) return result;
+  await keepThisSession(user.id, result.sessionVersion);
+  revalidatePath("/settings/security");
+  return { ok: true, codes: result.codes };
 }
 
 export async function disableTwoFactorAction(formData: FormData): Promise<PlainActionResult> {
@@ -52,7 +74,7 @@ export async function disableTwoFactorAction(formData: FormData): Promise<PlainA
     code: text(formData.get("code")),
   });
   if (!identity.ok) return identity;
-  await disableTwoFactor(user.id);
+  await keepThisSession(user.id, await disableTwoFactor(user.id));
   revalidatePath("/settings/security");
   return { ok: true };
 }
@@ -65,6 +87,8 @@ export async function regenerateBackupCodesAction(formData: FormData): Promise<B
   });
   if (!identity.ok) return identity;
   const result = await regenerateBackupCodes(user.id);
-  if (result.ok) revalidatePath("/settings/security");
-  return result;
+  if (!result.ok) return result;
+  await keepThisSession(user.id, result.sessionVersion);
+  revalidatePath("/settings/security");
+  return { ok: true, codes: result.codes };
 }

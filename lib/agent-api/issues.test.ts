@@ -185,11 +185,30 @@ describe("agent issue reads", () => {
     expect(response.headers.get("cache-control")).toContain("no-store");
   });
 
-  it("supports no-platform/no-assignee and the same unknown-platform fallback as the app", async () => {
+  it("supports no-platform/no-assignee and rejects an unknown platform or area id (#409)", async () => {
     await list(request("GET", undefined, "?projectId=project-a&platform=none&assignee=none"));
     expect(db.bug.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ categoryId: null, assigneeId: null }) }));
-    await list(request("GET", undefined, "?projectId=project-a&platform=unknown"));
-    expect(db.bug.findMany.mock.lastCall?.[0].where).not.toHaveProperty("categoryId");
+    db.bug.findMany.mockClear();
+    const platform = await list(request("GET", undefined, "?projectId=project-a&platform=unknown"));
+    expect(platform.status).toBe(422);
+    expect((await platform.json()).error).toContain('Unknown platform id "unknown"');
+    const area = await list(request("GET", undefined, "?projectId=project-a&area=unknown"));
+    expect(area.status).toBe(422);
+    expect((await area.json()).error).toContain('Unknown area id "unknown"');
+    expect(db.bug.findMany).not.toHaveBeenCalled();
+  });
+
+  it("filters by a case-insensitive text search on title and description (#460)", async () => {
+    const cursor = encodeCursor({ id: "previous", createdAt: issue.createdAt });
+    await list(request("GET", undefined, `?projectId=project-a&q=%20Login%25&cursor=${cursor}`));
+    const where = db.bug.findMany.mock.lastCall?.[0].where;
+    expect(where.AND).toEqual([{ OR: [
+      { title: { contains: "Login\\%", mode: "insensitive" } },
+      { description: { contains: "Login\\%", mode: "insensitive" } },
+    ] }]);
+    expect(where.OR).toHaveLength(2);
+    await list(request("GET", undefined, "?projectId=project-a&q=%20%20"));
+    expect(db.bug.findMany.mock.lastCall?.[0].where).not.toHaveProperty("AND");
   });
 
   it("keeps only open issues in the requested intake stage, then pages them", async () => {
@@ -287,6 +306,41 @@ describe("agent comment paging (#604)", () => {
   const comment = { id: "comment-b", body: "older", createdAt: new Date("2026-10-19T10:00:00Z"), authorId: "person-a", parentId: null };
   const newer = { id: "comment-c", body: "newer", createdAt: new Date("2026-10-19T10:01:00Z"), authorId: "person-b", parentId: comment.id };
   beforeEach(() => db.comment.findMany.mockResolvedValue([comment]));
+
+  it("returns 400 with validTypes for an unknown type parameter (#414)", async () => {
+    const response = await comments(request("GET", undefined, "?projectId=project-a&type=bogus"), context);
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toBe("Unknown comment type: bogus.");
+    expect(body.validTypes).toEqual(["comment", "bid", "review", "delivery", "request_to_merge"]);
+    expect(db.comment.findMany).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 with validTypes for another unknown type", async () => {
+    const response = await comments(request("GET", undefined, "?projectId=project-a&type=reviews"), context);
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toBe("Unknown comment type: reviews.");
+    expect(body.validTypes).toEqual(["comment", "bid", "review", "delivery", "request_to_merge"]);
+  });
+
+  it("valid types and absent type work as before", async () => {
+    db.comment.findMany.mockResolvedValueOnce([comment, newer]);
+    // valid type = review
+    const r1 = await comments(request("GET", undefined, "?projectId=project-a&type=review&limit=1"), context);
+    expect(r1.status).toBe(200);
+    expect(db.comment.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ type: "review" }) }));
+    // valid type = delivery
+    db.comment.findMany.mockResolvedValueOnce([comment]);
+    const r2 = await comments(request("GET", undefined, "?projectId=project-a&type=delivery"), context);
+    expect(r2.status).toBe(200);
+    expect(db.comment.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ type: "delivery" }) }));
+    // no type = all types
+    db.comment.findMany.mockResolvedValueOnce([comment, newer]);
+    const r3 = await comments(request("GET", undefined, "?projectId=project-a"), context);
+    expect(r3.status).toBe(200);
+    expect(db.comment.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.not.objectContaining({ type: expect.anything() }) }));
+  });
 
   it("returns comments oldest first under the issue's scope, with an author and a cursor", async () => {
     db.comment.findMany.mockResolvedValueOnce([comment, newer]);
@@ -626,7 +680,7 @@ describe("issue read confirmation", () => {
   async function readIssue() {
     const response = await read(request(), context);
     expect(response.status).toBe(200);
-    return (await response.json()).issue as { confirmed: boolean; validations: Array<{ id: string; createdAt: string }> };
+    return (await response.json()).issue as { confirmed: boolean; intake: "idea" | "issue"; validations: Array<{ id: string; createdAt: string }> };
   }
 
   it("returns validations newest-first and confirmed false with no accepts", async () => {
@@ -637,6 +691,7 @@ describe("issue read confirmation", () => {
 
     const body = await readIssue();
     expect(body.confirmed).toBe(false);
+    expect(body.intake).toBe("idea");
     expect(body.validations.map((row) => row.id)).toEqual(["v-new", "v-old"]);
     expect(body.validations[0]?.createdAt).toBe(newer.createdAt.toISOString());
 
@@ -661,12 +716,33 @@ describe("issue read confirmation", () => {
     expect((await readIssue()).confirmed).toBe(false);
   });
 
+  function triageClear(id: string, agentId: string, ownerUserId: string) {
+    return { id, agentId, agent: { id: agentId, ownerUserId, level: "triager" } };
+  }
+
   it("is confirmed once two distinct owners have accepted", async () => {
+    db.bug.findFirst.mockResolvedValue({ ...issue, status: "open", voteCount: 1 });
     db.issueValidation.findMany.mockResolvedValue([
       accept("v1", "r1", "rob"),
       accept("v2", "r2", "sam"),
+      triageClear("vt", "t1", "tia"),
     ]);
-    expect((await readIssue()).confirmed).toBe(true);
+    const body = await readIssue();
+    expect(body.confirmed).toBe(true);
+    expect(body.intake).toBe("idea");
+  });
+
+  it("passes a confirmed report on as an issue once it has three upvotes", async () => {
+    db.bug.findFirst.mockResolvedValue({ ...issue, status: "open", voteCount: 3 });
+    db.issueValidation.findMany.mockResolvedValue([
+      accept("v1", "r1", "rob"),
+      accept("v2", "r2", "sam"),
+      triageClear("vt", "t1", "tia"),
+    ]);
+    const body = await readIssue();
+    expect(body.confirmed).toBe(true);
+    expect(body.intake).toBe("issue");
+    expect(body).not.toHaveProperty("voteCount");
   });
 
   it("does not confirm when both accepts belong to the same owner", async () => {
@@ -675,6 +751,18 @@ describe("issue read confirmation", () => {
       accept("v2", "r2", "rob"),
     ]);
     expect((await readIssue()).confirmed).toBe(false);
+  });
+
+  it("reads an issue by its readable number as well as its id (#457)", async () => {
+    db.bug.findFirst.mockResolvedValue({ ...issue, status: "open", voteCount: 0 });
+    db.issueValidation.findMany.mockResolvedValue([]);
+    for (const ref of ["12", "ZE-12"]) {
+      await read(request(), { params: Promise.resolve({ id: ref }) });
+      expect(db.bug.findFirst.mock.calls.at(-1)?.[0]?.where).toMatchObject({ number: 12, isDeleted: false });
+      expect(db.bug.findFirst.mock.calls.at(-1)?.[0]?.where).not.toHaveProperty("id");
+    }
+    await read(request(), context);
+    expect(db.bug.findFirst.mock.calls.at(-1)?.[0]?.where).toMatchObject({ id: issue.id });
   });
 
   it("leaves the list response without validations or confirmed", async () => {

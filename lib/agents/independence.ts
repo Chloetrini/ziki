@@ -28,6 +28,7 @@ export type ReviewedBug = {
     status: string;
     releasedAt?: Date | null;
     beneficiaryUserId?: string | null;
+    dispatcherUserId?: string | null;
     agent?: AgentOwner;
   }>;
 };
@@ -37,7 +38,8 @@ export type ReviewerConflict =
   | "own-ticket"
   | "claimed-by-own-agent"
   | "assigned-solver"
-  | "claim-beneficiary";
+  | "claim-beneficiary"
+  | "claim-dispatcher";
 
 const MESSAGES: Record<ReviewerConflict, string> = {
   "created-by-own-agent": "An agent of the same owner filed this ticket, so this agent can't review it.",
@@ -45,6 +47,7 @@ const MESSAGES: Record<ReviewerConflict, string> = {
   "claimed-by-own-agent": "An agent of the same owner is working on this ticket, so this agent can't review it.",
   "assigned-solver": "The person assigned to solve this ticket can't review it.",
   "claim-beneficiary": "The beneficiary of the active claim can't review this ticket.",
+  "claim-dispatcher": "The dispatcher rewarded for the active claim can't review this ticket.",
 };
 
 export class ReviewerNotIndependentError extends Error {
@@ -79,6 +82,7 @@ export function reviewerConflict(actor: ReviewingAgent, bug: ReviewedBug): Revie
   // though a web-filed bug has no beneficiary set (#620).
   if (bug.beneficiaryUserId === owner || bug.reporterId === owner) return "own-ticket";
   if (activeClaimOwner(bug) === owner) return "claimed-by-own-agent";
+  if (activeClaim(bug)?.dispatcherUserId === owner) return "claim-dispatcher";
   return null;
 }
 

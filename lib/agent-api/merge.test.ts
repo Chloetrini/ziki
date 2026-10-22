@@ -13,12 +13,13 @@ type VerdictRow = {
 
 const state = vi.hoisted(() => ({
   verdicts: [] as VerdictRow[],
-  confirmations: [] as { agentId: string; agent: { id: string; ownerUserId: string } }[],
+  confirmations: [] as { agentId: string; agent: { id: string; ownerUserId: string; level?: string } }[],
 }));
 
 const db = vi.hoisted(() => ({
   bug: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
   bugActivity: { create: vi.fn() },
+  comment: { create: vi.fn() },
   testVerdict: { findMany: vi.fn() },
   issueValidation: { findMany: vi.fn() },
   pointEntry: { createMany: vi.fn() },
@@ -68,11 +69,12 @@ function merger(id: string, ownerId: string, level: "observer" | "contributor" |
   return { agentId: id, name: id, ownerId, tenantId: "tenant_zedu", level, burst: false, keyId: `key-${id}` };
 }
 
-/** The two independent accepts that confirm an issue. */
+/** The two independent accepts plus a triage clear that confirm an issue. */
 function confirmWith(ownerA: string, ownerB: string) {
   state.confirmations = [
     { agentId: `a-${ownerA}`, agent: { id: `a-${ownerA}`, ownerUserId: ownerA } },
     { agentId: `a-${ownerB}`, agent: { id: `a-${ownerB}`, ownerUserId: ownerB } },
+    { agentId: "a-tia", agent: { id: "a-tia", ownerUserId: "tia", level: "triager" } },
   ];
 }
 
@@ -105,6 +107,7 @@ beforeEach(() => {
   db.bug.findUnique.mockResolvedValue(bugRow());
   db.bug.update.mockResolvedValue({});
   db.bugActivity.create.mockResolvedValue({});
+  db.comment.create.mockResolvedValue({ id: "merge-comment-1" });
   db.pointEntry.createMany.mockResolvedValue({ count: 1 });
   db.agentEvent.create.mockResolvedValue({ id: "e1" });
   db.webhookSubscription.findMany.mockResolvedValue([]);
@@ -189,6 +192,26 @@ describe("acceptFix: the merger must be independent too (#493)", () => {
     expect(await acceptFix(merger("m1", "mo", "merger"), "bug1")).toMatchObject({ status: 200, accepted: true });
   });
 
+  it("leaves a comment on the issue saying the fix was merged (#458)", async () => {
+    confirmWith("rob", "sam");
+    verdict("r1", "rob");
+    verdict("r2", "sam");
+    expect(await acceptFix(merger("m1", "mo", "merger"), "bug1")).toMatchObject({ status: 200, accepted: true });
+    expect(db.comment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          bugId: "bug1",
+          authorId: "mo",
+          agentId: "m1",
+          type: "comment",
+        }),
+      }),
+    );
+    expect(db.bugActivity.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ type: "commented" }) }),
+    );
+  });
+
   it("requires the project's third verdict when configured (#595)", async () => {
     db.projectWorkflow.findUnique.mockResolvedValue({ verdictsNeeded: 3 });
     confirmWith("rob", "sam");
@@ -263,6 +286,45 @@ describe("acceptFix: the gate (#434)", () => {
     verdict("r1", "rob");
     verdict("r2", "rob");
     expect(await acceptFix(merger("m1", "mo", "merger"), "bug1")).toMatchObject({ status: 409, missing: "verdicts" });
+  });
+});
+
+describe("acceptFix: dispatcher completion reward", () => {
+  it("pays the dispatcher of the completed claim, not an earlier abandoned claim", async () => {
+    confirmWith("rob", "sam");
+    verdict("r1", "rob");
+    verdict("r2", "sam");
+    db.bug.findFirst.mockResolvedValue(bugRow({ claims: [
+      { status: "released", releasedAt: new Date(), dispatcherUserId: "old-dispatcher" },
+      { status: "active", releasedAt: null, agentId: "solver-agent", beneficiaryUserId: "ada", dispatcherUserId: "dispatcher-owner", agent: { ownerUserId: "ada" } },
+    ] }));
+
+    expect(await acceptFix(merger("m1", "mo"), "bug1")).toMatchObject({ status: 200 });
+    const rewards = db.pointEntry.createMany.mock.calls.flatMap((call) => call[0].data).filter((entry) => entry.role === "dispatcher");
+    expect(rewards).toEqual([{
+      tenantId: "tenant_zedu", bugId: "bug1", userId: "dispatcher-owner",
+      role: "dispatcher", points: 2, sourceKey: "dispatcher:bug1",
+    }]);
+  });
+
+  it("does not pay a dispatcher before independent verdicts accept the fix", async () => {
+    confirmWith("rob", "sam");
+    db.bug.findFirst.mockResolvedValue(bugRow({ claims: [
+      { status: "active", releasedAt: null, agentId: "solver-agent", beneficiaryUserId: "ada", dispatcherUserId: "dispatcher-owner", agent: { ownerUserId: "ada" } },
+    ] }));
+    expect(await acceptFix(merger("m1", "mo"), "bug1")).toMatchObject({ status: 409, missing: "verdicts" });
+    expect(db.pointEntry.createMany).not.toHaveBeenCalled();
+  });
+
+  it("does not let the rewarded dispatcher accept its own assigned fix", async () => {
+    confirmWith("rob", "sam");
+    verdict("r1", "rob");
+    verdict("r2", "sam");
+    db.bug.findFirst.mockResolvedValue(bugRow({ claims: [
+      { status: "active", releasedAt: null, agentId: "solver-agent", beneficiaryUserId: "ada", dispatcherUserId: "mo", agent: { ownerUserId: "ada" } },
+    ] }));
+    expect(await acceptFix(merger("m1", "mo"), "bug1")).toMatchObject({ status: 403, error: "not_independent" });
+    expect(db.pointEntry.createMany).not.toHaveBeenCalled();
   });
 });
 
@@ -348,19 +410,20 @@ describe("acceptFix: a successful accept (#434)", () => {
     });
   });
 
-  it("pays up to two reviewers, each for the person they acted for", async () => {
+  it("pays every good-to-merge reviewer, each less than the one before", async () => {
     confirmWith("rob", "sam");
     verdict("r1", "rob", "rob");
     verdict("r2", "sam", "sam");
     verdict("r3", "tia", "tia");
 
     const result = await acceptFix(merger("m1", "mo", "merger"), "bug1");
-    expect(result).toMatchObject({ status: 200, rewardedReviewerUserIds: ["rob", "sam"] });
+    expect(result).toMatchObject({ status: 200, rewardedReviewerUserIds: ["rob", "sam", "tia"] });
     const awards = db.pointEntry.createMany.mock.calls.map((call) => call[0].data[0]);
     const reviewerAwards = awards.filter((a) => a.role === "reviewer");
-    expect(reviewerAwards).toHaveLength(2);
+    expect(reviewerAwards).toHaveLength(3);
     expect(reviewerAwards[0]).toMatchObject({ userId: "rob", points: 10, sourceKey: "reviewer:bug1:rob" });
-    expect(reviewerAwards[1]).toMatchObject({ userId: "sam", points: 10, sourceKey: "reviewer:bug1:sam" });
+    expect(reviewerAwards[1]).toMatchObject({ userId: "sam", points: 7, sourceKey: "reviewer:bug1:sam" });
+    expect(reviewerAwards[2]).toMatchObject({ userId: "tia", points: 4, sourceKey: "reviewer:bug1:tia" });
   });
 
   it("does not count or pay a verdict credited to the active claim beneficiary (#495)", async () => {

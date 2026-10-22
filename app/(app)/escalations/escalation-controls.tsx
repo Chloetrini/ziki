@@ -18,6 +18,7 @@ export function EscalationTypeBadge({ type }: { type: EscalationType | string })
     "Human Approval": "bg-purple-50 text-purple-800 border-purple-200",
     "Scope Expansion": "bg-sky-50 text-sky-800 border-sky-200",
     Question: "bg-slate-100 text-slate-800 border-slate-200",
+    Redesign: "bg-violet-50 text-violet-800 border-violet-200",
   };
 
   const icons: Record<string, string> = {
@@ -26,6 +27,7 @@ export function EscalationTypeBadge({ type }: { type: EscalationType | string })
     "Human Approval": "👤",
     "Scope Expansion": "⚠️",
     Question: "❓",
+    Redesign: "✎",
   };
 
   const badgeStyle = styles[type] ?? styles.Question;

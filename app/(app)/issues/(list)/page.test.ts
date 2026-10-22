@@ -55,6 +55,38 @@ describe("issue list fails closed (#506)", () => {
     expect(findMany).not.toHaveBeenCalled();
   });
 
+  it("shows a reference, not the database error, when the count fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const dbError = new Error('duplicate key value violates unique constraint "Bug_secret_idx"');
+    count.mockRejectedValue(dbError);
+
+    const html = renderToStaticMarkup((await BugsPage({ searchParams: Promise.resolve({}) })) as ReactElement);
+
+    expect(html).toContain("Issues could not be loaded");
+    expect(html).not.toContain("Bug_secret_idx");
+    expect(html).not.toContain("database error");
+    const reference = html.match(/<code[^>]*>([0-9a-f]{8})<\/code>/)?.[1];
+    expect(reference).toBeDefined();
+    expect(consoleError).toHaveBeenCalledWith(`[bugs] list count failed (ref ${reference})`, dbError);
+    consoleError.mockRestore();
+  });
+
+  it("shows a reference, not the database error, when the list query fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const dbError = new Error('column "secret_col" of relation "Bug" does not exist');
+    count.mockResolvedValue(3);
+    findMany.mockRejectedValue(dbError);
+
+    const html = renderToStaticMarkup((await BugsPage({ searchParams: Promise.resolve({}) })) as ReactElement);
+
+    expect(html).toContain("Issues could not be loaded");
+    expect(html).not.toContain("secret_col");
+    const reference = html.match(/<code[^>]*>([0-9a-f]{8})<\/code>/)?.[1];
+    expect(reference).toBeDefined();
+    expect(consoleError).toHaveBeenCalledWith(`[bugs] list query failed (ref ${reference})`, dbError);
+    consoleError.mockRestore();
+  });
+
   it("still gives someone with no membership an empty board, never other tenants' issues", async () => {
     currentTenantIdFor.mockResolvedValue(null);
     count.mockRejectedValueOnce(missingTenantColumn()).mockResolvedValue(0);

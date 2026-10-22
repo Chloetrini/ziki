@@ -1,6 +1,7 @@
 import type { MembershipRole } from "@prisma/client";
 import { isOrganizationAdmin } from "@/lib/organization-role";
 import type { AppRole } from "@/lib/roles";
+import type { BugVoterSummary } from "@/lib/voters";
 
 export const TICKET_DELETION_ERRORS = {
   unauthorized: "Only an owner or admin of this organization can delete issues",
@@ -18,6 +19,15 @@ export type TicketDeletionError = keyof typeof TICKET_DELETION_ERRORS;
 
 /** What a delete leaves in place. Deleting only hides an issue (#692). */
 export type TicketDeletionCounts = { comments: number; votes: number };
+
+/**
+ * The counts every delete and restore message quotes. Votes are upvotes only:
+ * downvotes were removed (#1059), and the dislike rows still in the database
+ * no longer count anywhere, so the messages say what the vote button says.
+ */
+export function deletionCounts(visibleComments: number, voters: BugVoterSummary): TicketDeletionCounts {
+  return { comments: visibleComments, votes: voters.likes.count };
+}
 
 const plural = (count: number, word: string) =>
   `${count} ${word}${count === 1 ? "" : "s"}`;

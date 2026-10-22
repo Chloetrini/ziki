@@ -1,3 +1,5 @@
+import { clearCommentDrafts } from "./comment-draft";
+
 export const DRAFT_PREFIX = "draft";
 export const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
@@ -121,4 +123,9 @@ export function clearUserDrafts(userId?: string | null): void {
   } catch {
     // Ignore error
   }
+
+  // Comment drafts use their own prefix, so the loop above never saw them
+  // (#481). They are scoped per viewer as well; the unscoped leftovers from
+  // older builds go too, since they belong to nobody in particular.
+  clearCommentDrafts(window.localStorage, userId);
 }

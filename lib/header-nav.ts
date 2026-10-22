@@ -1,10 +1,11 @@
-import { isAdmin, isSuperAdmin, type AppRole } from "@/lib/roles";
+import { isSuperAdmin, type AppRole } from "@/lib/roles";
 import { isAgentPlatformEnabled } from "@/lib/feature-flags";
 
 export type HeaderNavSubItem = {
   href: string;
   label: string;
   description?: string;
+  badge?: number;
 };
 
 export type HeaderNavItem = {
@@ -15,58 +16,32 @@ export type HeaderNavItem = {
 };
 
 /** #444: pick another tenant, create one, or accept an invite. */
-export const SWITCH_TENANT_LINK: HeaderNavItem = { href: "/tenants", label: "Switch tenant" };
+export const SWITCH_TENANT_LINK: HeaderNavItem = { href: "/tenants", label: "Switch workspace" };
 
 /** Links shown in the header for the role the user is currently viewing as (#761). */
 export function headerNavItems(
   role?: AppRole | null,
-  options?: { agentPlatform?: boolean; managePlatforms?: boolean; pendingEscalations?: number },
+  options?: { agentPlatform?: boolean; pendingEscalations?: number },
 ): HeaderNavItem[] {
-  const manageProjectChildren: HeaderNavSubItem[] = [
-    { href: "/projects", label: "Projects", description: "View, switch, and create workspace projects" },
-    { href: "/milestones", label: "Milestones", description: "Track release goals and milestones" },
-  ];
-
-  if (options?.managePlatforms || isAdmin(role)) {
-    manageProjectChildren.push({
-      href: "/admin/categories",
-      label: "Platforms",
-      description: "Manage target platforms (Web, Mobile, Desktop, Backend)",
-    });
-  }
-
-  if (isAdmin(role)) {
-    manageProjectChildren.push({
-      href: "/admin/types",
-      label: "Types",
-      description: "Manage issue classifications",
-    });
-  }
+  const pending =
+    typeof options?.pendingEscalations === "number" && options.pendingEscalations > 0
+      ? options.pendingEscalations
+      : undefined;
 
   const items: HeaderNavItem[] = [
     { href: "/issues", label: "Issues" },
     { href: "/team", label: "Team" },
-    {
-      href: "/projects",
-      label: "Manage Project",
-      children: manageProjectChildren,
-    },
   ];
 
   if (options?.agentPlatform ?? isAgentPlatformEnabled()) {
-    items.push(
-      {
-        href: "/escalations",
-        label: "Escalations",
-        ...(typeof options?.pendingEscalations === "number" && options.pendingEscalations > 0
-          ? { badge: options.pendingEscalations }
-          : {}),
-      },
-      { href: "/redesigns", label: "Redesigns" },
-    );
+    items.push({
+      href: "/escalations",
+      label: "Escalations",
+      ...(pending ? { badge: pending } : {}),
+    });
+  } else {
+    items.push({ href: "/docs", label: "API Docs" });
   }
-
-  items.push({ href: "/docs", label: "API Docs" });
 
   if (isSuperAdmin(role)) {
     items.push({ href: "/admin/users", label: "Admins" });
@@ -96,7 +71,9 @@ export function isNavItemActive(pathname: string | null, href: string): boolean 
       path === "/escalations" ||
       path.startsWith("/escalations/") ||
       path === "/questions" ||
-      path.startsWith("/questions/")
+      path.startsWith("/questions/") ||
+      path === "/redesigns" ||
+      path.startsWith("/redesigns/")
     );
   }
   if (href === "/manage-project") {

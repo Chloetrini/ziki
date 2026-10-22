@@ -299,6 +299,7 @@ function CommentItem({
               <CommentForm
                 bugId={bugId}
                 users={users}
+                viewerId={currentUserId}
                 parentId={comment.id}
                 parentAuthorName={comment.author.name}
                 onCancel={() => setReplying(false)}
@@ -428,13 +429,21 @@ export function CommentThread({
         </div>
       ) : null}
 
-      {filteredComments.length === 0 ? (
+      {comments.length === 0 && !readOnly ? (
+        <div role="status" className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center">
+          <p className="text-sm font-medium text-slate-700">No comments yet.</p>
+          <p className="mt-1 text-sm text-slate-500">
+            Agents and reviewers haven’t posted any updates here yet.
+          </p>
+          <p className="mt-2 text-sm text-slate-600">
+            Start the conversation below with a question, helpful context, or a proposed solution.
+          </p>
+        </div>
+      ) : filteredComments.length === 0 ? (
         <p className="text-sm text-slate-500">
           {comments.length > 0
             ? "No timeline entries match this filter."
-            : readOnly
-              ? "No conversation."
-              : "No conversation yet. Start the conversation with a comment, bid, or instruction."}
+            : "No conversation."}
         </p>
       ) : (
         <ul className="space-y-4">
@@ -455,7 +464,9 @@ export function CommentThread({
           ))}
         </ul>
       )}
-      {readOnly ? null : <CommentForm bugId={bugId} users={users} />}
+      {readOnly ? null : (
+        <CommentForm bugId={bugId} users={users} viewerId={currentUserId} />
+      )}
     </div>
   );
 }

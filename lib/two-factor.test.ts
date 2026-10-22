@@ -6,6 +6,7 @@ const db = vi.hoisted(() => {
     totpCredential: { update: vi.fn(), deleteMany: vi.fn() },
     totpBackupCode: { deleteMany: vi.fn(), createMany: vi.fn() },
     securityAuditEvent: { create: vi.fn() },
+    user: { update: vi.fn() },
   };
   return {
     ...tx,
@@ -46,7 +47,14 @@ beforeEach(() => {
   process.env.AUTH_SECRET = "test-secret-that-is-long-enough-for-hashing";
   limits.attempt.mockResolvedValue({ allowed: true, retryAfterMs: 0 });
   limits.auth.mockResolvedValue({ allowed: true, retryAfterMs: 0 });
+  db.tx.user.update.mockResolvedValue({ sessionVersion: 4 });
 });
+
+const SIGN_OUT_EVERY_SESSION = {
+  where: { id: "u1" },
+  data: { sessionVersion: { increment: 1 } },
+  select: { sessionVersion: true },
+};
 
 describe("backup codes", () => {
   it("are XXXXX-XXXXX from an alphabet without look-alikes, and differ", () => {
@@ -102,10 +110,17 @@ describe("confirmEnrolment", () => {
     expect(db.tx.securityAuditEvent.create).toHaveBeenCalledWith({ data: { userId: "u1", type: "totp.enabled" } });
   });
 
+  it("signs out every other session in the same transaction and returns the new version (Ziki #389)", async () => {
+    const result = await confirmEnrolment("u1", goodCode(), NOW);
+    expect(db.tx.user.update).toHaveBeenCalledWith(SIGN_OUT_EVERY_SESSION);
+    expect(result).toMatchObject({ ok: true, sessionVersion: 4 });
+  });
+
   it("changes nothing on a wrong code", async () => {
     const result = await confirmEnrolment("u1", "000000", NOW);
     expect(result.ok).toBe(false);
     expect(db.$transaction).not.toHaveBeenCalled();
+    expect(db.tx.user.update).not.toHaveBeenCalled();
   });
 
   it("is rate limited", async () => {
@@ -216,14 +231,26 @@ describe("disable, regenerate and status", () => {
     expect(db.tx.securityAuditEvent.create).toHaveBeenCalledWith({ data: { userId: "u1", type: "totp.disabled" } });
   });
 
+  it("disabling signs out every other session in the same transaction (Ziki #389)", async () => {
+    expect(await disableTwoFactor("u1")).toBe(4);
+    expect(db.tx.user.update).toHaveBeenCalledWith(SIGN_OUT_EVERY_SESSION);
+  });
+
   it("regenerating replaces all backup codes, audits it, and refuses when off", async () => {
     db.totpCredential.findUnique.mockResolvedValueOnce(null);
     expect((await regenerateBackupCodes("u1")).ok).toBe(false);
+    expect(db.tx.user.update).not.toHaveBeenCalled();
     db.totpCredential.findUnique.mockResolvedValueOnce({ enabledAt: new Date() });
     const result = await regenerateBackupCodes("u1");
     expect(result.ok && result.codes).toHaveLength(BACKUP_CODE_COUNT);
     expect(db.tx.totpBackupCode.deleteMany).toHaveBeenCalledWith({ where: { userId: "u1" } });
     expect(db.tx.securityAuditEvent.create).toHaveBeenCalledWith({ data: { userId: "u1", type: "totp.backup_codes_regenerated" } });
+  });
+
+  it("regenerating signs out every other session in the same transaction (Ziki #389)", async () => {
+    db.totpCredential.findUnique.mockResolvedValueOnce({ enabledAt: new Date() });
+    expect(await regenerateBackupCodes("u1")).toMatchObject({ ok: true, sessionVersion: 4 });
+    expect(db.tx.user.update).toHaveBeenCalledWith(SIGN_OUT_EVERY_SESSION);
   });
 
   it("reports status, counting only unused backup codes", async () => {

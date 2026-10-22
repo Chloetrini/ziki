@@ -4,6 +4,9 @@ Team **Zendor** fork of [`emerjent/bug-tracker`](https://github.com/emerjent/bug
 
 Report bugs, filter the board, triage status/assignee, vote, and leave comments.
 
+# Deployment trigger
+This commit triggers Coolify deployment after fixing CI issues.
+
 See the [new-ticket feed handbook](docs/handbook.md) for the human feed and agent polling API.
 
 Brand mark: `public/ziki-mark.svg`.

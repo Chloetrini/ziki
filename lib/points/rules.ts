@@ -23,15 +23,50 @@ export const REVIEWER_POINTS = 10;
  * Reviewer points for an independent "real" accept that confirms the issue.
  * Separate from the merge verdict so the same person can earn both.
  */
-export const CONFIRMATION_REVIEWER_POINTS = 5;
+export const CONFIRMATION_REVIEWER_POINTS = 3;
 
-/** At most this many reviewers earn points on one issue. */
-export const MAX_REWARDED_REVIEWERS = 2;
+/** Triager points for clearing a report as not a duplicate. */
+export const TRIAGER_CLEAR_POINTS = 1;
+
+/** Triager points for marking a report as a duplicate of another issue. */
+export const DUPLICATE_MARKER_POINTS = 5;
+
+/**
+ * The next reviewer's award, given the previous reviewer's award.
+ * Subtract log base 2 of the previous award, and never pay less than 1.
+ * The first reviewer still receives the full base amount.
+ */
+export function diminishedReviewerPoints(previous: number): number {
+  if (previous <= 1) return 1;
+  return Math.max(1, Math.round(previous - Math.log2(previous)));
+}
+
+/** Points for the reviewer at `index` (0 is the first), starting from `firstAward`. */
+export function reviewerPointsAt(index: number, firstAward: number): number {
+  if (index < 0 || firstAward < 1) return 0;
+  let points = Math.floor(firstAward);
+  for (let step = 0; step < index; step += 1) {
+    points = diminishedReviewerPoints(points);
+  }
+  return points;
+}
 
 /** The goal is this many points. Solved tasks are counted, not required. */
 export const TARGET_POINTS = 500;
 
-export type PointRole = "solver" | "reporter" | "reviewer" | "submission";
+export const DISPATCHER_POINTS = 2;
+
+export type PointRole = "solver" | "reporter" | "reviewer" | "triager" | "submission" | "dispatcher";
+
+/** Idempotency key for paying the triager who cleared an issue as not a duplicate. */
+export function triagerClearSourceKey(bugId: string, userId: string): string {
+  return `triager-clear:${bugId}:${userId}`;
+}
+
+/** Idempotency key for paying the agent that marked an issue as a duplicate. */
+export function duplicateMarkerSourceKey(bugId: string, userId: string): string {
+  return `duplicate-marker:${bugId}:${userId}`;
+}
 
 /** The idempotency key for a job-submission award (#617). */
 export function jobSubmissionSourceKey(jobId: string, submissionId: string): string {

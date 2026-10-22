@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const db = vi.hoisted(() => ({ bug: { findMany: vi.fn() }, project: { findFirst: vi.fn() } }));
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 vi.mock("@/lib/tenant-context", () => ({ defaultProjectIdFor: vi.fn().mockResolvedValue("default-project") }));
-import { feedProject, feedWhere, parseFeedCursor, readFeed } from "./feed";
+import { FEED_MAX_PAGE_SIZE, FEED_PAGE_SIZE, FeedInputError, feedProject, feedWhere, parseFeedCursor, parseFeedLimit, readFeed } from "./feed";
 import { AREA_NONE } from "@/lib/project-area-filter";
 
 const timestamp = "2026-10-19T12:00:00.000Z";
@@ -41,6 +41,19 @@ describe("new-ticket feed", () => {
     expect((await readFeed("t", "p", page.nextCursor)).nextCursor).toEqual(page.nextCursor);
   });
 
+  it("honours a limit argument when reading a page (#469)", async () => {
+    db.bug.findMany.mockResolvedValue(Array.from({ length: 4 }, (_, i) => ({ id: String(i), createdAt: new Date(timestamp) })));
+    const page = await readFeed("t", "p", null, null, 3);
+    expect(db.bug.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 4 }));
+    expect(page.issues).toHaveLength(3);
+    expect(page.hasMore).toBe(true);
+    expect(page.nextCursor?.afterId).toBe("2");
+
+    db.bug.findMany.mockResolvedValue(Array.from({ length: 2 }, (_, i) => ({ id: String(i), createdAt: new Date(timestamp) })));
+    const last = await readFeed("t", "p", null, null, 3);
+    expect(last.hasMore).toBe(false);
+  });
+
   it("verifies an explicit project belongs to the tenant", async () => {
     db.project.findFirst.mockResolvedValue(null);
     expect(await feedProject("t", "foreign-project")).toBeNull();
@@ -48,9 +61,44 @@ describe("new-ticket feed", () => {
     await feedProject("t");
     expect(db.project.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: { id: "default-project", tenantId: "t" } }));
   });
+
+  it("treats an empty or whitespace-only projectId as not given (#470)", async () => {
+    db.project.findFirst.mockResolvedValue(null);
+    for (const empty of ["", "   "]) {
+      await feedProject("t", empty);
+      expect(db.project.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: { id: "default-project", tenantId: "t" } }));
+    }
+    await feedProject("t", "  real-project  ");
+    expect(db.project.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: { id: "real-project", tenantId: "t" } }));
+  });
 });
 
   it("filters a project feed by area, including issues with no area", () => {
     expect(feedWhere("tenant-a", "project-a", null, "area-1")).toMatchObject({ areaId: "area-1" });
     expect(feedWhere("tenant-a", "project-a", null, AREA_NONE)).toMatchObject({ areaId: null });
   });
+
+describe("feed limit parameter (#469)", () => {
+  it("keeps the historical page size when limit is absent", () => {
+    expect(parseFeedLimit(new URLSearchParams())).toBe(FEED_PAGE_SIZE);
+    expect(FEED_PAGE_SIZE).toBe(50);
+  });
+
+  it("returns the page size the caller asked for", () => {
+    expect(parseFeedLimit(new URLSearchParams("limit=3"))).toBe(3);
+    expect(parseFeedLimit(new URLSearchParams("limit=1"))).toBe(1);
+    expect(parseFeedLimit(new URLSearchParams("limit=%203%20"))).toBe(3);
+    expect(parseFeedLimit(new URLSearchParams(`limit=${FEED_MAX_PAGE_SIZE}`))).toBe(FEED_MAX_PAGE_SIZE);
+  });
+
+  it("clamps out-of-range numbers to the documented bounds", () => {
+    expect(parseFeedLimit(new URLSearchParams("limit=0"))).toBe(1);
+    expect(parseFeedLimit(new URLSearchParams("limit=200"))).toBe(FEED_MAX_PAGE_SIZE);
+  });
+
+  it("rejects values that are not whole numbers instead of guessing", () => {
+    for (const raw of ["", "abc", "-1", "1.5", "1e3", "3px"]) {
+      expect(() => parseFeedLimit(new URLSearchParams({ limit: raw })), raw).toThrow(FeedInputError);
+    }
+  });
+});

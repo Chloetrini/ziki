@@ -9,7 +9,7 @@ import {
 } from "@/components/markdown-editor";
 import { MentionText } from "@/components/comment-body";
 import { AttachmentPicker } from "@/components/attachment-picker";
-import { clearDraft, draftKey, readDraft, writeDraft } from "@/lib/comment-draft";
+import { clearDraft, discardLegacyDraft, draftKey, readDraft, writeDraft } from "@/lib/comment-draft";
 import { useToast } from "@/components/ui/toast";
 import type { CommentType } from "@/lib/validations/issue";
 
@@ -18,6 +18,8 @@ type UserOption = { id: string; name: string };
 type CommentFormProps = {
   bugId: string;
   users: UserOption[];
+  /** The signed-in viewer, so drafts never cross accounts (#481). */
+  viewerId?: string | null;
   parentId?: string;
   parentAuthorName?: string;
   onCancel?: () => void;
@@ -27,6 +29,7 @@ type CommentFormProps = {
 export function CommentForm({
   bugId,
   users,
+  viewerId,
   parentId,
   parentAuthorName,
   onCancel,
@@ -45,7 +48,7 @@ export function CommentForm({
   const [isSettling, setIsSettling] = useState(false);
   const [pending, startTransition] = useTransition();
   const isReply = Boolean(parentId);
-  const key = draftKey(bugId, parentId);
+  const key = draftKey(viewerId, bugId, parentId);
   const bodyId = parentId ? `body-${parentId}` : "body";
   const errorId = `${bodyId}-error`;
   const [bodyInvalid, setBodyInvalid] = useState(false);
@@ -58,6 +61,10 @@ export function CommentForm({
   // and setting state during the effect would be the cascading render the
   // lint rule warns about. A microtask after mount is the first safe moment.
   useEffect(() => {
+    // Drafts saved before #481 have no viewer in the key. They cannot be
+    // attributed, so drop them here instead of handing them to whoever is
+    // signed in now.
+    discardLegacyDraft(localStorage, bugId, parentId);
     const saved = readDraft(localStorage, key);
     if (!saved) return;
     queueMicrotask(() => {
@@ -65,7 +72,7 @@ export function CommentForm({
       setBody((current) => (current ? current : saved));
       setRestored(true);
     });
-  }, [key]);
+  }, [bugId, key, parentId]);
 
   const update = useCallback(
     (next: string) => {

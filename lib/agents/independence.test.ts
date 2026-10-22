@@ -3,6 +3,7 @@ import {
   assertIndependentReviewer,
   ReviewerNotIndependentError,
   reviewerConflict,
+  reviewerCreditConflict,
   type ReviewedBug,
 } from "./independence";
 
@@ -50,6 +51,23 @@ describe("assertIndependentReviewer (#442)", () => {
       claims: [{ status: "active", releasedAt: null, agent: { ownerUserId: alice } }],
     };
     expect(reviewerConflict(aliceAgentB, claimedByAlice)).toBe("claimed-by-own-agent");
+  });
+
+  it("rejects the dispatcher owner and a credited reviewer benefiting from the completed claim", () => {
+    const bug: ReviewedBug = {
+      beneficiaryUserId: carol,
+      claims: [{ status: "active", dispatcherUserId: alice, agent: { ownerUserId: bob } }],
+    };
+    expect(reviewerConflict(aliceAgentB, bug)).toBe("claim-dispatcher");
+    expect(reviewerCreditConflict(alice, bug)).toBe("claim-dispatcher");
+  });
+
+  it("does not treat dispatchers of abandoned claims as reward beneficiaries", () => {
+    const bug: ReviewedBug = {
+      beneficiaryUserId: carol,
+      claims: [{ status: "released", releasedAt: new Date(), dispatcherUserId: alice }],
+    };
+    expect(reviewerConflict(aliceAgentB, bug)).toBeNull();
   });
 
   it("ignores released and offered claims", () => {

@@ -23,7 +23,7 @@ import { discoverableTenants, requestsForUser } from "@/lib/tenant-join-requests
 import { JoinWorkspaceForm } from "./join-workspace-form";
 
 /* Distinct browser-tab title; the root layout appends "· Ziki". */
-export const metadata = { title: "Tenants" };
+export const metadata = { title: "Workspaces" };
 
 const card = "rounded-xl border border-slate-200 bg-white p-4 sm:p-6";
 
@@ -81,12 +81,12 @@ export default async function TenantsPage({
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="space-y-1">
         <h1 className="text-2xl font-semibold text-slate-900">
-          {hasTenants ? "Choose a tenant" : "Join or create a tenant"}
+          {hasTenants ? "Choose a workspace" : "Join or create a workspace"}
         </h1>
         <p className="text-sm text-slate-600">
           {hasTenants
-            ? "A tenant is one organisation's workspace: its projects, issues and people. Pick the one to work in."
-            : "You're not in a tenant yet. Accept an invite from someone in one, or create a tenant of your own."}
+            ? "A workspace is your team. A project is one product inside it. A platform, such as Web or Mobile, is only a label on an issue."
+            : "You're not in a workspace yet. Accept an invite, or create a workspace of your own."}
         </p>
       </div>
 
@@ -159,15 +159,16 @@ export default async function TenantsPage({
             </h2>
             <ul className="mt-2 space-y-1.5 text-sm text-slate-700">
               <li>
-                <span className="font-medium">A workspace</span> (tenant) is your team or company: its people,
-                projects and issues. Nobody outside it sees them.
+                <span className="font-medium">A workspace</span> is your team or company. Its people, projects,
+                and issues stay inside it.
               </li>
               <li>
-                <span className="font-medium">A project</span> is one product inside it, such as a web app.
+                <span className="font-medium">A project</span> is one product in that workspace, such as a web
+                app or a desktop app. The switcher chooses which project&apos;s issues you see.
               </li>
               <li>
-                <span className="font-medium">Issues</span> are the bugs and requests filed against a project, by
-                people and their agents.
+                <span className="font-medium">A platform</span> is a label on an issue, such as Web or Mobile.
+                It is not a product, and every project in the workspace uses the same list.
               </li>
             </ul>
           </section>
@@ -210,7 +211,7 @@ export default async function TenantsPage({
             id="your-tenants"
             className="border-b border-slate-200 bg-slate-50 px-4 py-3 text-base font-semibold text-slate-900 sm:px-6"
           >
-            Your tenants
+            Your workspaces
           </h2>
           <ul className="divide-y divide-slate-200">
             {activeTenants.map((tenant) => {
@@ -255,10 +256,10 @@ export default async function TenantsPage({
             id="archived-tenants"
             className="border-b border-slate-200 bg-slate-50 px-4 py-3 text-base font-semibold text-slate-900 sm:px-6"
           >
-            Archived tenants
+            Archived workspaces
           </h2>
           <p className="border-b border-slate-200 px-4 py-3 text-sm text-slate-600 sm:px-6">
-            Archived tenants are hidden from the switcher and can&apos;t be opened. Restore one
+            Archived workspaces are hidden from the switcher and can&apos;t be opened. Restore one
             to work in it again.
           </p>
           <ul className="divide-y divide-slate-200">
@@ -292,7 +293,7 @@ export default async function TenantsPage({
         </h2>
         <p className="mt-1 text-sm text-slate-600">
           {hasTenants
-            ? "Tenants are invite-only. Open the link an owner or admin sent you, or paste it here."
+            ? "Workspaces are invite-only. Open the link an owner or admin sent you, or paste it here."
             : "Joining your team instead? Open the invite link an owner or admin sent you, or paste it here."}
         </p>
         <InviteLinkForm />
@@ -301,7 +302,7 @@ export default async function TenantsPage({
       {hasTenants || inviteId ? (
         <section aria-labelledby="create-tenant" className={card}>
           <h2 id="create-tenant" className="text-base font-semibold text-slate-900">
-            Create a tenant
+            Create a workspace
           </h2>
           <CreateTenantForm nameMax={TENANT_NAME_MAX} />
         </section>

@@ -5,6 +5,8 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { addCommentAction } from "@/app/actions/issues";
+import { draftKey, writeDraft } from "@/lib/comment-draft";
+import { clearUserDrafts } from "@/lib/form-drafts";
 import { CommentForm } from "./comment-form";
 
 const mockToast = vi.fn();
@@ -298,5 +300,70 @@ describe("CommentForm optimistic update and rollback", () => {
     } finally {
       document.body.removeChild(commentLi);
     }
+  });
+});
+
+describe("comment drafts stay with their viewer (#481)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("restores nothing for account B after account A signs out", async () => {
+    // Account A types a root comment and a reply on the same issue.
+    writeDraft(window.localStorage, draftKey("A", "b1"), "A's private thought");
+    writeDraft(window.localStorage, draftKey("A", "b1", "c9"), "A's private reply");
+
+    // Signing out runs this (see components/sign-out-button.tsx).
+    clearUserDrafts("A");
+
+    // Account B opens the same issue in the same browser.
+    renderForm({ ...defaultProps, viewerId: "B" });
+    await waitFor(() => {
+      expect(bodyTextarea().value).toBe("");
+    });
+    expect(screen.queryByText("Restored an unsent draft.")).toBeNull();
+
+    cleanup();
+
+    // ...and the same reply box.
+    render(
+      <CommentForm
+        bugId="b1"
+        users={[]}
+        viewerId="B"
+        parentId="c9"
+        parentAuthorName="Someone"
+      />,
+    );
+    const reply = screen.getByLabelText("Reply to Someone") as HTMLTextAreaElement;
+    await waitFor(() => {
+      expect(reply.value).toBe("");
+    });
+    expect(screen.queryByText("Restored an unsent draft.")).toBeNull();
+  });
+
+  it("still restores the draft for the viewer who wrote it", async () => {
+    writeDraft(window.localStorage, draftKey("A", "b1"), "mine to finish");
+
+    renderForm({ ...defaultProps, viewerId: "A" });
+
+    await waitFor(() => {
+      expect(bodyTextarea().value).toBe("mine to finish");
+    });
+    expect(screen.getByText("Restored an unsent draft.")).toBeTruthy();
+  });
+
+  it("discards a legacy unscoped draft instead of handing it to a viewer", async () => {
+    window.localStorage.setItem(
+      "comment-draft:b1:root",
+      JSON.stringify({ body: "written before the fix", savedAt: Date.now() }),
+    );
+
+    renderForm({ ...defaultProps, viewerId: "A" });
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem("comment-draft:b1:root")).toBeNull();
+    });
+    expect(bodyTextarea().value).toBe("");
   });
 });

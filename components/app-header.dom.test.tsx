@@ -3,6 +3,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { switchActiveRoleAction } from "@/app/actions/auth";
+import { selectTenantAction } from "@/app/(app)/tenants/actions";
+import { labelInNameMismatches } from "@/lib/a11y/label-in-name";
 import { AppHeader } from "./app-header";
 
 vi.mock("next/image", () => ({
@@ -13,8 +15,8 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/issues",
 }));
 
-vi.mock("@/app/(app)/projects/actions", () => ({
-  switchProjectAction: vi.fn(),
+vi.mock("@/app/(app)/tenants/actions", () => ({
+  selectTenantAction: vi.fn(),
 }));
 
 vi.mock("@/app/actions/auth", () => ({
@@ -27,6 +29,7 @@ vi.mock("@/app/actions/settings", () => ({
 }));
 
 const switchRole = vi.mocked(switchActiveRoleAction);
+const selectTenant = vi.mocked(selectTenantAction);
 
 afterEach(() => cleanup());
 
@@ -43,8 +46,8 @@ function renderHeader(props?: Partial<Parameters<typeof AppHeader>[0]>) {
         role: "super_admin" as const,
         isRealSuperAdmin: true,
         isRealAdmin: true,
-        projects: [{ id: "p1", name: "Ziki", slug: "ziki" }],
-        activeProjectId: "p1",
+        workspaces: [{ id: "t1", name: "Ziki", slug: "ziki" }],
+        activeTenantId: "t1",
         ...props,
       }}
     />,
@@ -74,27 +77,79 @@ describe("account menu role switch", () => {
     expect(switchRole).toHaveBeenCalledWith("user", `${window.location.pathname}${window.location.search}`);
   });
 
-  it("renders Escalations navigation tab with pending count badge (#763)", () => {
+  it("renders Escalations as a link, with the pending count (#763)", () => {
     renderHeader({ pendingEscalationsCount: 5 });
-    const escalationsLink = screen.getAllByRole("link", { name: /escalations/i })[0];
-    expect(escalationsLink).toBeTruthy();
-    expect(escalationsLink.getAttribute("href")).toBe("/escalations");
-    expect(screen.getByLabelText("5 pending")).toBeTruthy();
+    const link = screen.getByRole("link", { name: /escalations/i });
+    expect(link.getAttribute("href")).toBe("/escalations");
+    expect(screen.getAllByLabelText("5 pending").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /agents/i })).toBeNull();
   });
 
-  it("renders Manage Project dropdown and displays grouped links (#761)", async () => {
-    const user = userEvent.setup();
+  it("does not put a Workspace menu in the bar", () => {
     renderHeader();
+    expect(screen.queryByRole("button", { name: "Workspace" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Workspace" })).toBeNull();
+  });
 
-    const manageBtn = screen.getByRole("button", { name: /manage project/i });
-    expect(manageBtn).toBeTruthy();
+  it("shows this person's points in the bar", () => {
+    renderHeader({ userId: "ada", points: 128, solvedTasks: 4 });
+    const link = screen.getByRole("link", { name: /128 pts of 500, 4 solved/i });
+    expect(link.getAttribute("href")).toBe("/users/ada");
+    expect(link.textContent).toContain("128");
+  });
 
-    await user.click(manageBtn);
+  it("keeps each control's visible text inside its accessible name", () => {
+    const { container } = renderHeader({
+      userId: "ada",
+      points: 0,
+      solvedTasks: 0,
+      unreadCount: 3,
+      pendingEscalationsCount: 5,
+    });
+    expect(labelInNameMismatches(container)).toEqual([]);
+    const workspace = screen.getByRole("button", { name: /active workspace, ziki/i });
+    expect(workspace.getAttribute("aria-label")).toBeNull();
+    expect(workspace.textContent).toContain("Ziki");
+  });
 
-    expect(screen.getByRole("menuitem", { name: /projects/i })).toBeTruthy();
-    expect(screen.getByRole("menuitem", { name: /milestones/i })).toBeTruthy();
-    expect(screen.getByRole("menuitem", { name: /platforms/i })).toBeTruthy();
-    expect(screen.getByRole("menuitem", { name: /types/i })).toBeTruthy();
+  it("switches the active workspace as soon as one is chosen", async () => {
+    const user = userEvent.setup();
+    renderHeader({
+      workspaces: [
+        { id: "t1", name: "Ziki", slug: "ziki" },
+        { id: "t2", name: "Acme", slug: "acme" },
+      ],
+      activeTenantId: "t1",
+    });
+
+    await user.click(screen.getByRole("button", { name: /active workspace, ziki/i }));
+    await user.click(screen.getByRole("option", { name: "Acme" }));
+
+    expect(selectTenant).toHaveBeenCalledTimes(1);
+    const data = selectTenant.mock.calls[0][0] as FormData;
+    expect(data.get("tenantId")).toBe("t2");
+  });
+
+  it("links to workspaces when the person has none", () => {
+    renderHeader({ workspaces: [], activeTenantId: null });
+    expect(screen.queryByRole("button", { name: /active workspace/i })).toBeNull();
+    expect(screen.getByRole("link", { name: "Workspaces" }).getAttribute("href")).toBe("/tenants");
+  });
+
+  it("shows the slug when two workspaces share a name", async () => {
+    const user = userEvent.setup();
+    renderHeader({
+      workspaces: [
+        { id: "t1", name: "Acme", slug: "acme" },
+        { id: "t2", name: "Acme", slug: "acme-eu" },
+      ],
+      activeTenantId: "t1",
+    });
+    const trigger = screen.getByRole("button", { name: /active workspace, acme \(acme\)/i });
+    expect(trigger.getAttribute("aria-label")).toBeNull();
+    await user.click(trigger);
+    expect(screen.getByRole("option", { name: "Acme (acme)" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Acme (acme-eu)" })).toBeTruthy();
   });
 
   it("renders Docs & /llms.txt link in the account menu (#625)", async () => {

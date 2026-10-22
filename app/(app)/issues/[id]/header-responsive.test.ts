@@ -51,15 +51,22 @@ describe("Bug detail header responsive layout (#698)", () => {
     expect(contentsSpan![1]).not.toMatch(/bug\.type|bug\.category|voteCount/);
   });
 
-  it("anchors the desktop action cluster to the title's top edge (#687)", () => {
-    // The back-link sits above the title, so the action cluster needs enough
-    // top padding to clear it and share the title's top edge.
+  it("anchors the desktop action cluster to the title's top edge (#687, #451)", () => {
+    // The back arrow now sits inline with the title, so the action cluster
+    // shares the title's top edge without a separate back-link row to clear.
     expect(pageSource).toContain(
-      '<div className="flex shrink-0 flex-wrap items-center gap-2 self-start sm:pt-9 print:hidden">'
+      '<div className="flex shrink-0 flex-wrap items-center gap-2 self-start print:hidden">'
     );
+    expect(pageSource).not.toContain("← Back to issues");
 
     // Danger zone remains at the bottom of the page
     expect(pageSource).toMatch(/Danger zone[\s\S]*?<DeleteIssueButton/);
+  });
+
+  it("places the back arrow beside the issue number with an accessible name (#451)", () => {
+    expect(pageSource).toMatch(
+      /<div className="flex items-start gap-2">[\s\S]*?href="\/issues"[\s\S]*?aria-label="Back to issues"[\s\S]*?<h1/
+    );
   });
 });
 

@@ -306,7 +306,7 @@ describe("createTenant (#444)", () => {
     const db = tenantDb();
     expect(await createTenant(db as never, { id: "ada" }, { name: " a " })).toEqual({
       ok: false,
-      error: "Tenant name must be at least 2 characters.",
+      error: "Workspace name must be at least 2 characters.",
       field: "name",
     });
     expect(await createTenant(db as never, { id: "ada" }, { name: "x".repeat(61) })).toMatchObject({
@@ -330,7 +330,7 @@ describe("createTenant (#444)", () => {
     const db = tenantDb();
     expect(await createTenant(db as never, { id: "ada" }, { name: "<b>Évil</b> Co" })).toEqual({
       ok: false,
-      error: "Tenant name can't contain < or >.",
+      error: "Workspace name can't contain < or >.",
       field: "name",
     });
     expect(await createTenant(db as never, { id: "ada" }, { name: "Acme", projectName: "<script>" })).toMatchObject({
@@ -350,7 +350,7 @@ describe("createTenant (#444)", () => {
       ok: false,
       field: "name",
       duplicateName: "acme",
-      error: `You're already in a tenant called "Acme" (acme). Choose another name, or select Create anyway to have both.`,
+      error: `You're already in an organization called "Acme" (acme). Choose another name, or select Create anyway to have both.`,
     });
     expect(db.membership.findFirst.mock.calls[0]![0]).toMatchObject({
       where: { userId: "ada", tenant: { name: { equals: "acme", mode: "insensitive" } } },
@@ -511,7 +511,7 @@ describe("tenant lifecycle (#573)", () => {
     const invalid = lifecycleDb();
     expect(await renameTenant(invalid as never, "ada", ACME.id, "A")).toMatchObject({
       ok: false,
-      error: "Tenant name must be at least 2 characters.",
+      error: "Workspace name must be at least 2 characters.",
     });
     expect(invalid.update).not.toHaveBeenCalled();
   });

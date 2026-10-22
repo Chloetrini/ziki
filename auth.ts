@@ -13,6 +13,7 @@ import { clientIpFrom, consumeAuthRateLimit } from "@/lib/rate-limit";
 import { TwoFactorInvalidError, TwoFactorRequiredError } from "@/lib/auth-errors";
 import { isTwoFactorEnabled, verifySecondFactor } from "@/lib/two-factor";
 import { googleSignInBlockedByTwoFactor } from "@/lib/google-two-factor";
+import { acceptedSessionRefresh } from "@/lib/session-refresh";
 
 const googleClientId = cleanEnv(
   process.env.GOOGLE_CLIENT_ID || process.env.AUTH_GOOGLE_ID,
@@ -41,7 +42,7 @@ if (process.env.NODE_ENV !== "test") {
   }
 }
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+export const { handlers, auth, signIn, signOut, unstable_update: updateSession } = NextAuth({
   ...authConfig,
   providers: [
     ...(googleConfigured
@@ -145,7 +146,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
       return true;
     },
-    async jwt({ token, user, account, profile }) {
+    async jwt({ token, user, account, profile, trigger, session }) {
       if (account?.provider === "google") {
         const email =
           typeof profile?.email === "string"
@@ -220,6 +221,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
       if (typeof user?.sessionVersion === "number") {
         token.sv = user.sessionVersion;
+      }
+
+      // The session that signed the others out keeps working (Ziki #389). Only a
+      // server-signed refresh moves the version; see lib/session-refresh.ts.
+      if (trigger === "update") {
+        const refreshed = acceptedSessionRefresh(token, session);
+        if (refreshed !== null) token.sv = refreshed;
       }
 
       // Keep a stale token (#655). Edge middleware never reads the database, so

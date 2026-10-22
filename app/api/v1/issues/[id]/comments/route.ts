@@ -1,3 +1,4 @@
+import { createMethodNotAllowed, createOptions } from "@/lib/agent-api/http-errors";
 import { NextResponse, type NextRequest } from "next/server";
 import { agentIssueRequest, commentOnAgentIssue, listAgentIssueComments, issueProject } from "@/lib/agent-api/issues";
 
@@ -19,3 +20,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     return NextResponse.json(await listAgentIssueComments(scope, id, request.nextUrl.searchParams));
   });
 }
+
+const apiMethodNotAllowed = createMethodNotAllowed(["GET", "HEAD", "POST", "OPTIONS"]);
+const apiOptions = createOptions(["GET", "HEAD", "POST", "OPTIONS"]);
+export const PUT = apiMethodNotAllowed;
+export const PATCH = apiMethodNotAllowed;
+export const DELETE = apiMethodNotAllowed;
+export const OPTIONS = apiOptions;

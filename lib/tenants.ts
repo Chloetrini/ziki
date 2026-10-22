@@ -297,7 +297,7 @@ function nameRules(label: string, { optional = false } = {}) {
 export const tenantNameSchema = z
   .string()
   .transform(collapse)
-  .pipe(nameRules("Tenant name"));
+  .pipe(nameRules("Workspace name"));
 
 export const createTenantSchema = z.object({
   name: tenantNameSchema,
@@ -401,7 +401,7 @@ export async function createTenant(
     const issue = parsed.error.issues[0];
     return {
       ok: false,
-      error: issue?.message ?? "Check the tenant's name.",
+      error: issue?.message ?? "Check the organization's name.",
       field: issue?.path[0] === "projectName" ? "projectName" : "name",
     };
   }
@@ -423,7 +423,7 @@ export async function createTenant(
         ok: false,
         field: "name",
         duplicateName: name,
-        error: `You're already in a tenant called "${same.tenant.name}" (${same.tenant.slug}). Choose another name, or select Create anyway to have both.`,
+        error: `You're already in an organization called "${same.tenant.name}" (${same.tenant.slug}). Choose another name, or select Create anyway to have both.`,
       };
     }
   }
@@ -454,7 +454,7 @@ export async function createTenant(
       throw error;
     }
   }
-  return { ok: false, error: "Couldn't create that tenant. Try a different name.", field: "name" };
+  return { ok: false, error: "Couldn't create that organization. Try a different name.", field: "name" };
 }
 
 // ---------------------------------------------------------------------------
@@ -492,12 +492,12 @@ export async function renameTenant(
 ): Promise<TenantLifecycleResult> {
   const parsed = tenantNameSchema.safeParse(typeof name === "string" ? name : "");
   if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the tenant's name." };
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the organization's name." };
   }
 
   const tenant = await ownerTenant(db, userId, tenantId);
-  if (!tenant) return { ok: false, error: "Only the tenant's owner can rename it." };
-  if (tenant.archivedAt) return { ok: false, error: "Restore this tenant before renaming it." };
+  if (!tenant) return { ok: false, error: "Only the organization's owner can rename it." };
+  if (tenant.archivedAt) return { ok: false, error: "Restore this organization before renaming it." };
 
   await db.tenant.update({ where: { id: tenant.id }, data: { name: parsed.data } });
   return { ok: true, tenant: { ...tenant, name: parsed.data } };
@@ -515,7 +515,7 @@ export async function setTenantArchived(
   archived: boolean,
 ): Promise<TenantLifecycleResult> {
   const tenant = await ownerTenant(db, userId, tenantId);
-  if (!tenant) return { ok: false, error: "Only the tenant's owner can archive it." };
+  if (!tenant) return { ok: false, error: "Only the organization's owner can archive it." };
   if (archived && tenant.slug === ZEDU_SLUG) {
     return { ok: false, error: "Zedu is the default workspace and can't be archived." };
   }
@@ -537,7 +537,7 @@ export async function deleteTenant(
   confirmName: unknown,
 ): Promise<TenantLifecycleResult> {
   const tenant = await ownerTenant(db, userId, tenantId);
-  if (!tenant) return { ok: false, error: "Only the tenant's owner can delete it." };
+  if (!tenant) return { ok: false, error: "Only the organization's owner can delete it." };
   if (tenant.slug === ZEDU_SLUG) {
     return { ok: false, error: "Zedu is the default workspace and can't be deleted." };
   }
@@ -546,26 +546,26 @@ export async function deleteTenant(
     where: { id: tenant.id },
     select: { _count: { select: { bugs: true, agents: true, memberships: true } } },
   });
-  if (!counts) return { ok: false, error: "That tenant no longer exists." };
+  if (!counts) return { ok: false, error: "That organization no longer exists." };
 
   const { bugs, agents, memberships } = counts._count;
   if (bugs > 0 || agents > 0 || memberships > 1) {
     return {
       ok: false,
-      error: "This tenant still has issues, agents or other members. Archive it instead.",
+      error: "This organization still has issues, agents or other members. Archive it instead.",
     };
   }
 
   const typed = typeof confirmName === "string" ? confirmName.trim() : "";
   if (typed !== tenant.name) {
-    return { ok: false, error: "Type the tenant's name exactly to confirm." };
+    return { ok: false, error: "Type the organization's name exactly to confirm." };
   }
 
   try {
     await db.tenant.delete({ where: { id: tenant.id } });
   } catch (error) {
     console.error("[tenants] deleteTenant failed", error);
-    return { ok: false, error: "Couldn't delete this tenant. Archive it instead." };
+    return { ok: false, error: "Couldn't delete this organization. Archive it instead." };
   }
   return { ok: true, tenant };
 }
@@ -611,7 +611,7 @@ export async function promoteFirstZeduOwner(
   }
 
   const zedu = await db.tenant.findUnique({ where: { slug: ZEDU_SLUG }, select: { id: true } });
-  if (!zedu) return { ok: false, error: "There's no Zedu tenant yet. Run the database migrations." };
+  if (!zedu) return { ok: false, error: "There's no Zedu organization yet. Run the database migrations." };
 
   const owners = await db.membership.count({ where: { tenantId: zedu.id, role: "owner" } });
   if (owners > 0) return { ok: false, error: "Zedu already has an owner." };

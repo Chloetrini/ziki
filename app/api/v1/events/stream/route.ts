@@ -1,3 +1,4 @@
+import { createMethodNotAllowed, createOptions } from "@/lib/agent-api/http-errors";
 import { NextResponse, type NextRequest } from "next/server";
 import { parseEventFilters, parseEventCursor } from "@/lib/agent-api/events";
 import { eventStreamBus, type StreamEvent } from "@/lib/events/stream-bus";
@@ -205,3 +206,11 @@ async function replayMissedEvents(
     return null;
   }
 }
+
+const apiMethodNotAllowed = createMethodNotAllowed(["GET", "HEAD", "OPTIONS"]);
+const apiOptions = createOptions(["GET", "HEAD", "OPTIONS"]);
+export const POST = apiMethodNotAllowed;
+export const PUT = apiMethodNotAllowed;
+export const PATCH = apiMethodNotAllowed;
+export const DELETE = apiMethodNotAllowed;
+export const OPTIONS = apiOptions;

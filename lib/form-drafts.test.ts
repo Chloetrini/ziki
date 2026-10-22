@@ -194,6 +194,11 @@ describe("form-drafts pure helpers (#106)", () => {
       mockStorage["draft:user-1:bug:new"] = JSON.stringify({ values: {}, updatedAt: 1000 });
       mockStorage["draft:user-1:comment:b1:root"] = JSON.stringify({ values: {}, updatedAt: 1000 });
       mockStorage["draft:user-2:bug:new"] = JSON.stringify({ values: {}, updatedAt: 1000 });
+      // Comment drafts live under their own prefix and were missed before #481.
+      mockStorage["comment-draft:user-1:b1:root"] = JSON.stringify({ body: "A root", savedAt: 1000 });
+      mockStorage["comment-draft:user-1:b1:c9"] = JSON.stringify({ body: "A reply", savedAt: 1000 });
+      mockStorage["comment-draft:user-2:b1:root"] = JSON.stringify({ body: "B root", savedAt: 1000 });
+      mockStorage["comment-draft:b1:root"] = JSON.stringify({ body: "legacy", savedAt: 1000 });
       mockStorage["unrelated_key"] = "test";
 
       clearUserDrafts("user-1");
@@ -201,6 +206,10 @@ describe("form-drafts pure helpers (#106)", () => {
       expect(mockStorage["draft:user-1:bug:new"]).toBeUndefined();
       expect(mockStorage["draft:user-1:comment:b1:root"]).toBeUndefined();
       expect(mockStorage["draft:user-2:bug:new"]).toBeDefined();
+      expect(mockStorage["comment-draft:user-1:b1:root"]).toBeUndefined();
+      expect(mockStorage["comment-draft:user-1:b1:c9"]).toBeUndefined();
+      expect(mockStorage["comment-draft:user-2:b1:root"]).toBeDefined();
+      expect(mockStorage["comment-draft:b1:root"]).toBeUndefined();
       expect(mockStorage["unrelated_key"]).toBeDefined();
     });
   });

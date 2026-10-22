@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { databaseErrorReason } from "@/lib/db-error";
 import { prisma } from "@/lib/prisma";
 import {
   DEFAULT_PROJECT_WORKFLOW,
@@ -36,19 +37,28 @@ export async function workflowFor(
     return { ...DEFAULT_PROJECT_WORKFLOW };
   }
 
-  const row = (await delegate.findUnique({
-    where: { projectId },
-    select: {
-      confirmationsNeeded: true,
-      verdictsNeeded: true,
-      offerWindowSeconds: true,
-      heartbeatMinutes: true,
-      deliveryMinutes: true,
-      maxActiveClaims: true,
-      volunteerWindowSeconds: true,
-      autoMerge: true,
-    },
-  })) as Partial<ProjectWorkflowValues> | null;
+  let row: Partial<ProjectWorkflowValues> | null;
+  try {
+    row = (await delegate.findUnique({
+      where: { projectId },
+      select: {
+        confirmationsNeeded: true,
+        verdictsNeeded: true,
+        offerWindowSeconds: true,
+        heartbeatMinutes: true,
+        deliveryMinutes: true,
+        maxActiveClaims: true,
+        volunteerWindowSeconds: true,
+        autoMerge: true,
+      },
+    })) as Partial<ProjectWorkflowValues> | null;
+  } catch (error) {
+    // The team page reads this for every member. A database that has not
+    // created ProjectWorkflow yet must use the defaults, not take the page down.
+    if (!databaseErrorReason(error)) throw error;
+    console.error("[workflow] project workflow is unavailable", error);
+    return { ...DEFAULT_PROJECT_WORKFLOW };
+  }
 
   // Never cache a missing row: creating the row later should take effect at
   // once, not after the TTL.

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { currentTenantIdFor } from "@/lib/tenant-context";
@@ -7,6 +8,11 @@ import { TARGET_POINTS } from "@/lib/points/rules";
 import { Avatar } from "@/components/avatar";
 
 export const metadata = { title: "Leaderboard" };
+
+/** One shape for every leaderboard link, so the redirect and Previous/Next agree. */
+function leaderboardHref(page: number, limit: number): string {
+  return `/leaderboard?page=${page}&limit=${limit}`;
+}
 
 /** Members of the current tenant ranked by points (#428, #657). */
 export default async function LeaderboardPage({
@@ -23,6 +29,10 @@ export default async function LeaderboardPage({
   const { entries: rows, total, totalPages } = tenantId
     ? await paginatedTenantLeaderboard(prisma, tenantId, { page, limit })
     : { entries: [], total: 0, totalPages: 0 };
+
+  // A page past the end (an old link, a hand-edited URL) would otherwise show
+  // "No points yet" on a leaderboard that has points. Send it to the last page.
+  if (total > 0 && page > totalPages) redirect(leaderboardHref(totalPages, limit));
 
   const startIdx = total === 0 ? 0 : (page - 1) * limit + 1;
   const endIdx = Math.min(page * limit, total);
@@ -79,13 +89,13 @@ export default async function LeaderboardPage({
               <div className="flex items-center gap-2">
                 {page > 1 ? (
                   <Link
-                    href={`/leaderboard?page=${page - 1}&limit=${limit}`}
+                    href={leaderboardHref(page - 1, limit)}
                     className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
                     Previous
                   </Link>
                 ) : (
-                  <span className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-400 cursor-not-allowed">
+                  <span aria-disabled="true" className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-400 cursor-not-allowed">
                     Previous
                   </span>
                 )}
@@ -94,13 +104,13 @@ export default async function LeaderboardPage({
                 </span>
                 {page < totalPages ? (
                   <Link
-                    href={`/leaderboard?page=${page + 1}&limit=${limit}`}
+                    href={leaderboardHref(page + 1, limit)}
                     className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
                     Next
                   </Link>
                 ) : (
-                  <span className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-400 cursor-not-allowed">
+                  <span aria-disabled="true" className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-400 cursor-not-allowed">
                     Next
                   </span>
                 )}

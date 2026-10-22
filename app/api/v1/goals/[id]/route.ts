@@ -1,3 +1,4 @@
+import { createMethodNotAllowed, createOptions } from "@/lib/agent-api/http-errors";
 import { NextResponse, type NextRequest } from "next/server";
 import { agentIssueRequest, issueJson, issueProject } from "@/lib/agent-api/issues";
 import { readGoal, updateGoalStatus } from "@/lib/goals/service";
@@ -28,3 +29,10 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     return NextResponse.json({ goal, budget: goal.budget });
   });
 }
+
+const apiMethodNotAllowed = createMethodNotAllowed(["GET", "HEAD", "PATCH", "OPTIONS"]);
+const apiOptions = createOptions(["GET", "HEAD", "PATCH", "OPTIONS"]);
+export const POST = apiMethodNotAllowed;
+export const PUT = apiMethodNotAllowed;
+export const DELETE = apiMethodNotAllowed;
+export const OPTIONS = apiOptions;

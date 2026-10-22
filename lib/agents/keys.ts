@@ -23,11 +23,42 @@ export function generateApiKey(): NewApiKey {
   return { raw, hash: hashSecret(raw), prefix: raw.slice(0, KEY_DISPLAY_LENGTH) };
 }
 
+/**
+ * Reads the token out of an `Authorization` header, or says why it could not.
+ *
+ * `missing` means there is nothing to read: no header, or a `Bearer` scheme
+ * with no token. Everything else means a header *was* sent but is unusable
+ * (#467) - a wrong scheme, or a token that is not shaped like a Ziki key
+ * (a truncated paste, a quoted key, a token with a space in it). The two are
+ * not the same problem, so callers can answer `invalid_key` instead of telling
+ * an agent that did send a key to send one.
+ */
+export type AuthorizationToken =
+  | { status: "ok"; token: string }
+  | { status: "missing" }
+  | { status: "malformed" };
+
+export function authorizationToken(header: string | null | undefined): AuthorizationToken {
+  const value = (header ?? "").trim();
+  if (!value) return { status: "missing" };
+  const parts = value.split(/\s+/);
+  const [scheme, ...rest] = parts;
+  // `Bearer` on its own is a scheme with no token: nothing was actually sent.
+  if (parts.length === 1 && scheme.toLowerCase() === "bearer") return { status: "missing" };
+  // No scheme at all (a bare or pinched value).
+  if (parts.length < 2) return { status: "malformed" };
+  // A scheme other than Bearer still means a header was sent.
+  if (scheme.toLowerCase() !== "bearer") return { status: "malformed" };
+  // A token with a space in it is malformed.
+  if (rest.length > 1) return { status: "malformed" };
+  const token = rest[0];
+  return token.startsWith(API_KEY_PREFIX) ? { status: "ok", token } : { status: "malformed" };
+}
+
 /** Reads `Authorization: Bearer <key>`. Anything else is no key. */
 export function bearerToken(header: string | null | undefined): string | null {
-  const match = /^Bearer\s+(\S+)\s*$/i.exec(header ?? "");
-  const token = match?.[1];
-  return token && token.startsWith(API_KEY_PREFIX) ? token : null;
+  const parsed = authorizationToken(header);
+  return parsed.status === "ok" ? parsed.token : null;
 }
 
 // No 0/O, 1/I/L or U: the code is read off one screen and typed into another.

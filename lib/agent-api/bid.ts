@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import type { AgentContext } from "@/lib/agents/require-agent";
+import { assertKeyProject, type AgentContext } from "@/lib/agents/require-agent";
+import { requireLevel } from "@/lib/agents/levels";
 import { isTenantAdmin } from "@/lib/agents/membership";
 import { IssueApiError } from "@/lib/agent-api/issues";
 import { isConfirmed } from "@/lib/agent-api/validation";
@@ -11,6 +12,7 @@ import { isOfferExpired } from "@/lib/agent-api/offer";
 import { assertRedesignOpen } from "@/lib/redesigns";
 import { deliveryDeadline, deliveryWindowMinutes } from "@/lib/claim-deadline";
 import { assigneeChangedSummary, statusChangedSummary } from "@/lib/activity-log";
+import { WORK_READINESS_VOTE_THRESHOLD } from "@/lib/ticket-assignment";
 import { ensureWatching } from "@/lib/watch";
 import type { AppRole } from "@/lib/roles";
 
@@ -49,11 +51,13 @@ export async function placeBid(caller: AgentContext, projectId: string, bugId: s
     if (!locked.length) throw new IssueApiError(404, "Issue not found in this project.");
     const bug = await tx.bug.findFirst({
       where: { id: bugId, tenantId: caller.tenantId, projectId, isDeleted: false },
-      select: { id: true, projectId: true, status: true },
+      select: { id: true, projectId: true, status: true, voteCount: true },
     });
     if (!bug) throw new IssueApiError(404, "Issue not found in this project.");
     if (bug.status !== "open") throw new IssueApiError(409, "Only open issues can take bids.");
-    if (!await isConfirmed(bugId, tx)) throw new IssueApiError(409, "The issue must be confirmed before an agent can bid.");
+    if (!await isConfirmed(bugId, tx) || bug.voteCount < WORK_READINESS_VOTE_THRESHOLD) {
+      throw new IssueApiError(409, "This is still an idea. Reviewers must accept it, and it needs at least 3 upvotes, before it can be passed on.");
+    }
     await assertRedesignOpen(bugId, tx);
     await competingClaim(tx, bugId);
     const activeClaims = await tx.issueClaim.count({
@@ -147,7 +151,8 @@ export async function withdrawBid(caller: AgentContext, projectId: string, bugId
  * A person picks one bid. The reporter or a tenant admin may award it.
  * The agent's owner becomes the assignee, and the bid becomes an active claim.
  */
-export async function awardBid(actor: Actor, bidId: string) {
+export async function awardBid(actor: Actor, bidId: string, dispatcher?: AgentContext) {
+  if (dispatcher) requireLevel(dispatcher, "dispatcher");
   try {
     const result = await prisma.$transaction(async (tx) => {
       const bid = await tx.issueBid.findUnique({
@@ -158,6 +163,10 @@ export async function awardBid(actor: Actor, bidId: string) {
         },
       });
       if (!bid || bid.bug.isDeleted) throw new IssueApiError(404, "Bid not found.");
+      if (dispatcher) {
+        if (dispatcher.tenantId !== bid.bug.tenantId) throw new IssueApiError(404, "Bid not found.");
+        assertKeyProject(dispatcher, bid.bug.projectId);
+      }
       const allowed = bid.bug.reporterId === actor.id || await isTenantAdmin(actor, bid.bug.tenantId);
       if (!allowed) throw new IssueApiError(403, "Only the reporter or an organization admin can award a bid.");
       const locked = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Bug" WHERE "id" = ${bid.bugId} AND "isDeleted" = false FOR UPDATE`;
@@ -166,11 +175,14 @@ export async function awardBid(actor: Actor, bidId: string) {
         where: { id: bidId },
         include: {
           beneficiary: { select: { name: true } },
-          bug: { select: { id: true, status: true, assigneeId: true, tenantId: true, projectId: true, reporterId: true, severity: true, assignee: { select: { name: true } } } },
+          bug: { select: { id: true, status: true, assigneeId: true, tenantId: true, projectId: true, reporterId: true, severity: true, voteCount: true, assignee: { select: { name: true } } } },
         },
       });
       if (!fresh || fresh.withdrawnAt || fresh.awardedAt) throw new IssueApiError(409, "This bid is no longer open.");
       if (fresh.bug.status !== "open") throw new IssueApiError(409, "Only open issues can be awarded.");
+      if (!await isConfirmed(fresh.bugId, tx) || fresh.bug.voteCount < WORK_READINESS_VOTE_THRESHOLD) {
+        throw new IssueApiError(409, "This is still an idea. Reviewers must accept it, and it needs at least 3 upvotes, before it can be passed on.");
+      }
       if (fresh.bug.assigneeId && fresh.bug.assigneeId !== fresh.beneficiaryUserId) {
         throw new IssueApiError(409, "This issue is already assigned to someone else.");
       }
@@ -206,6 +218,7 @@ export async function awardBid(actor: Actor, bidId: string) {
           bugId: fresh.bugId,
           beneficiaryUserId: fresh.beneficiaryUserId,
           agentId: fresh.agentId,
+          ...(dispatcher ? { dispatcherUserId: dispatcher.ownerId } : {}),
           status: "active",
           claimedAt: now,
           lastHeartbeatAt: now,

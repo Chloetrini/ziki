@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { revalidateIssue } from "@/lib/revalidate-issue";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { bugInTenant, currentTenantIdFor } from "@/lib/tenant-context";
@@ -237,7 +238,7 @@ export async function bulkUpdateBugsAction(
   revalidatePath("/issues");
   revalidatePath("/bugs");
   for (const id of changedIds) {
-    revalidatePath(`/issues/${id}`);
+    revalidateIssue(id);
     revalidatePath(`/bugs/${id}`);
   }
 

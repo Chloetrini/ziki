@@ -1,10 +1,14 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 export type PlatformTab = {
-  /** A category id, `"none"` for issues without a platform, or `null` for All. */
+  /** A category id, `"resolved"` for resolved issues view, or `null` for All. */
   id: string | null;
   name: string;
   count: number;
+  href?: string;
+  active?: boolean;
+  icon?: ReactNode;
 };
 
 /**
@@ -21,19 +25,20 @@ export function PlatformTabs({
   hrefFor,
 }: {
   tabs: PlatformTab[];
-  current: string | null;
-  hrefFor: (id: string | null) => string;
+  current?: string | null;
+  hrefFor?: (id: string | null) => string;
 }) {
   if (tabs.length <= 1) return null;
   return (
     <nav aria-label="Platforms" className="-mx-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <ul className="flex min-w-max items-center gap-1 border-b border-slate-200">
         {tabs.map((tab) => {
-          const active = tab.id === current;
+          const active = tab.active ?? (tab.id === current);
+          const href = tab.href ?? (hrefFor ? hrefFor(tab.id) : "#");
           return (
             <li key={tab.id ?? "all"}>
               <Link
-                href={hrefFor(tab.id)}
+                href={href}
                 aria-current={active ? "page" : undefined}
                 className={`relative inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-2 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 ${
                   active
@@ -41,6 +46,7 @@ export function PlatformTabs({
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
+                {tab.icon}
                 {tab.name}
                 <span
                   className={`rounded-full px-1.5 py-0.5 text-xs font-medium tabular-nums ${

@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
-import type { z } from "zod";
+import { z } from "zod";
 import { TOOLS } from "../../packages/mcp-server/src/tools";
-import { agentQuestionSchema } from "@/lib/agent-questions";
+import { agentEscalationSchema, agentQuestionSchema } from "@/lib/agent-questions";
 import { commentSchema, createBugSchema } from "@/lib/validations/issue";
+import { createGoalSchema, splitGoalPoolSchema, updateGoalStatusSchema } from "@/lib/validations/goal";
+import { createJobSchema, jobReviewSchema, submitJobSchema } from "@/lib/validations/job";
+import { redesignSchema } from "@/lib/redesigns";
+import { missionCoverageSchema, nextMissionSchema } from "@/lib/missions";
 import { bidSchema } from "./bid";
+import { claimSchema } from "./claim";
 import { extendSchema } from "./deadline";
+import { interestSchema } from "./interest";
+import { releaseSchema } from "./offer";
+import { structureInputSchema } from "./structure";
 import { testVerdictBodySchema } from "./test-verdict";
 import { validationBodySchema } from "./validation";
 
@@ -22,6 +30,20 @@ const ROUTE_SCHEMAS: Record<string, z.ZodType> = {
   ziki_validate_issue: validationBodySchema,
   ziki_submit_test_result: testVerdictBodySchema,
   ziki_ask_owner: agentQuestionSchema,
+  ziki_escalate: agentEscalationSchema,
+  ziki_claim_issue: claimSchema,
+  ziki_release_claim: releaseSchema,
+  ziki_structure_issue: structureInputSchema,
+  ziki_register_interest: interestSchema,
+  ziki_create_goal: createGoalSchema,
+  ziki_update_goal: updateGoalStatusSchema,
+  ziki_split_goal: splitGoalPoolSchema,
+  ziki_create_job: createJobSchema,
+  ziki_submit_job: submitJobSchema,
+  ziki_review_job_submission: jobReviewSchema,
+  ziki_propose_redesign: redesignSchema,
+  ziki_next_mission: nextMissionSchema,
+  ziki_cover_mission: missionCoverageSchema.extend({ projectId: z.string().trim().min(1) }),
 };
 
 // The agent routes extend the shared issue and comment schemas with attachmentIds (lib/agent-api/issues.ts).
@@ -36,7 +58,15 @@ const NOT_OFFERED_TO_AGENTS: Record<string, readonly string[]> = {
 // Fields the route doesn't take from the body: the tool puts them in the path or query.
 const NOT_BODY = new Set(["projectId", "id"]);
 
-const shapeOf = (schema: z.ZodType) => (schema as unknown as { shape: Record<string, z.ZodType> }).shape;
+/** Zod objects and objects wrapped in superRefine both expose the field map. */
+const shapeOf = (schema: z.ZodType) => {
+  let current: unknown = schema;
+  for (let hop = 0; hop < 4 && current && typeof current === "object" && !("shape" in current); hop += 1) {
+    current = (current as { def?: { schema?: unknown }; _def?: { schema?: unknown } }).def?.schema
+      ?? (current as { _def?: { schema?: unknown } })._def?.schema;
+  }
+  return (current as { shape: Record<string, z.ZodType> }).shape;
+};
 const isRequired = (field: z.ZodType) => !field.safeParse(undefined).success;
 
 describe("MCP tools match the route body schemas", () => {
@@ -71,8 +101,15 @@ describe("MCP tools match the route body schemas", () => {
 
   it("covers every tool that posts a JSON body to a route with an exported schema", () => {
     const bodyTools = TOOLS.filter((tool) => tool.body?.length).map((tool) => tool.name);
-    // github, inbox/read and attachments have no exported body schema to compare.
+    // These bodies are declared on the route file, not as an exported schema.
     const unchecked = bodyTools.filter((name) => !(name in ROUTE_SCHEMAS));
-    expect(unchecked.sort()).toEqual(["ziki_link_pull_request", "ziki_mark_inbox_read"]);
+    expect(unchecked.sort()).toEqual([
+      "ziki_collect_pairing_token",
+      "ziki_create_webhook",
+      "ziki_link_pull_request",
+      "ziki_mark_inbox_read",
+      "ziki_pair",
+      "ziki_update_webhook",
+    ]);
   });
 });

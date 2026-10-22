@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { revalidateIssue } from "@/lib/revalidate-issue";
 import { prisma } from "@/lib/prisma";
 import { bugInTenant, currentTenantIdFor } from "@/lib/tenant-context";
 import { requireUser } from "@/lib/auth-helpers";
@@ -23,7 +24,7 @@ export async function setWatchingAction(
     create: { userId: user.id, bugId, watching: Boolean(watching) },
     update: { watching: Boolean(watching) },
   });
-  revalidatePath(`/issues/${bugId}`);
+  revalidateIssue(bugId);
   revalidatePath("/issues");
   revalidatePath(`/bugs/${bugId}`);
   // The "Issues I'm watching" list (#312).

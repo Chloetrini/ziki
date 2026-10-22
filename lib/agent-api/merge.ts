@@ -7,18 +7,15 @@ import type { AgentContext } from "@/lib/agents/require-agent";
 import { IssueApiError } from "@/lib/agent-api/issues";
 import { publish } from "@/lib/agent-api/events";
 import { isConfirmed } from "@/lib/agent-api/validation";
-import { award } from "@/lib/points/award";
-import {
-  MAX_REWARDED_REVIEWERS,
-  pointSourceKey,
-} from "@/lib/points/rules";
+import { award, awardDispatcher } from "@/lib/points/award";
+import { pointSourceKey, reviewerPointsAt } from "@/lib/points/rules";
 import {
   calculateReviewerPoints,
   calculateSolverPoints,
   getProjectRewardConfig,
 } from "@/lib/points/project-rewards";
 import { assertRedesignOpen } from "@/lib/redesigns";
-import { statusChangedSummary } from "@/lib/activity-log";
+import { statusChangedSummary, commentedSummary, commentPreview } from "@/lib/activity-log";
 import { workflowFor } from "@/lib/workflow";
 
 /**
@@ -54,6 +51,7 @@ const mergeBugSelect = {
       releasedAt: true,
       agentId: true,
       beneficiaryUserId: true,
+      dispatcherUserId: true,
       agent: { select: { ownerUserId: true } },
     },
   },
@@ -190,7 +188,7 @@ export async function acceptFix(agent: AgentContext, bugId: string): Promise<Acc
       };
     }
 
-    const rewardedReviewerUserIds = reviewers.slice(0, MAX_REWARDED_REVIEWERS);
+    const rewardedReviewerUserIds = reviewers;
     const solverUserId = claim?.beneficiaryUserId ?? bug.assigneeId;
 
     await tx.bug.update({ where: { id: bug.id }, data: { status: "resolved" } });
@@ -212,6 +210,31 @@ export async function acceptFix(agent: AgentContext, bugId: string): Promise<Acc
       data: { status: "released", releasedAt: new Date(), releaseReason: "resolved" },
     });
 
+    // #458: a merger's acceptance is a decision other people read on the
+    // issue, not only an audit row — leave a plain comment saying it merged,
+    // the same way any other agent comment is recorded, so the thread itself
+    // shows the merge without anyone having to read the audit log.
+    const mergeCommentBody = "Fix accepted and merged by a merger agent.";
+    const mergeComment = await tx.comment.create({
+      data: {
+        bugId: bug.id,
+        authorId: agent.ownerId,
+        agentId: agent.agentId,
+        body: mergeCommentBody,
+        type: "comment",
+      },
+      select: { id: true },
+    });
+    await tx.bugActivity.create({
+      data: {
+        bugId: bug.id,
+        actorId: agent.ownerId,
+        type: "commented",
+        summary: commentedSummary(mergeCommentBody),
+        metadata: { commentId: mergeComment.id, commentPreview: commentPreview(mergeCommentBody) },
+      },
+    });
+
     // The solver: the person the active claim is for, else whoever it is
     // assigned to. The sourceKey makes a second accept, or the backfill
     // (#435), a no-op.
@@ -226,14 +249,15 @@ export async function acceptFix(agent: AgentContext, bugId: string): Promise<Acc
         sourceKey: pointSourceKey("solver", bug.id, solverUserId),
       });
     }
+    await awardDispatcher(tx, bug, claim.dispatcherUserId);
     const reviewerPoints = calculateReviewerPoints(rewardConfig);
-    for (const userId of rewardedReviewerUserIds) {
+    for (const [index, userId] of rewardedReviewerUserIds.entries()) {
       await award(tx, {
         tenantId: bug.tenantId,
         userId,
         bugId: bug.id,
         role: "reviewer",
-        points: reviewerPoints,
+        points: reviewerPointsAt(index, reviewerPoints),
         sourceKey: pointSourceKey("reviewer", bug.id, userId),
       });
     }

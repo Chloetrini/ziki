@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/auth-helpers";
 import { isAdmin } from "@/lib/roles";
 import { currentTenantIdFor } from "@/lib/tenant-context";
 import { loadMilestoneSummaries, type MilestoneSummary } from "@/lib/milestone-stats";
-import { dueDateValue } from "@/lib/milestones";
+import { dueDateValue, milestoneIssuesHref } from "@/lib/milestones";
 import { MilestoneProgressBar } from "@/components/milestone-progress";
 import { MilestoneDue } from "@/components/milestone-due";
 
@@ -22,7 +22,7 @@ function MilestoneCard({ m }: { m: MilestoneSummary }) {
         <MilestoneProgressBar progress={m.progress} label={m.title} />
       </div>
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-        <Link href={`/issues?milestone=${m.id}`} className="font-medium text-teal-700 hover:underline">
+        <Link href={milestoneIssuesHref(m.id)} className="font-medium text-teal-700 hover:underline">
           All {m.progress.total} issue{m.progress.total === 1 ? "" : "s"}
         </Link>
         {/* No link: "left" spans open and in progress, which no single

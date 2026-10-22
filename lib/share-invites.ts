@@ -16,7 +16,7 @@ import { absoluteUrl } from "@/lib/site-url";
  * lasts and how many people may use it. Opening it and signing in with
  * Google (or any other sign-in) adds that account to the tenant as a member.
  *
- * The raw token is sealed with AUTH_SECRET so owners can copy it again.
+ * The raw token is sealed with NEXTAUTH_SECRET so owners can copy it again.
  * Acceptance looks up the SHA-256 hash. A mail scanner that only GETs the
  * page cannot spend a use; joining is a POST from the signed-in account.
  */

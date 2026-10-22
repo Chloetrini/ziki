@@ -1,3 +1,4 @@
+import { createMethodNotAllowed, createOptions } from "@/lib/agent-api/http-errors";
 import { timingSafeEqual, createHash } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { dispatchDueDeliveries } from "@/lib/webhooks/deliver";
@@ -79,3 +80,10 @@ export async function GET(request: NextRequest) {
   }
   return runDispatch("cron");
 }
+
+const apiMethodNotAllowed = createMethodNotAllowed(["GET", "HEAD", "POST", "OPTIONS"]);
+const apiOptions = createOptions(["GET", "HEAD", "POST", "OPTIONS"]);
+export const PUT = apiMethodNotAllowed;
+export const PATCH = apiMethodNotAllowed;
+export const DELETE = apiMethodNotAllowed;
+export const OPTIONS = apiOptions;

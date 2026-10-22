@@ -5,11 +5,31 @@ import { defaultProjectIdFor } from "@/lib/tenant-context";
 import { projectAreaFilterWhere } from "@/lib/project-area-filter";
 
 export type FeedCursor = { after: string; afterId: string };
+/** The historical page size, kept as the default so pollers are not broken. */
 export const FEED_PAGE_SIZE = 50;
+/** Documented ceiling; a larger `limit` is clamped to this rather than rejected. */
+export const FEED_MAX_PAGE_SIZE = 100;
 
 export class FeedInputError extends Error {}
 
 const timestampSchema = z.iso.datetime({ offset: true });
+
+/**
+ * `limit` was documented for /feed but ignored (#469). A missing value keeps
+ * the old page size, a number is clamped to 1..100, and anything that is not a
+ * whole number is a caller error rather than a silent fallback.
+ */
+export function parseFeedLimit(params: URLSearchParams): number {
+  const raw = params.get("limit");
+  if (raw === null) return FEED_PAGE_SIZE;
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    throw new FeedInputError(
+      `limit must be a whole number between 1 and ${FEED_MAX_PAGE_SIZE}; the default is ${FEED_PAGE_SIZE}.`,
+    );
+  }
+  return Math.min(Math.max(Number(trimmed), 1), FEED_MAX_PAGE_SIZE);
+}
 
 export function parseFeedCursor(params: URLSearchParams): FeedCursor | null {
   const after = params.get("after");
@@ -32,25 +52,32 @@ export function feedWhere(tenantId: string, projectId: string, cursor: FeedCurso
   };
 }
 
-/** Resolve only projects inside the caller's tenant; never trust a supplied id. */
+/**
+ * Resolve only projects inside the caller's tenant; never trust a supplied id.
+ * An empty or whitespace-only `projectId` (e.g. `?projectId=` built from an
+ * unset variable) means "not given", so it falls back to the default project
+ * as documented instead of looking up a project with id "" (#470).
+ */
 export async function feedProject(tenantId: string, requested?: string | null) {
-  const id = requested ?? await defaultProjectIdFor(prisma, tenantId);
+  const given = requested?.trim() || null;
+  const id = given ?? await defaultProjectIdFor(prisma, tenantId);
   if (!id) return null;
   return prisma.project.findFirst({ where: { id, tenantId }, select: { id: true, name: true } });
 }
 
-export async function readFeed(tenantId: string, projectId: string, cursor: FeedCursor | null, area: string | null = null) {
+export async function readFeed(tenantId: string, projectId: string, cursor: FeedCursor | null, area: string | null = null, limit: number = FEED_PAGE_SIZE) {
+  const pageSize = Math.min(Math.max(Math.trunc(limit) || FEED_PAGE_SIZE, 1), FEED_MAX_PAGE_SIZE);
   const rows = await prisma.bug.findMany({
     where: feedWhere(tenantId, projectId, cursor, area),
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    take: FEED_PAGE_SIZE + 1,
+    take: pageSize + 1,
     select: { id: true, number: true, title: true, status: true, severity: true, createdAt: true, projectId: true, areaId: true },
   });
-  const issues = rows.slice(0, FEED_PAGE_SIZE);
+  const issues = rows.slice(0, pageSize);
   const last = issues.at(-1);
   return {
     issues,
     nextCursor: last ? { after: last.createdAt.toISOString(), afterId: last.id } : cursor,
-    hasMore: rows.length > FEED_PAGE_SIZE,
+    hasMore: rows.length > pageSize,
   };
 }

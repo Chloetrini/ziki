@@ -29,7 +29,7 @@ describe("feed authentication and scope", () => {
     expect((await GET(request("?projectId=project", true))).status).toBe(200);
     expect(mocks.budget).toHaveBeenCalledWith({ id: "agent", burst: false, burstUntil: null }, "read");
     expect(mocks.audit).toHaveBeenCalled();
-    expect(mocks.read).toHaveBeenCalledWith("tenant", "project", null, null);
+    expect(mocks.read).toHaveBeenCalledWith("tenant", "project", null, null, 50);
     expect(mocks.session).not.toHaveBeenCalled();
   });
   it("allows a current session", async () => {
@@ -42,6 +42,20 @@ describe("feed authentication and scope", () => {
     mocks.session.mockResolvedValue({ error: "expired" });
     expect((await GET(request())).status).toBe(401);
     expect(mocks.read).not.toHaveBeenCalled();
+  });
+
+  it("passes a requested limit through to the feed (#469)", async () => {
+    expect((await GET(request("?projectId=project&limit=3", true))).status).toBe(200);
+    expect(mocks.read).toHaveBeenLastCalledWith("tenant", "project", null, null, 3);
+  });
+
+  it("clamps an oversized limit and rejects a non-numeric one (#469)", async () => {
+    expect((await GET(request("?projectId=project&limit=500", true))).status).toBe(200);
+    expect(mocks.read).toHaveBeenLastCalledWith("tenant", "project", null, null, 100);
+
+    const response = await GET(request("?projectId=project&limit=abc", true));
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: expect.stringContaining("limit") });
   });
   it("does not fall back to a session for an invalid key", async () => {
     mocks.requireAgent.mockRejectedValue(new AgentAuthError("invalid_key"));

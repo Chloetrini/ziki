@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient, Severity } from "@prisma/client";
-import { pointSourceKey, solverPoints, type PointRole } from "./rules";
+import { DISPATCHER_POINTS, pointSourceKey, solverPoints, type PointRole } from "./rules";
 import {
   calculateSolverPoints,
   getProjectRewardConfig,
@@ -30,6 +30,22 @@ export type PointAward = {
 export async function award(db: Db, entry: PointAward): Promise<boolean> {
   const { count } = await db.pointEntry.createMany({ data: [entry], skipDuplicates: true });
   return count > 0;
+}
+
+export async function awardDispatcher(
+  db: Db,
+  issue: { id: string; tenantId: string },
+  dispatcherUserId: string | null | undefined,
+): Promise<boolean> {
+  if (!dispatcherUserId) return false;
+  return award(db, {
+    tenantId: issue.tenantId,
+    bugId: issue.id,
+    userId: dispatcherUserId,
+    role: "dispatcher",
+    points: DISPATCHER_POINTS,
+    sourceKey: `dispatcher:${issue.id}`,
+  });
 }
 
 export type ResolvedIssue = {

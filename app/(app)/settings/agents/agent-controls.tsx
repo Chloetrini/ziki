@@ -2,7 +2,7 @@
 
 import type { AgentLevel } from "@prisma/client";
 import { useState, useTransition } from "react";
-import { regenerateAgentKeyAction, revokeAgentAction, setAgentAreaPreferencesAction, setAgentBurstAction, setAgentLevelAction } from "./actions";
+import { deleteAgentAction, regenerateAgentKeyAction, revokeAgentAction, setAgentAreaPreferencesAction, setAgentBurstAction, setAgentLevelAction } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -36,6 +36,8 @@ export function AgentControls({
   canSetBurst = false,
   areas = [],
   areaPreferences = [],
+  revoked = false,
+  personal = false,
 }: {
   agentId: string;
   agentName: string;
@@ -55,6 +57,10 @@ export function AgentControls({
   canSetBurst?: boolean;
   areas?: { id: string; name: string; projectId: string }[];
   areaPreferences?: { projectId: string; projectAreaId: string }[];
+  /** A revoked agent only offers delete. */
+  revoked?: boolean;
+  /** The automatic personal agent is created again on the next visit. */
+  personal?: boolean;
 }) {
   const toast = useToast();
   const confirm = useConfirm();
@@ -116,6 +122,22 @@ export function AgentControls({
   async function copyIssued() {
     if (!issued) return;
     toast((await copyText(issued.rawKey)) ? "Key copied." : "Couldn't copy. Select the key and copy it.");
+  }
+
+  async function remove() {
+    const ok = await confirm({
+      title: `Delete ${agentName}?`,
+      body: personal
+        ? "The agent is removed from this list and its key stops working. A new personal agent is created the next time its owner opens Agents. Issues it filed stay. This can't be undone."
+        : "The agent is removed from this list. Its key stops working, and any offer, claim, or bid it held is handed back. Issues it filed stay. This can't be undone.",
+      confirmLabel: "Delete agent",
+      tone: "danger",
+    });
+    if (!ok) return;
+    startTransition(async () => {
+      const result = await deleteAgentAction(agentId);
+      toast(result.ok ? `${agentName} was deleted.` : result.error, result.ok ? "success" : "error");
+    });
   }
 
   async function revoke() {
@@ -228,6 +250,14 @@ export function AgentControls({
     });
   }
 
+  if (revoked) {
+    return (
+      <Button type="button" variant="danger-secondary" onClick={remove} disabled={pending}>
+        Delete
+      </Button>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-2 sm:items-end">
       <div className="flex flex-wrap items-center gap-2">
@@ -328,6 +358,9 @@ export function AgentControls({
         </Button>
         <Button type="button" variant="danger-secondary" onClick={revoke} disabled={pending}>
           Revoke
+        </Button>
+        <Button type="button" variant="danger-secondary" onClick={remove} disabled={pending}>
+          Delete
         </Button>
       </div>
       {canSetBurst || burstOn ? (

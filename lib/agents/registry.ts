@@ -50,7 +50,7 @@ export type Actor = { id: string; role?: AppRole | null };
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-export type IssuedKey = { agentId: string; name: string; rawKey: string; prefix: string };
+export type IssuedKey = { agentId: string; name: string; level: AgentLevel; rawKey: string; prefix: string };
 
 /** Inserts an agent and its first key. Shared by the settings page and pairing. */
 export async function insertAgentWithKey(
@@ -68,7 +68,7 @@ export async function insertAgentWithKey(
     },
     select: { id: true, name: true },
   });
-  return { agentId: agent.id, name: agent.name, rawKey: key.raw, prefix: key.prefix };
+  return { agentId: agent.id, name: agent.name, level: input.level, rawKey: key.raw, prefix: key.prefix };
 }
 
 export type CreateAgentResult =
@@ -124,6 +124,7 @@ export async function createAgent(owner: Actor, input: unknown): Promise<CreateA
 type ManagedAgent = {
   id: string;
   name: string;
+  level: AgentLevel;
   tenantId: string;
   ownerUserId: string;
   revokedAt: Date | null;
@@ -142,7 +143,7 @@ async function projectInTenant(tenantId: string, projectId: string) {
 async function managedAgent(actor: Actor, agentId: string) {
   const agent: ManagedAgent | null = await prisma.agent.findUnique({
     where: { id: agentId },
-    select: { id: true, name: true, tenantId: true, ownerUserId: true, revokedAt: true, defaultProjectId: true },
+    select: { id: true, name: true, level: true, tenantId: true, ownerUserId: true, revokedAt: true, defaultProjectId: true },
   });
   if (!agent) return null;
   const isOwner = agent.ownerUserId === actor.id;
@@ -182,6 +183,31 @@ export async function revokeAgent(actor: Actor, agentId: string, now = new Date(
       { by: managed.isOwner ? "owner" : "tenant_admin", ...handedBack },
       { actorUserId: actor.id, db: tx },
     );
+  });
+  for (const offer of offers) {
+    notifyClaimOffered(offer);
+    scheduleOfferExpiry(offer.id);
+  }
+  return { ok: true };
+}
+
+/**
+ * Removes the agent. Open offers, claims, and bids are handed back first,
+ * then the row and its keys are deleted. Issues it filed stay.
+ */
+export async function deleteAgent(actor: Actor, agentId: string, now = new Date()): Promise<ManageResult> {
+  const managed = await managedAgent(actor, agentId);
+  if (!managed) return { ok: false, error: NOT_FOUND };
+  let offers: Awaited<ReturnType<typeof releaseWorkOfRevokedAgent>>["offers"] = [];
+  await prisma.$transaction(async (tx) => {
+    const released = await releaseWorkOfRevokedAgent(tx, {
+      agentId,
+      tenantId: managed.agent.tenantId,
+      actorUserId: actor.id,
+      now,
+    });
+    offers = released.offers;
+    await tx.agent.delete({ where: { id: agentId } });
   });
   for (const offer of offers) {
     notifyClaimOffered(offer);
@@ -346,7 +372,7 @@ export async function rotateKey(agent: AgentContext, now = new Date()): Promise<
       },
     });
     await audit(agent, "agent.key_rotated", `agent:${agent.agentId}`, { prefix: key.prefix, projectId: agent.projectId ?? null }, { db: tx });
-    return { agentId: agent.agentId, name: agent.name, rawKey: key.raw, prefix: key.prefix };
+    return { agentId: agent.agentId, name: agent.name, level: agent.level, rawKey: key.raw, prefix: key.prefix };
   });
 }
 
@@ -393,6 +419,6 @@ export async function regenerateKey(
   });
   return {
     ok: true,
-    key: { agentId, name: managed.agent.name, rawKey: key.raw, prefix: key.prefix },
+    key: { agentId, name: managed.agent.name, level: managed.agent.level, rawKey: key.raw, prefix: key.prefix },
   };
 }

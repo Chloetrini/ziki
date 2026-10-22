@@ -55,7 +55,17 @@ beforeEach(() => {
 describe("requireAgent (#427)", () => {
   it("rejects a request with no key without touching the database", async () => {
     expect((await failure(requireAgent(request()))).code).toBe("missing_key");
-    expect((await failure(requireAgent(request("Basic abc")))).code).toBe("missing_key");
+    expect((await failure(requireAgent(request("Bearer")))).code).toBe("missing_key");
+    expect((await failure(requireAgent(request("   ")))).code).toBe("missing_key");
+    expect(findUnique).not.toHaveBeenCalled();
+  });
+
+  it("calls a sent-but-unusable header a bad key, not a missing one (#467)", async () => {
+    // Each of these *did* send a key; only its shape is wrong.
+    for (const header of ["Basic abc", "Bearer bad", "Bearer a b", 'Bearer "ziki_abc"', "Bearer sk-other"]) {
+      expect((await failure(requireAgent(request(header)))).code).toBe("invalid_key");
+    }
+    // A malformed header never reaches the database.
     expect(findUnique).not.toHaveBeenCalled();
   });
 

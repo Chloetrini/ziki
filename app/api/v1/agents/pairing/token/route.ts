@@ -1,3 +1,4 @@
+import { createMethodNotAllowed, createOptions } from "@/lib/agent-api/http-errors";
 import { NextResponse, type NextRequest } from "next/server";
 import { clientRateLimitKey, RATE_LIMIT_MESSAGE } from "@/lib/rate-limit";
 import { consumePairingLimit } from "@/lib/agents/rate-limit";
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
         {
           api_key: result.key.rawKey,
           key_prefix: result.key.prefix,
-          agent: { id: result.key.agentId, name: result.key.name },
+          agent: { id: result.key.agentId, name: result.key.name, level: result.key.level },
           project_id: result.projectId,
           message: "Store this key now. It is your account and it is not shown again. Confirm with GET /api/v1/agents/me.",
         },
@@ -59,3 +60,12 @@ export async function POST(req: NextRequest) {
       );
   }
 }
+
+const apiMethodNotAllowed = createMethodNotAllowed(["POST", "OPTIONS"]);
+const apiOptions = createOptions(["POST", "OPTIONS"]);
+export const GET = apiMethodNotAllowed;
+export const PUT = apiMethodNotAllowed;
+export const PATCH = apiMethodNotAllowed;
+export const DELETE = apiMethodNotAllowed;
+export const HEAD = apiMethodNotAllowed;
+export const OPTIONS = apiOptions;

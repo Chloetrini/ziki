@@ -31,7 +31,7 @@ export default async function LoginPage({
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-16">
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm">
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
         <div className="mb-4">
           <Link
             href="/"

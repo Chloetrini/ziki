@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Avatar } from "@/components/avatar";
+import {
+  StatusPage,
+  primaryActionClass,
+  secondaryActionClass,
+} from "@/components/status-page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LocalTime } from "@/components/local-time";
@@ -16,6 +21,7 @@ import {
   TENANT_NAME_MAX,
   memberTenantBySlug,
   tenantMembersFrom,
+  type TenantChoice,
 } from "@/lib/tenants";
 import {
   deleteTenantAction,
@@ -32,14 +38,30 @@ import { joinedSummary, listShareLinks, shareLinkStatusLabel } from "@/lib/share
 import { InviteForm } from "./invite-form";
 import { ShareLinkForm } from "./share-link-form";
 import { pendingTenantJoinRequests, TENANT_DESCRIPTION_MAX, tenantSummary } from "@/lib/tenant-join-requests";
+import { databaseErrorReason } from "@/lib/db-error";
 
 /* Static on purpose: a title built from the slug could name someone else's tenant. */
-export const metadata = { title: "Tenant" };
+export const metadata = { title: "Organization" };
 
 const card = "rounded-xl border border-slate-200 bg-white p-4 sm:p-6";
 
 function plural(count: number, word: string): string {
   return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
+async function loadTenant(
+  userId: string,
+  slug: string,
+): Promise<{ tenant: TenantChoice | null; problem: string | null }> {
+  try {
+    return { tenant: await memberTenantBySlug(prisma, userId, slug), problem: null };
+  } catch (error) {
+    console.error("[tenant] lookup failed", error);
+    return {
+      tenant: null,
+      problem: databaseErrorReason(error) ?? "The workspace record could not be read.",
+    };
+  }
 }
 
 async function loadQuietly<T>(label: string, task: Promise<T>, empty: T): Promise<T> {
@@ -95,7 +117,27 @@ export default async function TenantPage({
   } = await searchParams;
   const error = typeof errorParam === "string" ? errorParam : "";
   const notice = typeof noticeParam === "string" ? noticeParam : "";
-  const tenant = await memberTenantBySlug(prisma, user.id, slug);
+  const loaded = await loadTenant(user.id, slug);
+  if (loaded.problem) {
+    return (
+      <StatusPage
+        title="This page didn't load"
+        actions={
+          <>
+            <Link href={`/tenants/${encodeURIComponent(slug)}`} className={primaryActionClass}>
+              Try again
+            </Link>
+            <Link href="/issues" className={secondaryActionClass}>
+              Go to issues
+            </Link>
+          </>
+        }
+      >
+        <p>{loaded.problem}</p>
+      </StatusPage>
+    );
+  }
+  const tenant = loaded.tenant;
   // Someone else's tenant looks exactly like no tenant: its name is never read.
   if (!tenant) notFound();
 
@@ -119,7 +161,7 @@ export default async function TenantPage({
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="space-y-2">
         <Link href="/tenants" className="text-sm text-teal-700 hover:underline">
-          ← All tenants
+          ← All organizations
         </Link>
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="min-w-0 truncate text-2xl font-semibold text-slate-900">{tenant.name}</h1>
@@ -145,9 +187,9 @@ export default async function TenantPage({
 
       {tenant.archivedAt ? (
         <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 sm:p-6">
-          <h2 className="text-base font-semibold text-amber-900">This tenant is archived</h2>
+          <h2 className="text-base font-semibold text-amber-900">This organization is archived</h2>
           <p className="mt-1 text-sm text-amber-900">
-            Archived tenants are hidden from the switcher and can&apos;t be opened. Its issues and
+            Archived organizations are hidden from the switcher and can&apos;t be opened. Its issues and
             members stay here, read-only, until an owner restores it.
           </p>
           {tenant.role === "owner" ? (
@@ -155,7 +197,7 @@ export default async function TenantPage({
               <input type="hidden" name="tenantId" value={tenant.id} />
               <input type="hidden" name="archived" value="false" />
               <Button type="submit" variant="secondary">
-                Restore tenant
+                Restore organization
               </Button>
             </form>
           ) : null}
@@ -176,10 +218,10 @@ export default async function TenantPage({
       {canManageSettings ? (
         <section aria-labelledby="tenant-settings" className={card}>
           <h2 id="tenant-settings" className="text-base font-semibold text-slate-900">
-            Tenant settings
+            Organization settings
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            Rename this tenant, archive it, or delete it permanently when it has no issues,
+            Rename this organization, archive it, or delete it permanently when it has no issues,
             agents or other members.
           </p>
 
@@ -202,7 +244,7 @@ export default async function TenantPage({
               </Button>
             </div>
             <p className="text-xs text-slate-500">
-              The tenant&apos;s URL stays the same, so existing links keep working.
+              The organization&apos;s URL stays the same, so existing links keep working.
             </p>
           </form>
 
@@ -217,7 +259,7 @@ export default async function TenantPage({
                   <input type="hidden" name="tenantId" value={tenant.id} />
                   <input type="hidden" name="archived" value="true" />
                   <Button type="submit" variant="secondary">
-                    Archive tenant
+                    Archive organization
                   </Button>
                   <p className="mt-1 text-xs text-slate-500">
                     Archiving hides it from the switcher. You can restore it later.
@@ -226,9 +268,9 @@ export default async function TenantPage({
 
                 <form action={deleteTenantAction} className="space-y-2">
                   <input type="hidden" name="tenantId" value={tenant.id} />
-                  <p className="text-sm font-medium text-slate-800">Delete tenant</p>
+                  <p className="text-sm font-medium text-slate-800">Delete organization</p>
                   <p className="text-xs text-slate-500">
-                    Deleting is permanent and only works when the tenant has no issues, agents or
+                    Deleting is permanent and only works when the organization has no issues, agents or
                     other members. Otherwise archive it instead.
                   </p>
                   <label htmlFor="confirm-tenant-name" className="block text-xs text-slate-600">
@@ -245,7 +287,7 @@ export default async function TenantPage({
                       className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-900"
                     />
                     <Button type="submit" variant="danger-secondary">
-                      Delete tenant
+                      Delete organization
                     </Button>
                   </div>
                 </form>

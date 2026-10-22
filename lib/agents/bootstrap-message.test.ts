@@ -24,8 +24,9 @@ describe("agentBootstrapMessage", () => {
     const message = agentAccessRequest({ origin: "https://ziki.dev/", projectName: "Web" });
     expect(message).toContain("Site: https://ziki.dev\n");
     expect(message).toContain("POST https://ziki.dev/api/v1/agents/pairing");
-    expect(message).toContain("open verification_uri_complete in my browser yourself");
-    expect(message).toContain("Do not only print the link");
+    expect(message).toContain("show me user_code and verification_uri_complete");
+    expect(message).toContain("If you can open a browser");
+    expect(message).not.toContain("Do not only print");
     expect(message).toContain("POST https://ziki.dev/api/v1/agents/pairing/token");
     expect(message).toContain("Do not ask me to paste an API key");
     expect(message).toContain("separate agent for each level");

@@ -1,3 +1,4 @@
+import { createMethodNotAllowed, createOptions } from "@/lib/agent-api/http-errors";
 import { NextResponse, type NextRequest } from "next/server";
 import {
   agentIssueRequest,
@@ -85,3 +86,9 @@ export async function DELETE(
     });
   });
 }
+
+const apiMethodNotAllowed = createMethodNotAllowed(["GET", "HEAD", "POST", "DELETE", "OPTIONS"]);
+const apiOptions = createOptions(["GET", "HEAD", "POST", "DELETE", "OPTIONS"]);
+export const PUT = apiMethodNotAllowed;
+export const PATCH = apiMethodNotAllowed;
+export const OPTIONS = apiOptions;

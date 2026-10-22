@@ -5,22 +5,22 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { SignOutButton } from "@/components/sign-out-button";
 import { BrandLockup } from "@/components/brand-lockup";
-import { ProjectSwitcher } from "@/components/project-switcher";
-import { AgentKeyCopyButton, type AgentKeyHint } from "@/components/agent-key-copy";
+import { WorkspaceSwitcher, type WorkspaceChoice } from "@/components/workspace-switcher";
 import { PAGE_CONTAINER_CLASS } from "@/components/page-container";
 import { RoleSwitcher } from "@/components/role-switcher";
-import type { ProjectChoice } from "@/lib/project-context";
 import {
   SWITCH_TENANT_LINK,
   headerNavItems,
   isNavItemActive,
   realRoleOf,
   roleViewLabels,
+  type HeaderNavItem,
 } from "@/lib/header-nav";
 import { isAdmin, type AppRole } from "@/lib/roles";
 import { FOCUSABLE, wrapFocusIndex } from "@/lib/focus-trap";
 import { Avatar } from "@/components/avatar";
 import { ThemeToggle, AccountThemeSelector } from "@/components/theme-toggle";
+import { pointsProgress, TARGET_POINTS } from "@/lib/points/rules";
 
 /** Closes a popover on outside click or Escape, returning focus to its trigger. */
 function useDismiss(
@@ -149,6 +149,145 @@ function NotificationsBell({ unreadCount, active }: { unreadCount: number; activ
 const linkFocus =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2";
 
+function CountBadge({ count }: { count: number }) {
+  return (
+    <span
+      aria-label={`${count} pending`}
+      className="inline-flex items-center justify-center rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white"
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
+function tabClass(active: boolean) {
+  return `relative inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-sm transition-colors ${linkFocus} ${
+    active
+      ? "bg-teal-50 font-medium text-teal-900"
+      : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+  }`;
+}
+
+function NavTab({ item, pathname }: { item: HeaderNavItem; pathname: string | null }) {
+  const active = isNavItemActive(pathname, item.href);
+  return (
+    <Link href={item.href} aria-current={active ? "page" : undefined} className={tabClass(active)}>
+      <span>{item.label}</span>
+      {typeof item.badge === "number" && item.badge > 0 ? <CountBadge count={item.badge} /> : null}
+    </Link>
+  );
+}
+
+function NavMenu({
+  item,
+  pathname,
+  open,
+  onToggle,
+  onClose,
+}: {
+  item: HeaderNavItem;
+  pathname: string | null;
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  useDismiss(open, onClose, ref, buttonRef);
+  const active = item.children?.some((sub) => isNavItemActive(pathname, sub.href)) ?? false;
+  const menuId = `nav-menu-${item.label.toLowerCase().replace(/\s+/g, "-")}`;
+
+  return (
+    <div ref={ref} className="relative flex items-stretch">
+      <button
+        ref={buttonRef}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={menuId}
+        onClick={onToggle}
+        className={tabClass(active)}
+      >
+        <span>{item.label}</span>
+        {typeof item.badge === "number" && item.badge > 0 ? <CountBadge count={item.badge} /> : null}
+        <svg
+          className={`h-4 w-4 text-slate-400 ${open ? "rotate-180" : ""}`}
+          viewBox="0 0 20 20"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path
+            fillRule="evenodd"
+            d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"
+            clipRule="evenodd"
+          />
+        </svg>
+      </button>
+      {open ? (
+        <div
+          id={menuId}
+          role="menu"
+          aria-label={item.label}
+          className="absolute left-0 top-full z-50 mt-1 w-72 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm"
+        >
+          {item.children?.map((sub) => {
+            const subActive = isNavItemActive(pathname, sub.href);
+            return (
+              <Link
+                key={sub.href}
+                href={sub.href}
+                role="menuitem"
+                onClick={onClose}
+                className={`flex flex-col rounded-lg px-3 py-2 text-sm transition-colors ${linkFocus} ${
+                  subActive
+                    ? "bg-teal-50 font-medium text-teal-900"
+                    : "text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+                }`}
+              >
+                <span className="flex items-center justify-between gap-3">
+                  <span className="font-medium">{sub.label}</span>
+                  {typeof sub.badge === "number" && sub.badge > 0 ? <CountBadge count={sub.badge} /> : null}
+                </span>
+                {sub.description ? (
+                  <span className="font-normal text-xs text-slate-500">{sub.description}</span>
+                ) : null}
+              </Link>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PointsChip({
+  points,
+  solvedTasks,
+  userId,
+}: {
+  points: number;
+  solvedTasks: number;
+  userId?: string | null;
+}) {
+  if (!userId) return null;
+  const progress = pointsProgress(points, solvedTasks);
+  const label = `${points} pts of ${TARGET_POINTS}, ${solvedTasks} solved`;
+  return (
+    <Link
+      href={`/users/${userId}`}
+      title={label}
+      className={`inline-flex h-9 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 text-slate-700 hover:bg-slate-50 ${linkFocus}`}
+    >
+      <span className="text-sm font-semibold tabular-nums text-slate-900">{points}</span>
+      <span className="text-xs text-slate-500">pts</span>
+      <span className="sr-only"> of {TARGET_POINTS}, {solvedTasks} solved</span>
+      <span className="hidden h-1.5 w-10 overflow-hidden rounded-full bg-slate-200 md:block" aria-hidden="true">
+        <span className="block h-full rounded-full bg-teal-700" style={{ width: `${progress.pointsPercent}%` }} />
+      </span>
+    </Link>
+  );
+}
+
 export function AppHeader({
   userName,
   userImage,
@@ -158,12 +297,10 @@ export function AppHeader({
   unreadCount = 0,
   pendingEscalationsCount = 0,
   userId,
-  projects = [],
-  activeProjectId = null,
-  canManagePlatforms = false,
-  agentKeys = [],
-  apiKey = null,
-  keyPrefix = null,
+  workspaces = [],
+  activeTenantId = null,
+  points = 0,
+  solvedTasks = 0,
 }: {
   userName?: string | null;
   /** Their picture, if their sign-in provider gave one (#290). */
@@ -176,36 +313,28 @@ export function AppHeader({
   /** Unresolved escalations from agents (#763). */
   pendingEscalationsCount?: number;
   userId?: string | null;
-  /** The tenant's projects and the one currently active (#426). */
-  projects?: ProjectChoice[];
-  activeProjectId?: string | null;
-  /** Owner or admin of the organization currently open. */
-  canManagePlatforms?: boolean;
-  /** Prefixes of this person's live agent keys for the active project. */
-  agentKeys?: AgentKeyHint[];
-  /** Personal API key for the active project. Copying it includes the site. */
-  apiKey?: string | null;
-  keyPrefix?: string | null;
+  /** Workspaces this person can open, and the one currently active. */
+  workspaces?: WorkspaceChoice[];
+  activeTenantId?: string | null;
+  /** This person's points in the open workspace. */
+  points?: number;
+  solvedTasks?: number;
 }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-  const [manageProjectOpen, setManageProjectOpen] = useState(false);
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
 
   const accountRef = useRef<HTMLDivElement>(null);
   const accountButtonRef = useRef<HTMLButtonElement>(null);
-  const manageProjectRef = useRef<HTMLDivElement>(null);
-  const manageProjectButtonRef = useRef<HTMLButtonElement>(null);
   const headerRef = useRef<HTMLElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const menuPanelRef = useRef<HTMLDivElement>(null);
 
   const closeAccount = () => setAccountOpen(false);
   const closeMenu = () => setMenuOpen(false);
-  const closeManageProject = () => setManageProjectOpen(false);
   useDismiss(accountOpen, closeAccount, accountRef, accountButtonRef);
   useDismiss(menuOpen, closeMenu, headerRef, menuButtonRef);
-  useDismiss(manageProjectOpen, closeManageProject, manageProjectRef, manageProjectButtonRef);
   useMenuFocusTrap(menuOpen, headerRef, menuPanelRef, menuButtonRef);
 
   // Close menus when the page changes (state adjusted during render, not in an effect).
@@ -214,16 +343,14 @@ export function AppHeader({
     setLastPath(pathname);
     setMenuOpen(false);
     setAccountOpen(false);
-    setManageProjectOpen(false);
+    setOpenMenu(null);
   }
 
   const items = headerNavItems(role, {
-    managePlatforms: canManagePlatforms,
     pendingEscalations: pendingEscalationsCount,
   });
   const canSwitchRole = Boolean((isRealSuperAdmin || isRealAdmin) && role);
   const realRole = realRoleOf({ isRealSuperAdmin, isRealAdmin });
-  const viewingAsOther = canSwitchRole && role !== realRole;
   const onNewIssue =
     pathname?.replace(/\/+$/, "") === "/issues/new" ||
     pathname?.replace(/\/+$/, "") === "/bugs/new";
@@ -242,131 +369,30 @@ export function AppHeader({
           <BrandLockup href="/issues" size="sm" />
         </div>
 
-        {/* #426: the active project and agent key, visible wherever projects change what a page shows.
-            #1070: the full bar (project, key, nav, account) needs about 940px, so below
-            lg (1024px) it all lives in the menu instead of pushing the page sideways. */}
-        <div className="hidden shrink-0 items-center gap-2 lg:flex">
-          <ProjectSwitcher
-            projects={projects}
-            activeProjectId={activeProjectId}
-          />
-          <AgentKeyCopyButton
-            projectId={activeProjectId ?? projects[0]?.id}
-            projectName={projects.find((p) => p.id === (activeProjectId ?? projects[0]?.id))?.name}
-            keys={agentKeys}
-            apiKey={apiKey}
-            keyPrefix={keyPrefix}
-          />
+        {/* Active workspace. Below lg it moves into the menu. */}
+        <div className="hidden shrink-0 lg:block">
+          <WorkspaceSwitcher workspaces={workspaces} activeTenantId={activeTenantId} />
         </div>
 
-        {/* Desktop navigation: the active page is underlined on the header's edge. */}
-        <nav
-          aria-label="Main"
-          className="hidden h-full min-w-0 flex-1 items-stretch gap-1 overflow-x-auto lg:flex [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        >
-          {items.map((item) => {
-            if (item.children && item.children.length > 0) {
-              const active = item.children.some((sub) => isNavItemActive(pathname, sub.href));
-              return (
-                <div key={item.label} ref={manageProjectRef} className="relative flex items-stretch">
-                  <button
-                    ref={manageProjectButtonRef}
-                    type="button"
-                    aria-haspopup="menu"
-                    aria-expanded={manageProjectOpen}
-                    aria-controls="manage-project-menu"
-                    onClick={() => setManageProjectOpen((open) => !open)}
-                    className={`relative inline-flex items-center gap-1 rounded-sm px-2.5 text-sm transition-colors ${linkFocus} ${
-                      active
-                        ? "font-medium text-slate-900 after:absolute after:inset-x-2.5 after:bottom-0 after:h-0.5 after:rounded-full after:bg-teal-700"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    <span>{item.label}</span>
-                    <svg
-                      className={`h-4 w-4 text-slate-500 transition-transform ${manageProjectOpen ? "rotate-180" : ""}`}
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      aria-hidden="true"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </button>
-                  {manageProjectOpen ? (
-                    <div
-                      id="manage-project-menu"
-                      role="menu"
-                      aria-label={item.label}
-                      className="absolute left-0 top-full z-50 mt-1 w-64 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg ring-1 ring-black/5"
-                    >
-                      {item.children.map((sub) => {
-                        const subActive = isNavItemActive(pathname, sub.href);
-                        return (
-                          <Link
-                            key={sub.href}
-                            href={sub.href}
-                            role="menuitem"
-                            onClick={() => setManageProjectOpen(false)}
-                            className={`flex flex-col rounded-lg px-3 py-2 text-sm transition-colors ${linkFocus} ${
-                              subActive
-                                ? "bg-teal-50 font-medium text-teal-900"
-                                : "text-slate-700 hover:bg-slate-50 hover:text-slate-900"
-                            }`}
-                          >
-                            <span className="font-medium">{sub.label}</span>
-                            {sub.description ? (
-                              <span className="text-xs text-slate-500 font-normal">{sub.description}</span>
-                            ) : null}
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </div>
-              );
-            }
-
-            const active = isNavItemActive(pathname, item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                aria-current={active ? "page" : undefined}
-                className={`relative inline-flex items-center gap-1.5 rounded-sm px-2.5 text-sm transition-colors ${linkFocus} ${
-                  active
-                    ? "font-medium text-slate-900 after:absolute after:inset-x-2.5 after:bottom-0 after:h-0.5 after:rounded-full after:bg-teal-700"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <span>{item.label}</span>
-                {typeof item.badge === "number" && item.badge > 0 ? (
-                  <span
-                    aria-label={`${item.badge} pending`}
-                    className="inline-flex items-center justify-center rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white ring-1 ring-white"
-                  >
-                    {item.badge > 99 ? "99+" : item.badge}
-                  </span>
-                ) : null}
-              </Link>
-            );
-          })}
+        <nav aria-label="Main" className="hidden h-full min-w-0 items-center lg:flex">
+          {items.map((item) =>
+            item.children && item.children.length > 0 ? (
+              <NavMenu
+                key={item.label}
+                item={item}
+                pathname={pathname}
+                open={openMenu === item.label}
+                onToggle={() => setOpenMenu((current) => (current === item.label ? null : item.label))}
+                onClose={() => setOpenMenu(null)}
+              />
+            ) : (
+              <NavTab key={item.href} item={item} pathname={pathname} />
+            ),
+          )}
         </nav>
 
-        <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
-          {viewingAsOther ? (
-            <button
-              type="button"
-              onClick={() => setAccountOpen(true)}
-              className={`hidden items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100 lg:inline-flex ${linkFocus}`}
-            >
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
-              Viewing as {roleViewLabels[effectiveRole].toLowerCase()}
-            </button>
-          ) : null}
+        <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-1.5">
+          <PointsChip points={points} solvedTasks={solvedTasks} userId={userId} />
 
           <NotificationsBell
             unreadCount={unreadCount}
@@ -379,7 +405,7 @@ export function AppHeader({
             href="/issues/new"
             aria-current={onNewIssue ? "page" : undefined}
             aria-label="New issue"
-            className={`inline-flex h-9 items-center gap-1.5 rounded-lg bg-teal-700 px-2.5 text-sm font-medium text-white shadow-xs transition-colors hover:bg-teal-800 sm:px-3.5 ${linkFocus}`}
+            className={`inline-flex h-9 items-center gap-1.5 rounded-full bg-teal-700 px-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-800 sm:px-3.5 ${linkFocus}`}
           >
             <PlusIcon />
             <span className="hidden sm:inline">New issue</span>
@@ -398,12 +424,6 @@ export function AppHeader({
             >
               <span className="sr-only">Account menu for {userName}</span>
               <Avatar name={userName} image={userImage} size="md" />
-              {viewingAsOther ? (
-                <span
-                  className="absolute left-6 top-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-amber-500 lg:hidden"
-                  aria-hidden="true"
-                />
-              ) : null}
               <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                 <path
                   fillRule="evenodd"
@@ -416,9 +436,9 @@ export function AppHeader({
             {accountOpen ? (
               <div
                 id="account-menu"
-                className="absolute right-0 top-full z-50 mt-2 w-64 origin-top-right rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg ring-1 ring-black/5 motion-safe:animate-[header-pop_120ms_ease-out]"
+                className="absolute right-0 top-full z-50 mt-2 w-64 origin-top-right rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm motion-safe:animate-[header-pop_120ms_ease-out]"
               >
-                <AccountSummary userName={userName} userImage={userImage} role={effectiveRole} realRole={realRole} />
+                <AccountSummary userName={userName} userImage={userImage} realRole={realRole} />
                 {canSwitchRole ? (
                   <div className="border-t border-slate-100 px-2 py-2.5">
                     <RoleSwitcher activeRole={effectiveRole} isSuperAdmin={isRealSuperAdmin} />
@@ -462,12 +482,6 @@ export function AppHeader({
             aria-label={menuOpen ? "Close menu" : "Open menu"}
             className={`relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 lg:hidden ${linkFocus}`}
           >
-            {viewingAsOther ? (
-              <span
-                className="absolute right-1 top-1 h-2 w-2 rounded-full bg-amber-500"
-                aria-hidden="true"
-              />
-            ) : null}
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
               {menuOpen ? (
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -486,23 +500,13 @@ export function AppHeader({
           ref={menuPanelRef}
           className="relative max-h-[calc(100dvh-3.5rem)] overflow-y-auto border-t border-slate-200 bg-white px-4 pb-4 pt-2 lg:hidden"
         >
-          {projects.length > 0 ? (
-            <div className="flex flex-col gap-2 border-b border-slate-200 pb-3">
-              <ProjectSwitcher
-                projects={projects}
-                activeProjectId={activeProjectId}
-                fullWidth
-              />
-              <AgentKeyCopyButton
-                projectId={activeProjectId ?? projects[0]?.id}
-                projectName={projects.find((p) => p.id === (activeProjectId ?? projects[0]?.id))?.name}
-                keys={agentKeys}
-                apiKey={apiKey}
-                keyPrefix={keyPrefix}
-                fullWidth
-              />
-            </div>
-          ) : null}
+          <div className="border-b border-slate-200 pb-3">
+            <WorkspaceSwitcher
+              workspaces={workspaces}
+              activeTenantId={activeTenantId}
+              fullWidth
+            />
+          </div>
           <nav aria-label="Main" className="flex flex-col py-1">
             {items.map((item) => {
               if (item.children && item.children.length > 0) {
@@ -511,12 +515,13 @@ export function AppHeader({
                     <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">
                       {item.label}
                     </div>
-                    <div className="pl-2 space-y-0.5">
+                    <div className="space-y-0.5 pl-2">
                       {item.children.map((sub) => (
                         <MenuLink
                           key={sub.href}
                           href={sub.href}
                           active={isNavItemActive(pathname, sub.href)}
+                          badge={sub.badge}
                           large
                         >
                           {sub.label}
@@ -563,7 +568,7 @@ export function AppHeader({
           </nav>
 
           <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50/60">
-            <AccountSummary userName={userName} userImage={userImage} role={effectiveRole} realRole={realRole} />
+            <AccountSummary userName={userName} userImage={userImage} realRole={realRole} />
             {canSwitchRole ? (
               <div className="border-t border-slate-200 px-3 py-3">
                 <RoleSwitcher activeRole={effectiveRole} isSuperAdmin={isRealSuperAdmin} />
@@ -583,12 +588,10 @@ export function AppHeader({
 function AccountSummary({
   userName,
   userImage,
-  role,
   realRole,
 }: {
   userName?: string | null;
   userImage?: string | null;
-  role: AppRole;
   realRole: AppRole;
 }) {
   return (
@@ -598,9 +601,6 @@ function AccountSummary({
         <p className="truncate text-sm font-medium text-slate-900">{userName}</p>
         <p className="truncate text-xs text-slate-500">
           {realRole === "user" ? "Member" : roleViewLabels[realRole]}
-          {role !== realRole ? (
-            <span className="text-amber-700"> · viewing as {roleViewLabels[role].toLowerCase()}</span>
-          ) : null}
         </p>
       </div>
     </div>

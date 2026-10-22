@@ -76,7 +76,7 @@ export async function selectTenantAction(formData: FormData): Promise<void> {
   const tenant = await memberTenantById(prisma, user.id, String(formData.get("tenantId") ?? ""));
   if (!tenant) redirect("/tenants");
   if (tenant.archivedAt) {
-    redirect(`/tenants?error=${encodeURIComponent("Restore this tenant before opening it.")}`);
+    redirect(`/tenants?error=${encodeURIComponent("Restore this organization before opening it.")}`);
   }
   await enterTenant(tenant.id);
 }
@@ -233,7 +233,7 @@ export async function renameTenantAction(formData: FormData): Promise<void> {
   revalidatePath("/", "layout");
   revalidatePath("/tenants");
   revalidatePath(`/tenants/${tenant.slug}`);
-  redirect(`/tenants/${tenant.slug}?notice=${encodeURIComponent("Tenant renamed.")}`);
+  redirect(`/tenants/${tenant.slug}?notice=${encodeURIComponent("Organization renamed.")}`);
 }
 
 /** Archive or restore a tenant the person owns. */
@@ -252,7 +252,7 @@ export async function setTenantArchivedAction(formData: FormData): Promise<void>
   revalidatePath("/", "layout");
   revalidatePath("/tenants");
   revalidatePath(`/tenants/${tenant.slug}`);
-  redirect(`/tenants?notice=${encodeURIComponent(archived ? "Tenant archived." : "Tenant restored.")}`);
+  redirect(`/tenants?notice=${encodeURIComponent(archived ? "Organization archived." : "Organization restored.")}`);
 }
 
 /** Delete an empty tenant after the owner types its name. */
@@ -269,7 +269,7 @@ export async function deleteTenantAction(formData: FormData): Promise<void> {
 
   revalidatePath("/", "layout");
   revalidatePath("/tenants");
-  redirect(`/tenants?notice=${encodeURIComponent("Tenant deleted.")}`);
+  redirect(`/tenants?notice=${encodeURIComponent("Organization deleted.")}`);
 }
 
 export type CreateInviteActionResult =

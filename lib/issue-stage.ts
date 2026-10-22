@@ -7,8 +7,8 @@ import { WORK_READINESS_VOTE_THRESHOLD } from "@/lib/ticket-assignment";
 /** Where an open issue sits before someone starts the work. Not a status. */
 export type IssueStage = "reported" | "confirmed" | "ready";
 
-/** Sidebar views. Ready stays a tag: it is the same gate as assigning work. */
-export type IssueStageView = "reported" | "confirmed";
+/** List filters. `ready` is the issue that can be passed on. */
+export type IssueStageView = "reported" | "confirmed" | "ready";
 
 export const issueStageLabels: Record<IssueStage, string> = {
   reported: "Reported",
@@ -16,16 +16,52 @@ export const issueStageLabels: Record<IssueStage, string> = {
   ready: "Ready",
 };
 
+/**
+ * An open report is an idea until reviewers accept it and it has enough
+ * upvotes. Then it is an issue and can be passed on.
+ */
+export type Intake = "idea" | "issue";
+
 export function parseIssueStageView(raw: string | null | undefined): IssueStageView | null {
-  return raw === "reported" || raw === "confirmed" ? raw : null;
+  return raw === "reported" || raw === "confirmed" || raw === "ready" ? raw : null;
+}
+
+export function intakeOf(stage: IssueStage): Intake {
+  return stage === "ready" ? "issue" : "idea";
+}
+
+export function intakeLabel(stage: IssueStage): string {
+  return intakeOf(stage) === "issue" ? "Issue" : "Idea";
+}
+
+/** Idea until both gates are met, including once the report is no longer open. */
+export function intakeKind(input: {
+  status: string;
+  voteCount: number;
+  confirmed: boolean;
+}): Intake {
+  const stage = issueStage(input);
+  if (stage) return intakeOf(stage);
+  if (input.status === "in_progress" || input.status === "resolved" || input.confirmed) return "issue";
+  return "idea";
+}
+
+export function intakeDetail(stage: IssueStage, voteCount: number): string {
+  if (stage === "ready") {
+    return "This is an issue. Reviewers accepted it and it has enough upvotes, so it can be passed on.";
+  }
+  if (stage === "confirmed") {
+    const left = Math.max(0, WORK_READINESS_VOTE_THRESHOLD - voteCount);
+    const votes = left === 1 ? "1 more upvote" : `${left} more upvotes`;
+    return `This is an idea. Reviewers accepted it. It needs ${votes} before it can be passed on as an issue.`;
+  }
+  return "This is an idea. It becomes an issue when reviewers accept it and three people upvote it. Then it can be passed on.";
 }
 
 /**
- * Reported: open, and not yet confirmed. That includes issues a person filed
- * and issues an agent filed.
- * Confirmed: the project's required independent reviewers accepted it, and it
- * has fewer than three upvotes.
- * Ready: confirmed and at least three upvotes. Same gate as taking the work.
+ * Reported and confirmed are still ideas: reviewers have not accepted it, or
+ * it does not yet have three upvotes.
+ * Ready is an issue: both gates are met, so it can be passed on.
  * Anything no longer open has no intake tag.
  */
 export function issueStage(input: {

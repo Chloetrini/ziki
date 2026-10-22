@@ -19,6 +19,7 @@ vi.mock("@/lib/notify", () => ({ notifyLater: notify.notifyLater }));
 
 import {
   answerAgentQuestion,
+  askAgentEscalation,
   askAgentQuestion,
   classifyEscalation,
   countPendingEscalations,
@@ -26,7 +27,7 @@ import {
   readAgentQuestion,
   type AskAgentQuestionInput,
 } from "./agent-questions";
-import type { AgentContext } from "@/lib/agents/require-agent";
+import { AgentProjectError, type AgentContext } from "@/lib/agents/require-agent";
 
 const agent: AgentContext = {
   agentId: "a1",
@@ -78,6 +79,32 @@ describe("askAgentQuestion (#446)", () => {
     db.bug.findFirst.mockResolvedValue(null);
     await expect(askAgentQuestion(agent, { body: "What now?", bugId: "b-other" })).rejects.toMatchObject({ status: 404 });
     expect(db.agentQuestion.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("project-scoped keys on questions and escalations (#412)", () => {
+  const scoped: AgentContext = { ...agent, projectId: "project-a", projectSlug: "a" };
+
+  it("refuses to link an issue from another project, before anything is stored or returned", async () => {
+    db.bug.findFirst.mockResolvedValue({ id: "b-in-b", title: "Project B's secret title", projectId: "project-b" });
+    for (const ask of [askAgentQuestion, askAgentEscalation]) {
+      await expect(ask(scoped, { body: "Can I take this?", bugId: "b-in-b" })).rejects.toBeInstanceOf(AgentProjectError);
+    }
+    expect(db.agentQuestion.create).not.toHaveBeenCalled();
+    expect(notify.notifyLater).not.toHaveBeenCalled();
+  });
+
+  it("links an issue in the key's own project", async () => {
+    db.bug.findFirst.mockResolvedValue({ id: "b-in-a", title: "Header overlaps", projectId: "project-a" });
+    db.agentQuestion.create.mockResolvedValue({ id: "q2", bugId: "b-in-a", body: "Can I take this?", createdAt: new Date() });
+    const question = await askAgentQuestion(scoped, { body: "Can I take this?", bugId: "b-in-a" });
+    expect(question.bugTitle).toBe("Header overlaps");
+  });
+
+  it("leaves a key without a project restriction as it was", async () => {
+    db.bug.findFirst.mockResolvedValue({ id: "b-in-b", title: "Other project", projectId: "project-b" });
+    db.agentQuestion.create.mockResolvedValue({ id: "q3", bugId: "b-in-b", body: "Hi there", createdAt: new Date() });
+    await expect(askAgentQuestion({ ...agent, projectId: null }, { body: "Hi there", bugId: "b-in-b" })).resolves.toMatchObject({ id: "q3" });
   });
 });
 

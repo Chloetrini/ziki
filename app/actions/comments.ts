@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { revalidateIssue } from "@/lib/revalidate-issue";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { commentInTenant, currentTenantIdFor } from "@/lib/tenant-context";
@@ -162,7 +163,7 @@ export async function updateCommentAction(
     });
   }
 
-  revalidatePath(`/issues/${comment.bugId}`);
+  revalidateIssue(comment.bugId);
   revalidatePath(`/bugs/${comment.bugId}`);
   return { ok: true };
 }
@@ -242,7 +243,7 @@ export async function deleteCommentAction(
     return { error: COMMENT_ERRORS.failed };
   }
 
-  revalidatePath(`/issues/${comment.bugId}`);
+  revalidateIssue(comment.bugId);
   revalidatePath(`/bugs/${comment.bugId}`);
   return { ok: true };
 }

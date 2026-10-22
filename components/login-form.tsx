@@ -162,7 +162,8 @@ export function LoginForm({
               setError(null);
               startTransition(async () => {
                 try {
-                  await googleSignInAction();
+                  // Keep the requested page, e.g. an issue from its 404 (#457).
+                  await googleSignInAction(callbackUrl);
                 } catch (error) {
                   unstable_rethrow(error);
                   setError("Google sign-in failed. Please try again.");

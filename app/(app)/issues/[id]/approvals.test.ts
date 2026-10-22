@@ -49,7 +49,8 @@ vi.mock("@/lib/agents/membership", () => ({
   isTenantAdminRole: vi.fn().mockReturnValue(true),
 }));
 
-vi.mock("@/lib/ticket-deletion", () => ({
+vi.mock("@/lib/ticket-deletion", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/ticket-deletion")>()),
   canDeleteTicket: vi.fn().mockReturnValue(false),
 }));
 
@@ -95,7 +96,7 @@ vi.mock("@/lib/platforms", () => ({
 }));
 
 const mockDb = vi.hoisted(() => ({
-  bug: { findUnique: vi.fn() },
+  bug: { findUnique: vi.fn(), findFirst: vi.fn(async () => ({ id: "bug-1", number: 1 })) },
   membership: { findUnique: vi.fn().mockResolvedValue({ role: "admin", userId: "user-123" }) },
   redesignProposal: { findMany: vi.fn().mockResolvedValue([]) },
   issueBid: { findMany: vi.fn().mockResolvedValue([]) },
@@ -109,7 +110,6 @@ const mockDb = vi.hoisted(() => ({
     findMany: vi.fn().mockResolvedValue([]),
     findFirst: vi.fn().mockResolvedValue(null),
   },
-  issueWatch: { findUnique: vi.fn().mockResolvedValue(null) },
   attachment: { findMany: vi.fn().mockResolvedValue([]) },
   bugRevision: { findFirst: vi.fn().mockResolvedValue(null) },
   milestone: { findMany: vi.fn().mockResolvedValue([]) },
@@ -176,7 +176,7 @@ describe("Issue page human approval banner (#598)", () => {
     });
 
     const page = await BugDetailPage({
-      params: Promise.resolve({ id: "bug-1" }),
+      params: Promise.resolve({ id: "1" }),
     });
 
     render(page);
@@ -196,7 +196,7 @@ describe("Issue page human approval banner (#598)", () => {
     });
 
     const page = await BugDetailPage({
-      params: Promise.resolve({ id: "bug-1" }),
+      params: Promise.resolve({ id: "1" }),
     });
 
     render(page);
@@ -209,7 +209,7 @@ describe("Issue page human approval banner (#598)", () => {
     mockDb.issueApproval.findFirst.mockResolvedValue(null);
 
     const page = await BugDetailPage({
-      params: Promise.resolve({ id: "bug-1" }),
+      params: Promise.resolve({ id: "1" }),
     });
 
     render(page);

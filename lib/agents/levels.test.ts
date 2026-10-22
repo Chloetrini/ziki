@@ -34,10 +34,13 @@ describe("agent levels (#427)", () => {
   it("lets the owner set anything but merger, and a tenant admin anything", () => {
     const owner = { isOwner: true, isTenantAdmin: false };
     expect(canSetLevel(owner, "reviewer")).toBe(true);
+    expect(canSetLevel(owner, "triager")).toBe(true);
     expect(canSetLevel(owner, "merger")).toBe(false);
+    expect(canSetLevel(owner, "dispatcher")).toBe(true);
     expect(canSetLevel({ isOwner: false, isTenantAdmin: true }, "merger")).toBe(true);
+    expect(canSetLevel({ isOwner: false, isTenantAdmin: true }, "dispatcher")).toBe(true);
     expect(canSetLevel({ isOwner: false, isTenantAdmin: false }, "observer")).toBe(false);
-    expect(settableLevels(owner)).toEqual(["observer", "contributor", "reviewer"]);
+    expect(settableLevels(owner)).toEqual(["observer", "contributor", "triager", "reviewer", "dispatcher"]);
   });
 
   it("tells a person to keep one agent per level, without calling that a review", () => {

@@ -14,7 +14,7 @@ vi.mock("@/lib/project-context", () => ({ projectContextFor }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     membership: { findMany: vi.fn() },
-    category: { findMany: vi.fn() },
+    projectArea: { findMany: vi.fn() },
     agent: { findMany: vi.fn() },
     issueClaim: { findMany: vi.fn(), groupBy: vi.fn() },
     pointEntry: { groupBy: vi.fn() },
@@ -33,8 +33,10 @@ beforeEach(() => {
     { role: "member", user: { id: "viewer-1", name: "Ada" } },
     { role: "member", user: { id: "member-2", name: "Grace" } },
   ] as never);
-  vi.mocked(prisma.category.findMany).mockResolvedValue([
-    { id: "area-1", name: "Web" },
+  // Project areas (#609), not platforms: "Web" is the issue's platform.
+  vi.mocked(prisma.projectArea.findMany).mockResolvedValue([
+    { id: "area-1", name: "Checkout" },
+    { id: "area-2", name: "Search" },
   ] as never);
   vi.mocked(prisma.agent.findMany).mockResolvedValue([
     {
@@ -43,10 +45,11 @@ beforeEach(() => {
       name: "Ada's agent",
       model: "Claude",
       level: "reviewer",
+      apiKeys: [{ lastUsedAt: null }],
       claims: [{
         claimedAt: new Date(),
         lastHeartbeatAt: new Date(),
-        bug: { id: "issue-1", title: "Fix the app", categoryId: "area-1", category: { name: "Web" } },
+        bug: { id: "issue-1", title: "Fix the app", categoryId: "cat-web", category: { name: "Web" }, areaId: "area-1", area: { name: "Checkout" } },
       }],
     },
   ] as never);
@@ -109,7 +112,7 @@ describe("team directory page", () => {
     document.body.innerHTML = "";
   });
 
-  it("filters members by the selected category and online status", async () => {
+  it("filters members by the selected project area and online status", async () => {
     const page = await TeamPage({
       searchParams: Promise.resolve({ area: "area-1", online: "1", capacity: "1" }),
     });
@@ -129,5 +132,55 @@ describe("team directory page", () => {
     expect(html).toContain("Join or create a workspace");
     expect(prisma.membership.findMany).not.toHaveBeenCalled();
     expect(prisma.agent.findMany).not.toHaveBeenCalled();
+  });
+
+  it("offers the active project's areas in the Area filter, not its platforms", async () => {
+    const html = renderToStaticMarkup(await TeamPage({ searchParams: Promise.resolve({}) }));
+
+    expect(prisma.projectArea.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { projectId: "project-1" },
+    }));
+    expect(html).toContain('<option value="area-1">Checkout</option>');
+    expect(html).toContain('<option value="area-2">Search</option>');
+    expect(html).not.toContain('<option value="cat-web">');
+    // The work line names the area as well as the platform.
+    expect(html).toContain("Checkout");
+  });
+
+  it("shows only members whose agents work in the selected area", async () => {
+    vi.mocked(prisma.agent.findMany).mockResolvedValue([
+      {
+        id: "agent-1", ownerUserId: "viewer-1", name: "Ada's agent", model: "Claude", level: "reviewer",
+        apiKeys: [{ lastUsedAt: new Date() }],
+        claims: [{ claimedAt: new Date(), lastHeartbeatAt: new Date(),
+          bug: { id: "issue-1", title: "Fix checkout", categoryId: "cat-web", category: { name: "Web" }, areaId: "area-1", area: { name: "Checkout" } } }],
+      },
+      {
+        id: "agent-2", ownerUserId: "member-2", name: "Grace's agent", model: "Claude", level: "reviewer",
+        apiKeys: [{ lastUsedAt: new Date() }],
+        // Same platform, different area: the old platform filter matched both.
+        claims: [{ claimedAt: new Date(), lastHeartbeatAt: new Date(),
+          bug: { id: "issue-2", title: "Fix search", categoryId: "cat-web", category: { name: "Web" }, areaId: "area-2", area: { name: "Search" } } }],
+      },
+    ] as never);
+
+    const html = renderToStaticMarkup(await TeamPage({ searchParams: Promise.resolve({ area: "area-2" }) }));
+
+    expect(html).toContain("Grace");
+    expect(html).toContain("Fix search");
+    expect(html).not.toContain("Fix checkout");
+    expect(html).not.toContain("Ada&#x27;s agent");
+  });
+
+  it("hides the Area filter when there is no active project to take areas from", async () => {
+    projectContextFor.mockResolvedValue({ activeProjectId: null });
+
+    const html = renderToStaticMarkup(await TeamPage({ searchParams: Promise.resolve({ area: "area-1" }) }));
+
+    expect(prisma.projectArea.findMany).not.toHaveBeenCalled();
+    expect(html).not.toContain('name="area"');
+    // An area from an old link is ignored rather than filtering everyone out.
+    expect(html).toContain("Ada");
+    expect(html).toContain("Grace");
   });
 });

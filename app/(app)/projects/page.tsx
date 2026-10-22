@@ -103,8 +103,9 @@ export default async function ProjectsPage({
         </Link>
         <h1 className="text-2xl font-semibold text-slate-900">Projects</h1>
         <p className="text-sm text-slate-600">
-          Projects are the products inside {tenant?.name ?? "your workspace"}.
-          New issues and the issue list use the active project.
+          A project is one product inside {tenant?.name ?? "your workspace"}, such as a web app.
+          The issue list follows the project selected in the bar. A platform, such as Web or Mobile,
+          is a label on an issue, not another project.
         </p>
       </div>
 

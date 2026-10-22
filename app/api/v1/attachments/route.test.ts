@@ -36,6 +36,34 @@ function upload(file: File | null, { keyed = true, length }: { keyed?: boolean; 
   return req;
 }
 
+/** A chunked body (no Content-Length) that records how much of it was pulled. */
+function chunkedUpload(totalBytes: number, chunkSize = 512 * 1024) {
+  let sent = 0;
+  let pulls = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulls++;
+      if (sent >= totalBytes) {
+        controller.close();
+        return;
+      }
+      const size = Math.min(chunkSize, totalBytes - sent);
+      sent += size;
+      controller.enqueue(new Uint8Array(size));
+    },
+  });
+  const init = {
+    method: "POST",
+    body: stream,
+    headers: {
+      authorization: "Bearer ziki_test-key",
+      "content-type": "multipart/form-data; boundary=test",
+    },
+    duplex: "half",
+  } as unknown as ConstructorParameters<typeof NextRequest>[1];
+  return { request: new NextRequest("http://localhost/api/v1/attachments", init), pulls: () => pulls };
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
   db.agentApiKey.findUnique.mockResolvedValue(key());
@@ -71,6 +99,29 @@ describe("POST /api/v1/attachments (#645)", () => {
   it("refuses an oversized body before reading it", async () => {
     const response = await POST(upload(new File([PNG], "big.png"), { length: 40 * 1024 * 1024 }));
     expect(response.status).toBe(413);
+    expect(db.attachment.create).not.toHaveBeenCalled();
+  });
+
+  it("stops a chunked body over the cap instead of buffering all of it (#485)", async () => {
+    const { request, pulls } = chunkedUpload(8 * 1024 * 1024);
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: "Over 5 MB. Try a smaller file." });
+    // 8 MB in 512 KB chunks is 16 pulls; reading stopped near the 5 MB cap.
+    expect(pulls()).toBeLessThan(16);
+    expect(db.attachment.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-numeric content-length instead of treating it as zero (#485)", async () => {
+    const request = upload(new File([PNG], "shot.png", { type: "image/png" }));
+    request.headers.set("content-length", "12abc");
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Send a valid Content-Length header." });
     expect(db.attachment.create).not.toHaveBeenCalled();
   });
 

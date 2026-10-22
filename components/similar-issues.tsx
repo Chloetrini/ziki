@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { statusLabels } from "@/lib/labels";
 import { formatIssueNumber } from "@/lib/issue-number";
 import { normalizeQuery, shouldSearch, type SimilarIssue } from "@/lib/similar-issues";
+import { issuePath } from "@/lib/issue-ref";
 
 /** Short enough to feel instant, long enough not to query every keystroke. */
 const DEBOUNCE_MS = 200;
@@ -53,7 +54,7 @@ export function SimilarIssues({ title, id }: { title: string; id?: string }) {
             {issues.map((issue) => (
               <li key={issue.id} className="flex flex-wrap items-baseline gap-x-2 text-sm">
                 <a
-                  href={`/issues/${issue.id}`}
+                  href={issuePath(issue.number)}
                   target="_blank"
                   rel="noopener"
                   className="min-w-0 break-words font-medium text-teal-800 hover:underline"

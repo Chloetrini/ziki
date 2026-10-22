@@ -5,6 +5,7 @@ import { currentTenantIdFor } from "@/lib/tenant-context";
 import { feedProject, feedWhere, FEED_PAGE_SIZE } from "@/lib/feed";
 import { prisma } from "@/lib/prisma";
 import { LocalTime } from "@/components/local-time";
+import { issuePath } from "@/lib/issue-ref";
 
 export const metadata = { title: "New-ticket feed" };
 
@@ -33,7 +34,7 @@ export default async function FeedPage({ searchParams }: {
         <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
           {issues.map((issue) => (
             <li key={issue.id} className="p-4">
-              <Link href={`/issues/${issue.id}`} className="font-medium text-teal-700 hover:underline">#{issue.number} {issue.title}</Link>
+              <Link href={issuePath(issue.number)} className="font-medium text-teal-700 hover:underline">#{issue.number} {issue.title}</Link>
               <p className="mt-1 text-sm text-slate-500">
                 {issue.status.replaceAll("_", " ")} · <LocalTime date={issue.createdAt} />
               </p>

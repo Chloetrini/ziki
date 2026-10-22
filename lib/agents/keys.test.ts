@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   API_KEY_PREFIX,
+  authorizationToken,
   bearerToken,
   generateApiKey,
   generateUserCode,
@@ -28,6 +29,22 @@ describe("agent keys (#427)", () => {
     expect(bearerToken("Bearer sk-other")).toBeNull();
     expect(bearerToken("Bearer ziki_a ziki_b")).toBeNull();
     expect(bearerToken(null)).toBeNull();
+  });
+
+  it("says whether an Authorization header is missing or malformed (#467)", () => {
+    expect(authorizationToken("Bearer ziki_abc")).toEqual({ status: "ok", token: "ziki_abc" });
+    // Nothing was sent at all.
+    expect(authorizationToken(null)).toEqual({ status: "missing" });
+    expect(authorizationToken(undefined)).toEqual({ status: "missing" });
+    expect(authorizationToken("")).toEqual({ status: "missing" });
+    expect(authorizationToken("Bearer")).toEqual({ status: "missing" });
+    expect(authorizationToken("Bearer   ")).toEqual({ status: "missing" });
+    // A header was sent but cannot be a Ziki key.
+    expect(authorizationToken("Bearer bad")).toEqual({ status: "malformed" });
+    expect(authorizationToken("Bearer sk-other")).toEqual({ status: "malformed" });
+    expect(authorizationToken("Bearer ziki_a ziki_b")).toEqual({ status: "malformed" });
+    expect(authorizationToken("Basic ziki_abc")).toEqual({ status: "malformed" });
+    expect(authorizationToken('Bearer "ziki_abc"')).toEqual({ status: "malformed" });
   });
 
   it("makes user codes that survive being retyped loosely", () => {

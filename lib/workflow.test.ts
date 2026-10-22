@@ -81,4 +81,15 @@ describe("workflowFor (#595)", () => {
   it("returns defaults for a test double without the delegate", async () => {
     await expect(workflowFor("project-a", {} as never)).resolves.toEqual(DEFAULT_PROJECT_WORKFLOW);
   });
+
+  it("returns defaults when the workflow table has not been migrated", async () => {
+    const missing = Object.assign(
+      new Error("The table `public.ProjectWorkflow` does not exist in the current database."),
+      { code: "P2021", meta: { table: "public.ProjectWorkflow" } },
+    );
+    db.projectWorkflow.findUnique.mockRejectedValue(missing);
+    await expect(workflowFor("project-a")).resolves.toEqual(DEFAULT_PROJECT_WORKFLOW);
+    await expect(workflowFor("project-a")).resolves.toEqual(DEFAULT_PROJECT_WORKFLOW);
+    expect(db.projectWorkflow.findUnique).toHaveBeenCalledTimes(2);
+  });
 });

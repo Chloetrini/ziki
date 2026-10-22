@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidateIssue } from "@/lib/revalidate-issue";
 import { requireUser } from "@/lib/auth-helpers";
 import { awardBid } from "@/lib/agent-api/bid";
 import { IssueApiError } from "@/lib/agent-api/issues";
@@ -17,7 +17,7 @@ export async function awardIssueBidAction(
   if (!bidId) return { ok: false, error: "Choose a bid." };
   try {
     const awarded = await awardBid(user, bidId);
-    revalidatePath(`/issues/${awarded.bugId}`);
+    revalidateIssue(awarded.bugId);
     return { ok: true };
   } catch (error) {
     if (error instanceof IssueApiError) return { ok: false, error: error.message };

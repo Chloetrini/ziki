@@ -143,7 +143,7 @@ describe("tenant lifecycle actions (#573)", () => {
       renameTenantAction(form({ tenantId: ACME.id, name: "Acme Corp" })),
     );
 
-    expect(path).toBe("/tenants/acme?notice=Tenant%20renamed.");
+    expect(path).toBe("/tenants/acme?notice=Organization%20renamed.");
     expect(mocks.renameTenant).toHaveBeenCalledWith({}, "ada", ACME.id, "Acme Corp");
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/tenants/acme");
   });
@@ -165,14 +165,14 @@ describe("tenant lifecycle actions (#573)", () => {
       await redirectedTo(() =>
         setTenantArchivedAction(form({ tenantId: ACME.id, archived: "true" })),
       ),
-    ).toBe("/tenants?notice=Tenant%20archived.");
+    ).toBe("/tenants?notice=Organization%20archived.");
     expect(mocks.setTenantArchived).toHaveBeenCalledWith({}, "ada", ACME.id, true);
 
     expect(
       await redirectedTo(() =>
         setTenantArchivedAction(form({ tenantId: ACME.id, archived: "false" })),
       ),
-    ).toBe("/tenants?notice=Tenant%20restored.");
+    ).toBe("/tenants?notice=Organization%20restored.");
     expect(mocks.setTenantArchived).toHaveBeenLastCalledWith({}, "ada", ACME.id, false);
   });
 
@@ -182,7 +182,7 @@ describe("tenant lifecycle actions (#573)", () => {
       await redirectedTo(() =>
         deleteTenantAction(form({ tenantId: ACME.id, confirmName: ACME.name })),
       ),
-    ).toBe("/tenants?notice=Tenant%20deleted.");
+    ).toBe("/tenants?notice=Organization%20deleted.");
     expect(mocks.deleteTenant).toHaveBeenCalledWith({}, "ada", ACME.id, ACME.name);
 
     mocks.deleteTenant.mockResolvedValue({ ok: false, error: "This tenant still has issues." });
@@ -209,7 +209,7 @@ describe("createTenantAction (#444)", () => {
 
   it("points at the field to fix, without counting a typo against the limit", async () => {
     const result = await createTenantAction(undefined, form({ name: "A" }));
-    expect(result).toMatchObject({ field: "name", error: "Tenant name must be at least 2 characters." });
+    expect(result).toMatchObject({ field: "name", error: "Workspace name must be at least 2 characters." });
     expect(mocks.consumeRateLimit).not.toHaveBeenCalled();
     expect(mocks.createTenant).not.toHaveBeenCalled();
   });
@@ -219,12 +219,12 @@ describe("createTenantAction (#444)", () => {
       ok: false,
       field: "name",
       duplicateName: "Acme",
-      error: "You're already in a tenant called \"Acme\" (acme).",
+      error: "You're already in an organization called \"Acme\" (acme).",
     });
     expect(await createTenantAction(undefined, form({ name: "Acme" }))).toMatchObject({
       field: "name",
       duplicateName: "Acme",
-      fieldErrors: { name: expect.stringContaining("already in a tenant") },
+      fieldErrors: { name: expect.stringContaining("already in an organization") },
     });
 
     mocks.createTenant.mockResolvedValueOnce({ ok: true, tenant: ACME, projectId: "project-acme" });

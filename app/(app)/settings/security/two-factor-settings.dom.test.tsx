@@ -46,6 +46,7 @@ describe("TwoFactorSettings (#648)", () => {
     const list = await screen.findByRole("list", { name: "Backup codes" });
     expect(list).toHaveTextContent("AAAAA-BBBBB");
     expect(screen.getByText(/They are shown only now/)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("You've been signed out on your other devices.");
     await user.click(screen.getByRole("button", { name: "I've saved them" }));
     expect(actions.refresh).toHaveBeenCalled();
     expect(screen.queryByRole("list", { name: "Backup codes" })).toBeNull();
@@ -79,6 +80,7 @@ describe("TwoFactorSettings (#648)", () => {
     expect(sent.get("password")).toBe("pw");
     expect(sent.get("code")).toBe("123456");
     await waitFor(() => expect(actions.refresh).toHaveBeenCalled());
+    expect(screen.getByRole("status")).toHaveTextContent("You've been signed out on your other devices.");
   });
 
   it("makes new backup codes after re-authentication and shows them", async () => {
@@ -90,6 +92,32 @@ describe("TwoFactorSettings (#648)", () => {
     await user.type(screen.getByLabelText("Authenticator or backup code"), "123456");
     await user.click(screen.getByRole("button", { name: "Make new codes" }));
     expect(await screen.findByRole("list", { name: "Backup codes" })).toHaveTextContent("XXXXX-YYYYY");
+    expect(screen.getByRole("status")).toHaveTextContent("You've been signed out on your other devices.");
+  });
+
+  it("drops the signed-out notice when the next change fails or is cancelled", async () => {
+    const user = userEvent.setup();
+    actions.regenerateBackupCodesAction
+      .mockResolvedValueOnce({ ok: true, codes: ["XXXXX-YYYYY"] })
+      .mockResolvedValueOnce({ ok: false, error: "That code isn't right." });
+    render(<TwoFactorSettings enabled backupCodesLeft={5} />);
+    const makeCodes = async () => {
+      await user.click(screen.getByRole("button", { name: "Make new backup codes" }));
+      await user.type(screen.getByLabelText("Password"), "pw");
+      await user.type(screen.getByLabelText("Authenticator or backup code"), "123456");
+      await user.click(screen.getByRole("button", { name: "Make new codes" }));
+    };
+
+    await makeCodes();
+    await user.click(await screen.findByRole("button", { name: "I've saved them" }));
+    expect(screen.getByRole("status")).toHaveTextContent("You've been signed out on your other devices.");
+
+    await makeCodes();
+    expect(await screen.findByRole("alert")).toHaveTextContent("That code isn't right.");
+    expect(screen.queryByRole("status")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("explains when copying backup codes fails and keeps them available", async () => {
@@ -116,5 +144,6 @@ describe("TwoFactorSettings (#648)", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByText("On")).toBeInTheDocument();
     expect(actions.disableTwoFactorAction).not.toHaveBeenCalled();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });

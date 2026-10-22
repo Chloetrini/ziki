@@ -31,7 +31,7 @@ export const CREATE_INVITE_RATE_LIMIT = { max: 30, windowMs: 60 * 60 * 1000 };
 export const ACCEPT_INVITE_RATE_LIMIT = { max: 20, windowMs: 15 * 60 * 1000 };
 
 /** The same words whether the tenant doesn't exist or isn't yours to manage. */
-export const INVITE_NOT_ALLOWED = "Only an owner or admin of this tenant can manage its invites.";
+export const INVITE_NOT_ALLOWED = "Only an owner or admin of this organization can manage its invites.";
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
 

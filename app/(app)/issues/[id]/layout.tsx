@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth-helpers";
 import { viewerBugScope } from "@/lib/tenant-viewer";
+import { parseIssueRef, resolveIssueRef } from "@/lib/issue-ref";
 import { canDeleteTicket } from "@/lib/ticket-deletion";
 import { currentTenantAccess } from "@/lib/tenant-access";
 
@@ -24,8 +25,11 @@ export default async function IssueLayout({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const bug = await prisma.bug.findUnique({
-    where: { id, ...(await viewerBugScope()) },
+  const scope = await viewerBugScope();
+  // #457: the segment may be a readable number (`123`, `ZE-123`) or an old id.
+  const ref = await resolveIssueRef(prisma, parseIssueRef(id), scope);
+  const bug = ref && await prisma.bug.findUnique({
+    where: { id: ref.id, ...scope },
     select: { isDeleted: true },
   });
   if (!bug) notFound();

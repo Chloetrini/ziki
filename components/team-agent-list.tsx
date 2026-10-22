@@ -32,6 +32,7 @@ export function TeamAgentList({ agents }: { agents: TeamAgent[] }) {
                       {issue.title}
                     </Link>
                     {issue.categoryName ? <span className="text-slate-500"> · {issue.categoryName}</span> : null}
+                    {issue.areaName ? <span className="text-slate-500"> · {issue.areaName}</span> : null}
                   </li>
                 ))}
               </ul>

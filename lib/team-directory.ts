@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { AgentLevel, Prisma, PrismaClient } from "@prisma/client";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -10,13 +10,16 @@ export type TeamAgentWork = {
   title: string;
   categoryId: string | null;
   categoryName: string | null;
+  /** The project area (#609) the issue is in, which the Team page filters on. */
+  areaId: string | null;
+  areaName: string | null;
 };
 
 export type TeamAgent = {
   id: string;
   name: string;
   model: string | null;
-  level: "observer" | "contributor" | "reviewer" | "merger";
+  level: AgentLevel;
   online: boolean;
   acceptedFixes: number;
   currentWork: TeamAgentWork[];
@@ -48,6 +51,9 @@ export async function teamAgentsForMembers(
       name: true,
       model: true,
       level: true,
+      // #1123: any authenticated request counts as being seen, not only a
+      // claim heartbeat. requireAgent stamps lastUsedAt, at most once a minute.
+      apiKeys: { where: { revokedAt: null }, select: { lastUsedAt: true } },
       claims: {
         where: {
           status: "active",
@@ -63,6 +69,8 @@ export async function teamAgentsForMembers(
               title: true,
               categoryId: true,
               category: { select: { name: true } },
+              areaId: true,
+              area: { select: { name: true } },
             },
           },
         },
@@ -105,11 +113,17 @@ export async function teamAgentsForMembers(
       title: bug.title,
       categoryId: bug.categoryId,
       categoryName: bug.category?.name ?? null,
+      areaId: bug.areaId ?? null,
+      areaName: bug.area?.name ?? null,
     }));
-    const lastSeen = agent.claims.reduce<Date | null>((latest, claim) => {
-      const seen = claim.lastHeartbeatAt ?? claim.claimedAt;
-      return seen && (!latest || seen > latest) ? seen : latest;
-    }, null);
+    const seenTimes = [
+      ...agent.apiKeys.map((key) => key.lastUsedAt),
+      ...agent.claims.map((claim) => claim.lastHeartbeatAt ?? claim.claimedAt),
+    ];
+    const lastSeen = seenTimes.reduce<Date | null>(
+      (latest, seen) => (seen && (!latest || seen > latest) ? seen : latest),
+      null,
+    );
     const memberAgents = result.get(agent.ownerUserId);
     memberAgents?.push({
       id: agent.id,

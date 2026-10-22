@@ -46,7 +46,7 @@ export async function gettingStartedFor(
     {
       id: "project",
       label: "Set up a project",
-      hint: "One per product you track, such as a web app or a desktop app.",
+      hint: "One product you track, such as a web app. A platform such as Web or Mobile is a label on an issue, not its own project.",
       href: "/projects",
       done: projects > 0,
     },

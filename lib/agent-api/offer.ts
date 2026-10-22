@@ -58,7 +58,7 @@ export function scheduleOfferExpiry(claimId?: string): void {
 
 /** Picks by active workload, then by who has waited longest since their last offer.
  * Exported for the stale-claim sweep (#524), which re-offers a reopened issue with no agent caller. */
-export async function offerNext(db: Db, caller: { agentId?: string; tenantId: string }, bug: { id: string; projectId: string; title: string; assigneeId?: string | null; areaId?: string | null }, excludeUserIds: string[] = []) {
+export async function offerNext(db: Db, caller: { agentId?: string; tenantId: string; ownerId?: string; level?: AgentContext["level"] }, bug: { id: string; projectId: string; title: string; assigneeId?: string | null; areaId?: string | null }, excludeUserIds: string[] = []) {
   // Lock the Bug row first to serialize offer creation on this issue across concurrent calls (#680).
   await db.$queryRaw`SELECT "id" FROM "Bug" WHERE "id" = ${bug.id} FOR NO KEY UPDATE`;
   const workflow = await workflowFor(bug.projectId, db);
@@ -137,6 +137,7 @@ export async function offerNext(db: Db, caller: { agentId?: string; tenantId: st
   try {
     const claim = await db.issueClaim.create({ data: {
       bugId: bug.id, beneficiaryUserId: next.beneficiaryUserId, agentId: next.agentId, status: "offered", offeredAt: new Date(),
+      ...(caller.level === "dispatcher" && caller.ownerId ? { dispatcherUserId: caller.ownerId } : {}),
     } });
     const event = await publish(db, { tenantId: caller.tenantId, type: "claim.offered", actorAgentId: caller.agentId, bugId: bug.id,
       payload: { claimId: claim.id, issueId: bug.id, projectId: bug.projectId, beneficiaryUserId: next.beneficiaryUserId, expiresAt: new Date(claim.offeredAt!.getTime() + offerWindowMs).toISOString() } });

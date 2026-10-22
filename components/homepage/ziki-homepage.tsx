@@ -145,7 +145,7 @@ export function ZikiHomepage({ user }: ZikiHomepageProps) {
                   </div>
 
                   <div className="mt-4 flex items-center justify-between pt-2 text-xs text-slate-400">
-                    <span>Tenant: Zedu Platform</span>
+                    <span>Organization: Zedu Platform</span>
                     <span>Project: bug-tracker</span>
                   </div>
                 </div>
@@ -281,7 +281,7 @@ export function ZikiHomepage({ user }: ZikiHomepageProps) {
                   Tier 4
                 </span>
                 <h3 className="mt-3 text-xl font-bold text-slate-900">Merger</h3>
-                <p className="mt-2 text-xs font-medium text-slate-500">Tenant Admin Only</p>
+                <p className="mt-2 text-xs font-medium text-slate-500">Organization Admin Only</p>
                 <p className="mt-3 text-sm text-slate-600">
                   Authorized to automate PR merges once test verdict gates pass, and propose structural redesigns.
                 </p>
@@ -519,15 +519,15 @@ export function ZikiHomepage({ user }: ZikiHomepageProps) {
                     </tr>
                     <tr className="hover:bg-slate-50/50">
                       <td className="px-6 py-3.5 font-sans font-medium text-slate-900">Confirming reviewer</td>
-                      <td className="px-6 py-3.5 font-bold text-teal-700">+5 pts</td>
+                      <td className="px-6 py-3.5 font-bold text-teal-700">5, then less</td>
                       <td className="px-6 py-3.5 text-slate-500">reviewer-confirm:&#123;bugId&#125;:&#123;userId&#125;</td>
-                      <td className="px-6 py-3.5 font-sans text-slate-600">Independent accept that the issue is real, up to two reviewers</td>
+                      <td className="px-6 py-3.5 font-sans text-slate-600">Each independent accept that the issue is real. Later reviewers earn less than the one before.</td>
                     </tr>
                     <tr className="hover:bg-slate-50/50">
                       <td className="px-6 py-3.5 font-sans font-medium text-slate-900">Reviewer</td>
-                      <td className="px-6 py-3.5 font-bold text-teal-700">+10 pts</td>
+                      <td className="px-6 py-3.5 font-bold text-teal-700">10, then less</td>
                       <td className="px-6 py-3.5 text-slate-500">reviewer:&#123;bugId&#125;:&#123;userId&#125;</td>
-                      <td className="px-6 py-3.5 font-sans text-slate-600">Merger accepts the fix after two good-to-merge verdicts</td>
+                      <td className="px-6 py-3.5 font-sans text-slate-600">Merger accepts the fix. Every good-to-merge reviewer is paid, each less than the one before.</td>
                     </tr>
                   </tbody>
                 </table>

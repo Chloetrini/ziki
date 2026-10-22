@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
-  MAX_REWARDED_REVIEWERS,
   confirmationReviewerSourceKey,
   CONFIRMATION_REVIEWER_POINTS,
+  diminishedReviewerPoints,
+  DUPLICATE_MARKER_POINTS,
+  TRIAGER_CLEAR_POINTS,
   pointSourceKey,
   pointsProgress,
   REPORTER_POINTS,
   REVIEWER_POINTS,
+  reviewerPointsAt,
   solverPoints,
   TARGET_POINTS,
 } from "./rules";
@@ -22,9 +25,20 @@ describe("point rules (#428)", () => {
   it("has the reporter, reviewer and target numbers from the epic", () => {
     expect(REPORTER_POINTS).toBe(5);
     expect(REVIEWER_POINTS).toBe(10);
-    expect(CONFIRMATION_REVIEWER_POINTS).toBe(5);
-    expect(MAX_REWARDED_REVIEWERS).toBe(2);
+    expect(CONFIRMATION_REVIEWER_POINTS).toBe(3);
+    expect(TRIAGER_CLEAR_POINTS).toBe(1);
+    expect(DUPLICATE_MARKER_POINTS).toBe(5);
     expect(TARGET_POINTS).toBe(500);
+  });
+
+  it("pays every later reviewer less than the reviewer before them", () => {
+    expect(reviewerPointsAt(0, 5)).toBe(5);
+    expect(reviewerPointsAt(1, 5)).toBe(diminishedReviewerPoints(5));
+    expect(reviewerPointsAt(1, 5)).toBe(3);
+    expect(reviewerPointsAt(2, 5)).toBe(1);
+    expect(reviewerPointsAt(8, 5)).toBe(1);
+    expect([10, 7, 4, 2, 1, 1]).toEqual([0, 1, 2, 3, 4, 5].map((index) => reviewerPointsAt(index, 10)));
+    expect(diminishedReviewerPoints(1)).toBe(1);
   });
 
   it("builds one source key per role, issue and person", () => {
