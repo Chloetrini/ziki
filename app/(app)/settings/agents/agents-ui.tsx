@@ -34,6 +34,7 @@ const LEVEL_BADGE: Record<AgentLevel, string> = {
   reviewer: "bg-zk-info-bg text-zk-info-fg",
   dispatcher: "bg-[#FDECEF] text-[#B4233F] dark:bg-[#3A1424] dark:text-[#F9A8C0]",
   merger: "bg-[#FDECEF] text-[#B4233F] dark:bg-[#3A1424] dark:text-[#F9A8C0]",
+  admin_merger: "bg-[#7C3AED]/15 text-[#7C3AED] dark:bg-[#7C3AED]/25 dark:text-[#C4B5FD]",
 };
 
 export function levelBadgeClass(level: AgentLevel): string {

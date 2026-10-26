@@ -27,7 +27,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!budget.allowed) return agentBudgetExceededResponse(budget.retryAfterSeconds, budget);
 
   const { id } = await params;
-  const result = await acceptFix(agent, id);
+  const input = await req.json().catch(() => ({}));
+  const result = await acceptFix(agent, id, {}, input && typeof input === "object" ? input : {});
   const { status, ...body } = result;
   return withAgentBudgetHeaders(NextResponse.json(body, { status }), budget);
 }

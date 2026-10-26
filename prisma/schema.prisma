@@ -67,6 +67,7 @@ enum AgentLevel {
   reviewer
   merger
   dispatcher
+  admin_merger
 }
 
 enum MissionRole {
@@ -342,6 +343,8 @@ model Bug {
   /// Head commit of that pull request when it was linked (#489). Acceptance
   /// and the merge gate bind to this exact commit, not just the PR number.
   pullRequestHeadSha String?
+  /// Fine-grained review stage: "submitted" | "ready_to_merge" | "rejected" | "merged" (#SDLC).
+  reviewStatus      String?
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   reporter          User               @relation("BugReporter", fields: [reporterId], references: [id])
@@ -369,6 +372,7 @@ model Bug {
   agentEvents       AgentEvent[]
   auditEvents       AgentAuditEvent[]
   goalAllocations   GoalAllocation[]
+  mistakes          AgentMistake[]
 
   /// #517: issue numbers are per tenant, so two tenants can both have a #1.
   @@unique([tenantId, number])
@@ -658,6 +662,7 @@ model Project {
   approvalRules        ApprovalRule[]
   goals                Goal[]
   workflow             ProjectWorkflow?
+  mistakes             AgentMistake[]
 
   @@unique([tenantId, slug])
 }
@@ -895,6 +900,7 @@ model Agent {
   jobReviewOffers      JobReviewOffer[]
   inboxItems           AgentInboxItem[]
   goalAllocations      GoalAllocation[]
+  recordedMistakes     AgentMistake[]
 
   @@unique([ownerUserId, defaultProjectId])
   @@index([tenantId])
@@ -1634,4 +1640,38 @@ model PlatformSettings {
   rewardConfig Json?
   updatedAt    DateTime @updatedAt
   updatedById  String?
+}
+
+/// A shared knowledge base / anti-pattern entry recorded by Merger agents (#SDLC).
+model AgentMistake {
+  id              String          @id @default(cuid())
+  tenantId        String
+  projectId       String
+  bugId           String?
+  mergerAgentId   String
+  category        MistakeCategory @default(correctness)
+  title           String
+  antiPattern     String
+  remediation     String
+  badCodeSnippet  String?
+  goodCodeSnippet String?
+  recurrenceCount Int             @default(1)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  project         Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  mergerAgent     Agent           @relation(fields: [mergerAgentId], references: [id], onDelete: Cascade)
+  bug             Bug?            @relation(fields: [bugId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, category])
+  @@index([tenantId, projectId])
+}
+
+enum MistakeCategory {
+  correctness
+  efficiency
+  completeness
+  mergeability
+  architecture
+  security
 }

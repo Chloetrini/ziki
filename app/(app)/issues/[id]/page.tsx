@@ -83,6 +83,8 @@ import { tenantMemberWhere } from "@/lib/tenant-mentions";
 import { readAgentResolution } from "@/lib/agent-resolution";
 import { AgentResolvedNotice } from "@/components/agent-resolved-notice";
 import { issueStageLabels } from "@/lib/issue-stage";
+import { ReviewStatusBadge } from "@/components/review-status-badge";
+import { SubmissionEvidence } from "@/components/submission-evidence";
 import {
   issueChipBaseClass,
   issueSeverityChipClass,
@@ -208,6 +210,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
       select: {
         title: true,
         status: true,
+        reviewStatus: true,
         isDeleted: true,
       },
     });
@@ -221,6 +224,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
           <Badge className={`${issueChipBaseClass} ${issueStatusChipClass[bug.status]}`}>
             {statusLabels[bug.status]}
           </Badge>
+          <ReviewStatusBadge status={bug.reviewStatus} />
         </div>
         <Link
           href={`/login?callbackUrl=${encodeURIComponent(`/issues/${rawId}`)}`}
@@ -653,6 +657,15 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
     if (typeof value === "string") pageQuery.set(key, value);
   }
   const proofLinks = bug.proofLinks ?? [];
+  const prActivity = activities.find((a) => {
+    const meta = a.metadata as Record<string, unknown> | null;
+    return meta && (meta.screenshots || meta.testResults || meta.field === "pullRequestUrl");
+  });
+  const prMeta = prActivity?.metadata as Record<string, unknown> | null;
+  const submissionScreenshots: string[] = Array.isArray(prMeta?.screenshots)
+    ? (prMeta?.screenshots as string[])
+    : proofLinks.filter((l) => /\.(png|jpe?g|webp|gif|svg)($|\?)/i.test(l));
+  const submissionTestResults = (prMeta?.testResults as string | Record<string, unknown> | null) ?? null;
 
   const resolution = currentResolution(bug.status, latestStatusChange);
   const agentResolution =
@@ -1062,6 +1075,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
                 <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
                 {statusLabels[bug.status]}
               </Badge>
+              <ReviewStatusBadge status={bug.reviewStatus} />
               <Badge className={`${issueChipBaseClass} ${issueSeverityChipClass[bug.severity]}`}>
                 {severityLabels[bug.severity]}
               </Badge>
@@ -1136,6 +1150,12 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
             initialLinks={proofLinks}
             linkedPullRequestUrl={bug.pullRequestUrl}
             canEdit={(canEdit || isAssignee) && !bug.isDeleted}
+          />
+
+          <SubmissionEvidence
+            screenshots={submissionScreenshots}
+            testResults={submissionTestResults}
+            pullRequestUrl={bug.pullRequestUrl}
           />
 
           <IssueBids

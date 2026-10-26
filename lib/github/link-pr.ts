@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { publish } from "@/lib/agent-api/events";
 import { createReviewOffers } from "@/lib/agent-api/review-offer";
@@ -26,28 +26,44 @@ export async function linkPullRequest(params: {
   actorUserId: string;
   /** Marks how the link happened, e.g. `github_pull_request_opened`. */
   via?: string;
+  screenshots?: string[];
+  testResults?: string | Record<string, unknown>;
   db?: PrismaClient;
 }): Promise<void> {
   const db = params.db ?? prisma;
-  const { bugId, tenantId, projectId, pullRequestUrl, pullRequestHeadSha } = params;
+  const { bugId, tenantId, projectId, pullRequestUrl, pullRequestHeadSha, screenshots, testResults } = params;
 
   await db.$transaction(async (tx) => {
     await tx.bug.update({
       where: { id: bugId },
-      data: { pullRequestUrl, pullRequestHeadSha },
+      data: {
+        pullRequestUrl,
+        pullRequestHeadSha,
+        reviewStatus: "submitted",
+        ...(screenshots?.length ? { proofLinks: { push: screenshots } } : {}),
+      },
     });
+
+    const summaryEvidence = [
+      screenshots?.length ? `${screenshots.length} screenshot(s)` : null,
+      testResults ? "test results" : null,
+    ].filter(Boolean).join(" and ");
+
+    const meta: Prisma.InputJsonObject = {
+      field: "pullRequestUrl",
+      pullRequestUrl,
+      ...(screenshots ? { screenshots } : {}),
+      ...(testResults ? { testResults: testResults as Prisma.InputJsonValue } : {}),
+      ...(params.via ? { via: params.via } : {}),
+    };
 
     await tx.bugActivity.create({
       data: {
         bugId,
         actorId: params.actorUserId,
         type: "edited",
-        summary: `linked PR ${pullRequestUrl}`,
-        metadata: {
-          field: "pullRequestUrl",
-          pullRequestUrl,
-          ...(params.via ? { via: params.via } : {}),
-        },
+        summary: `linked PR ${pullRequestUrl}${summaryEvidence ? ` with ${summaryEvidence}` : ""}`,
+        metadata: meta,
       },
     });
 
@@ -62,25 +78,35 @@ export async function linkPullRequest(params: {
       data: { pullRequestUrl },
     });
 
+    const eventPayload: Prisma.InputJsonObject = {
+      issueId: bugId,
+      projectId,
+      pullRequestUrl,
+      agentId: params.actorAgentId,
+      ...(screenshots ? { screenshots } : {}),
+      ...(testResults ? { testResults: testResults as Prisma.InputJsonValue } : {}),
+    };
+
     await publish(tx, {
       tenantId,
       type: "issue.pr_linked",
-      payload: {
-        issueId: bugId,
-        projectId,
-        pullRequestUrl,
-        agentId: params.actorAgentId,
-      },
+      payload: eventPayload,
       actorAgentId: params.actorAgentId,
       bugId,
     });
 
     if (params.actorAgentId) {
+      const auditPayload: Prisma.InputJsonObject = {
+        pullRequestUrl,
+        pullRequestHeadSha,
+        ...(screenshots ? { screenshots } : {}),
+        ...(testResults ? { testResults: testResults as Prisma.InputJsonValue } : {}),
+      };
       await audit(
         { agentId: params.actorAgentId, tenantId },
         "github.linked",
         `bug:${bugId}`,
-        { pullRequestUrl, pullRequestHeadSha },
+        auditPayload,
         { db: tx, bugId },
       );
     }

@@ -35,5 +35,19 @@ export const issueStageChipClass: Record<IssueStage, string> = {
   ready: "bg-zk-info-bg text-zk-info-fg",
 };
 
+export const reviewStatusLabels: Record<string, string> = {
+  submitted: "In Review",
+  ready_to_merge: "Ready to Merge",
+  rejected: "Needs Revision",
+  merged: "Merged",
+};
+
+export const reviewStatusChipClass: Record<string, string> = {
+  submitted: "border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300",
+  ready_to_merge: "border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
+  rejected: "border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
+  merged: "border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300",
+};
+
 export const issueChipBaseClass =
   "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold";

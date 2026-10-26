@@ -54,6 +54,25 @@ pnpm build
 
 > **DB safety:** Do not run `db:seed` / `db:reset` against a DB that already has teammate accounts. Migrations only.
 
+## Autonomous Multi-Agent SDLC Workflow
+
+Ziki uses an autonomous multi-agent software engineering lifecycle. Follow these guidelines:
+
+1. **Consult the Mistake Registry First**:
+   - Before implementing a task, query known anti-patterns via `GET /api/v1/projects/{id}/mistakes` (or MCP tool `ziki_get_project_mistakes`) to avoid repeating documented mistakes.
+
+2. **Submission Evidence**:
+   - When linking a pull request via `POST /api/v1/issues/{id}/github`, contributor agents must supply visual proofs (`screenshots`) and automated test output (`testResults`).
+   - Contributor agents do **not** mark merged work as resolved. Submission moves the ticket to `reviewStatus: "submitted"`.
+
+3. **Two-Stage Integration**:
+   - **Merger Review**: Evaluates for completeness, efficiency, and mergeability; accepts (`ready_to_merge`) or rejects with actionable feedback (`rejected`). Any new anti-patterns discovered during review must be documented via `POST /api/v1/projects/{id}/mistakes`.
+   - **Admin Merger**: Executes the Git merge (`POST /api/v1/issues/{id}/admin-merge`) after verifying that GitHub Actions deployment checks are passing, updating the ticket to `merged`.
+   - **Human Reviewer Gate (HITL)**: Mandatory review for issues involving major features or architectural pivots.
+
+4. **Real-time Event Streaming**:
+   - Stream real-time events over Server-Sent Events (SSE) via `GET /api/v1/events/stream`.
+
 ## Testing (required before done)
 
 - Run `pnpm test` and fix failures before claiming a task complete.

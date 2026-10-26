@@ -55,13 +55,17 @@ const params = { params: Promise.resolve({ id: "bug1" }) };
 const PR_URL = "https://github.com/zedu/web/pull/7";
 
 function request(body: unknown, key = true, issueId = "bug1") {
+  const payload =
+    body && typeof body === "object" && !Array.isArray(body) && "pullRequestUrl" in body && !("screenshots" in body) && !("testResults" in body)
+      ? { ...body, testResults: "passes vitest" }
+      : body;
   return new NextRequest(`http://localhost/api/v1/issues/${issueId}/github`, {
     method: "POST",
     headers: {
       ...(key ? { authorization: "Bearer test-key" } : {}),
       "content-type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -101,17 +105,18 @@ describe("POST /api/v1/issues/[id]/github (#452)", () => {
     expect(await response.json()).toEqual({ linked: true, merged: true, mergeCommitSha: "merge-sha" });
     expect(db.bug.update).toHaveBeenCalledWith({
       where: { id: "bug1" },
-      data: { pullRequestUrl: PR_URL, pullRequestHeadSha: null },
+      data: { pullRequestUrl: PR_URL, pullRequestHeadSha: null, reviewStatus: "submitted" },
     });
     expect(db.bugActivity.create).toHaveBeenCalledWith({
       data: {
         bugId: "bug1",
         actorId: agent.ownerId,
         type: "edited",
-        summary: `linked PR ${PR_URL}`,
+        summary: `linked PR ${PR_URL} with test results`,
         metadata: {
           field: "pullRequestUrl",
           pullRequestUrl: PR_URL,
+          testResults: "passes vitest",
         },
       },
     });
@@ -124,6 +129,7 @@ describe("POST /api/v1/issues/[id]/github (#452)", () => {
           projectId: "proj-1",
           pullRequestUrl: PR_URL,
           agentId: agent.agentId,
+          testResults: "passes vitest",
         },
         actorAgentId: agent.agentId,
         bugId: "bug1",
@@ -132,6 +138,19 @@ describe("POST /api/v1/issues/[id]/github (#452)", () => {
     });
     expect(mocks.merge).toHaveBeenCalledWith(agent, "bug1");
     expect(mocks.budget).toHaveBeenCalledWith({ id: "c1", burst: false, burstUntil: null }, "write");
+  });
+
+  it("rejects submissions without screenshots or test results", async () => {
+    const rawReq = new NextRequest("http://localhost/api/v1/issues/bug1/github", {
+      method: "POST",
+      headers: { authorization: "Bearer test-key", "content-type": "application/json" },
+      body: JSON.stringify({ pullRequestUrl: PR_URL }),
+    });
+    const response = await POST(rawReq, params);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: "Include screenshots of the fix or test results demonstrating the fix with your pull request submission.",
+    });
   });
 
   it.each(["42", "ZE-42"])("resolves issue reference %s before linking the pull request", async (issueId) => {
@@ -168,7 +187,7 @@ describe("POST /api/v1/issues/[id]/github (#452)", () => {
     expect(response.status).toBe(200);
     expect(db.bug.update).toHaveBeenCalledWith({
       where: { id: "bug1" },
-      data: { pullRequestUrl: PR_URL, pullRequestHeadSha: null },
+      data: { pullRequestUrl: PR_URL, pullRequestHeadSha: null, reviewStatus: "submitted" },
     });
   });
 
@@ -267,7 +286,7 @@ describe("POST /api/v1/issues/[id]/github (#452)", () => {
     expect(await response.json()).toMatchObject({ linked: true, merged: false, reason: "head_moved" });
     expect(db.bug.update).toHaveBeenCalledWith({
       where: { id: "bug1" },
-      data: { pullRequestUrl: PR_URL, pullRequestHeadSha: "fresh-sha" },
+      data: { pullRequestUrl: PR_URL, pullRequestHeadSha: "fresh-sha", reviewStatus: "submitted" },
     });
   });
 
@@ -282,7 +301,7 @@ describe("POST /api/v1/issues/[id]/github (#452)", () => {
     expect(response.status).toBe(200);
     expect(db.bug.update).toHaveBeenCalledWith({
       where: { id: "bug1" },
-      data: { pullRequestUrl: PR_URL, pullRequestHeadSha: "abc123" },
+      data: { pullRequestUrl: PR_URL, pullRequestHeadSha: "abc123", reviewStatus: "submitted" },
     });
   });
 
@@ -299,7 +318,7 @@ describe("POST /api/v1/issues/[id]/github (#452)", () => {
     expect(response.status).toBe(200);
     expect(db.bug.update).toHaveBeenCalledWith({
       where: { id: "bug1" },
-      data: { pullRequestUrl: PR_URL, pullRequestHeadSha: null },
+      data: { pullRequestUrl: PR_URL, pullRequestHeadSha: null, reviewStatus: "submitted" },
     });
   });
 

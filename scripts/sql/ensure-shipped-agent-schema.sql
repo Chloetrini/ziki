@@ -60,3 +60,7 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
   ALTER TABLE "IssueBid" ADD CONSTRAINT "IssueBid_claimId_fkey" FOREIGN KEY ("claimId") REFERENCES "IssueClaim"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+ALTER TYPE "AgentLevel" ADD VALUE IF NOT EXISTS 'admin_merger';
+ALTER TABLE "Bug" ADD COLUMN IF NOT EXISTS "reviewStatus" TEXT;
+

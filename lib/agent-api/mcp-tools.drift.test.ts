@@ -15,6 +15,7 @@ import { releaseSchema } from "./offer";
 import { structureInputSchema } from "./structure";
 import { testVerdictBodySchema } from "./test-verdict";
 import { validationBodySchema } from "./validation";
+import { recordMistakeSchema } from "./mistakes";
 
 /**
  * The MCP server (packages/mcp-server) builds its tool inputs from its own zod
@@ -44,6 +45,7 @@ const ROUTE_SCHEMAS: Record<string, z.ZodType> = {
   ziki_propose_redesign: redesignSchema,
   ziki_next_mission: nextMissionSchema,
   ziki_cover_mission: missionCoverageSchema.extend({ projectId: z.string().trim().min(1) }),
+  ziki_record_project_mistake: recordMistakeSchema,
 };
 
 // The agent routes extend the shared issue and comment schemas with attachmentIds (lib/agent-api/issues.ts).

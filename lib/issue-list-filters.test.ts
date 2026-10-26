@@ -45,6 +45,14 @@ describe("parseBugListFilters", () => {
     expect(parse({ severity: "spicy" }).where.severity).toBeUndefined();
   });
 
+  it("applies reviewStatus only when it is a valid lifecycle phase", () => {
+    expect(parse({ reviewStatus: "submitted" }).where.reviewStatus).toBe("submitted");
+    expect(parse({ reviewStatus: "ready_to_merge" }).where.reviewStatus).toBe("ready_to_merge");
+    expect(parse({ reviewStatus: "rejected" }).where.reviewStatus).toBe("rejected");
+    expect(parse({ reviewStatus: "merged" }).where.reviewStatus).toBe("merged");
+    expect(parse({ reviewStatus: "invalid" }).where.reviewStatus).toBeUndefined();
+  });
+
   it("understands the finished aggregate the stat grid links to (#685)", () => {
     // The Closed tile counts resolved + closed and links to ?status=finished;
     // the export has to return that same set, not every status.

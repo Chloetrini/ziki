@@ -14,29 +14,36 @@ import {
 } from "./levels";
 
 describe("agent levels (#427)", () => {
-  it("keeps specialist roles separate and lets only dispatcher and merger inherit", () => {
+  it("keeps specialist roles separate, isolates dispatcher, and provides universal observation", () => {
     expect(hasLevel("merger", "observer")).toBe(true);
     expect(hasLevel("reviewer", "contributor")).toBe(false);
     expect(hasLevel("reviewer", "triager")).toBe(false);
     expect(hasLevel("triager", "contributor")).toBe(false);
     expect(hasLevel("contributor", "contributor")).toBe(true);
+    expect(hasLevel("contributor", "observer")).toBe(true);
     expect(hasLevel("observer", "contributor")).toBe(false);
     expect(hasLevel("reviewer", "merger")).toBe(false);
-    expect(hasLevel("merger", "dispatcher")).toBe(true);
+    expect(hasLevel("merger", "dispatcher")).toBe(false);
     expect(hasLevel("dispatcher", "merger")).toBe(false);
-    expect(hasLevel("dispatcher", "reviewer")).toBe(true);
+    expect(hasLevel("dispatcher", "reviewer")).toBe(false);
+    expect(hasLevel("dispatcher", "contributor")).toBe(false);
+    expect(hasLevel("dispatcher", "dispatcher")).toBe(true);
+    expect(hasLevel("dispatcher", "observer")).toBe(true);
+    expect(hasLevel("admin_merger", "merger")).toBe(true);
+    expect(hasLevel("admin_merger", "observer")).toBe(true);
   });
 
   it("enforces the complete capability matrix", () => {
-    const ladder = ["observer", "contributor", "triager", "reviewer", "dispatcher", "merger"] as const;
+    const ladder = ["observer", "contributor", "triager", "reviewer", "dispatcher", "merger", "admin_merger"] as const;
     expect(AGENT_LEVELS).toEqual(ladder);
     const allowed = {
       observer: ["observer"],
       contributor: ["observer", "contributor"],
       triager: ["observer", "triager"],
       reviewer: ["observer", "reviewer"],
-      dispatcher: ["observer", "contributor", "triager", "reviewer", "dispatcher"],
-      merger: [...ladder],
+      dispatcher: ["observer", "dispatcher"],
+      merger: ["observer", "merger"],
+      admin_merger: ["observer", "merger", "admin_merger"],
     };
     for (const level of ladder) {
       for (const required of ladder) {
@@ -55,21 +62,22 @@ describe("agent levels (#427)", () => {
     }
   });
 
-  it("reserves dispatcher and merger grants for tenant admins", () => {
+  it("reserves dispatcher, merger, and admin_merger grants for tenant admins", () => {
     const owner = { isOwner: true, isTenantAdmin: false };
     expect(canSetLevel(owner, "reviewer")).toBe(true);
     expect(canSetLevel(owner, "triager")).toBe(true);
     expect(canSetLevel(owner, "merger")).toBe(false);
     expect(canSetLevel(owner, "dispatcher")).toBe(false);
+    expect(canSetLevel(owner, "admin_merger")).toBe(false);
     expect(canSetLevel({ isOwner: false, isTenantAdmin: true }, "merger")).toBe(true);
     expect(canSetLevel({ isOwner: false, isTenantAdmin: true }, "dispatcher")).toBe(true);
+    expect(canSetLevel({ isOwner: false, isTenantAdmin: true }, "admin_merger")).toBe(true);
     expect(canSetLevel({ isOwner: false, isTenantAdmin: false }, "observer")).toBe(false);
     expect(settableLevels(owner)).toEqual(["observer", "contributor", "triager", "reviewer"]);
   });
 
   it("explains specialist roles without weakening review independence", () => {
-    expect(SEPARATE_LEVEL_AGENTS).toContain("Only dispatcher and merger inherit");
-    expect(SEPARATE_LEVEL_AGENTS).toMatch(/observer/);
+    expect(SEPARATE_LEVEL_AGENTS).toContain("observation is universal");
     expect(SEPARATE_LEVEL_AGENTS).toMatch(/contributor/);
     expect(SEPARATE_LEVEL_AGENTS).toMatch(/reviewer/);
     expect(SEPARATE_LEVEL_AGENTS).toMatch(/merger/);
@@ -82,6 +90,7 @@ describe("agent levels (#427)", () => {
 
   it("recognises only real levels, so a forged body can't set one", () => {
     expect(isAgentLevel("merger")).toBe(true);
+    expect(isAgentLevel("admin_merger")).toBe(true);
     expect(isAgentLevel("admin")).toBe(false);
     expect(isAgentLevel(undefined)).toBe(false);
   });

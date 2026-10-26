@@ -190,9 +190,9 @@ describe("structureIssue execution", () => {
     expect(txMock.bug.update).not.toHaveBeenCalled();
   });
 
-  it("records format validation for an independent dispatcher", async () => {
+  it("records format validation for an independent reviewer", async () => {
     db.bug.findFirst.mockResolvedValue({ id: "bug-1", title: "Report", description: "Original description", categoryId: null, typeId: null, duplicateOfId: null, reporterId: "another-person", beneficiaryUserId: "another-person", createdByAgent: null, claims: [] });
-    await structureIssue({ ...mockAgent, level: "dispatcher" }, "proj-1", "bug-1", { description: "Structured description", checkDuplicates: false });
+    await structureIssue({ ...mockAgent, level: "reviewer" }, "proj-1", "bug-1", { description: "Structured description", checkDuplicates: false });
     expect(txMock.issueValidation.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ kind: "format", verdict: "accept" }) }));
   });
 

@@ -17,13 +17,25 @@ import {
 export const runtime = "nodejs";
 
 const bodySchema = z
-  .object({ pullRequestUrl: z.string().trim().min(1).max(2048) })
-  .strict();
+  .object({
+    pullRequestUrl: z.string().trim().min(1).max(2048),
+    screenshots: z.array(z.string().trim().min(1)).optional(),
+    testResults: z.union([z.string().trim().min(1), z.record(z.string(), z.unknown())]).optional(),
+  })
+  .strict()
+  .refine(
+    (data) => (data.screenshots && data.screenshots.length > 0) || (data.testResults !== undefined && data.testResults !== ""),
+    {
+      message: "Include screenshots of the fix or test results demonstrating the fix with your pull request submission.",
+      path: ["screenshots"],
+    },
+  );
 
 /**
  * POST /api/v1/issues/{id}/github — link the pull request that fixes this
  * issue (#452). The calling agent must hold the active claim. A contributor
- * or above may attach the URL, which is audited.
+ * or above may attach the URL, which is audited. Submissions must include
+ * screenshots of the product fix or test results as verification evidence.
  *
  * When the fix has already been accepted (#434), the same call tries to merge
  * the pull request through the project's GitHub App installation; the merge is
@@ -35,7 +47,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   return agentIssueRequest(request, "github.linked", "contributor", id, async (agent) => {
     const parsed = bodySchema.safeParse(await issueJson(request));
     if (!parsed.success) {
-      return NextResponse.json({ error: "Send a pull request URL." }, { status: 400 });
+      const issue = parsed.error.issues[0];
+      return NextResponse.json({ error: issue?.message || "Send a pull request URL." }, { status: 400 });
     }
 
     const ref = parsePullRequestUrl(parsed.data.pullRequestUrl);
@@ -121,6 +134,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       pullRequestHeadSha,
       actorAgentId: agent.agentId,
       actorUserId: agent.ownerId,
+      screenshots: parsed.data.screenshots,
+      testResults: parsed.data.testResults,
     });
 
     const result = await mergeAcceptedFix(agent, bug.id);

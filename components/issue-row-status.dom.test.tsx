@@ -51,6 +51,14 @@ describe("IssueRowStatus", () => {
     cleanup();
     expect(text(<IssueRowStatus {...base} status="closed" />)).toBe("Closed");
   });
+
+  it("renders fine-grained SDLC review statuses", () => {
+    expect(text(<IssueRowStatus {...base} status="in_progress" reviewStatus="submitted" />)).toContain("PR Submitted");
+    cleanup();
+    expect(text(<IssueRowStatus {...base} status="in_progress" reviewStatus="ready_to_merge" />)).toContain("Ready to Merge");
+    cleanup();
+    expect(text(<IssueRowStatus {...base} status="in_progress" reviewStatus="rejected" />)).toContain("Needs Revision");
+  });
 });
 
 describe("formatElapsed", () => {

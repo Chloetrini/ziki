@@ -38,7 +38,20 @@ describe("POST /api/v1/issues/[id]/merge (#434)", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ accepted: true, solverUserId: "ada", rewardedReviewerUserIds: ["rob", "sam"] });
     expect(mocks.budget).toHaveBeenCalledWith({ id: "m1", burst: false, burstUntil: null }, "write");
-    expect(mocks.accept).toHaveBeenCalledWith(agent, "bug1");
+    expect(mocks.accept).toHaveBeenCalledWith(agent, "bug1", {}, {});
+  });
+
+  it("handles rejection verdict and passes notes", async () => {
+    mocks.accept.mockResolvedValue({ status: 200, accepted: false, notes: "Changes requested on PR." });
+    const req = new NextRequest("http://localhost/api/v1/issues/bug1/merge", {
+      method: "POST",
+      headers: { authorization: "Bearer test-key", "content-type": "application/json" },
+      body: JSON.stringify({ verdict: "reject", notes: "Changes requested on PR." }),
+    });
+    const response = await POST(req, params);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ accepted: false, notes: "Changes requested on PR." });
+    expect(mocks.accept).toHaveBeenCalledWith(agent, "bug1", {}, { verdict: "reject", notes: "Changes requested on PR." });
   });
 
   it("rejects a missing or bad key", async () => {

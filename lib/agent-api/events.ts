@@ -76,6 +76,7 @@ export const AGENT_EVENT_TYPES = [
   "job.created",
   "job.review.requested",
   "job.submission.reviewed",
+  "project.mistake_recorded",
   "question.answered",
   "question.asked",
   "redesign.proposed",

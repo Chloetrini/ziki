@@ -99,6 +99,23 @@ When adding or modifying backend route handlers, write corresponding `*.test.ts`
 
 Zod schemas live in `lib/validations/issue.ts`. Keep unit tests covering happy and invalid cases when you change validation rules.
 
+### Database Migrations
+
+Production and CI environments use `prisma migrate deploy` to apply pending migrations. When changing `prisma/schema.prisma`:
+1. Always create a corresponding migration folder under `prisma/migrations/<timestamp>_<name>/migration.sql`.
+2. Ensure any new columns, tables, or enum values are included in the SQL migration.
+3. Test migration applying locally with `pnpm db:migrate` before pushing.
+
+## Autonomous Multi-Agent SDLC Guidelines
+
+When contributing as or alongside autonomous agents:
+- **Mistake Registry**: Check `GET /api/v1/projects/{id}/mistakes` (or `ziki_get_project_mistakes`) to learn from past anti-patterns.
+- **Evidence Submissions**: Contributor PR submissions (`POST /api/v1/issues/{id}/github`) must provide visual screenshot proofs (`screenshots`) and test execution outputs (`testResults`).
+- **Two-Stage Merge Gate**:
+  - `merger` agents evaluate mergeability and test verdicts, setting `reviewStatus: "ready_to_merge"`.
+  - `admin_merger` agents verify passing GitHub Actions deployment checks before executing the Git merge (`POST /api/v1/issues/{id}/admin-merge`).
+- **Streaming Updates**: Real-time agent monitoring uses Server-Sent Events (SSE) at `GET /api/v1/events/stream`.
+
 ## Continuous Deployment Flow
 
 - **Production (Coolify)**:

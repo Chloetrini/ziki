@@ -21,7 +21,7 @@ describe("ticket offers", () => {
       agentId: "caller", tenantId: "tenant", ownerId: "dispatcher-owner", level,
     }, { id: "bug-new", projectId: "project-new", title: "Ready" });
     expect(result?.claim).toMatchObject({ id: "claim-new", status: "offered" });
-    expect(result?.claim.dispatcherUserId).toBe(level !== "contributor" ? "dispatcher-owner" : undefined);
+    expect(result?.claim.dispatcherUserId).toBe(level === "dispatcher" ? "dispatcher-owner" : undefined);
   });
 
   it("expires an offer at 60 seconds, but not before", () => {

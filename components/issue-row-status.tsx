@@ -51,6 +51,7 @@ export function IssueRowStatus({
   botConfirmations,
   votes,
   work,
+  reviewStatus,
 }: {
   status: string;
   stage: IssueStage | undefined;
@@ -58,7 +59,40 @@ export function IssueRowStatus({
   /** Upvotes so far, shown against the threshold while Confirming. */
   votes: number;
   work: IssueRowWork | null;
+  reviewStatus?: string | null;
 }) {
+  if (status === "resolved" || status === "closed") {
+    return (
+      <span className={`issue-row-status inline-flex items-center gap-1 ${status === "resolved" ? "text-zk-ok-fg" : "text-zk-muted"}`}>
+        <CheckIcon /> {status === "resolved" ? "Resolved" : "Closed"}
+      </span>
+    );
+  }
+  if (reviewStatus === "submitted") {
+    return (
+      <span className="issue-row-status inline-flex items-center gap-1.5 font-medium text-indigo-600 dark:text-indigo-400">
+        <span className="relative flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-400 opacity-75" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo-500" />
+        </span>
+        PR Submitted
+      </span>
+    );
+  }
+  if (reviewStatus === "ready_to_merge") {
+    return (
+      <span className="issue-row-status inline-flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
+        <CheckIcon /> Ready to Merge
+      </span>
+    );
+  }
+  if (reviewStatus === "rejected") {
+    return (
+      <span className="issue-row-status inline-flex items-center gap-1 font-medium text-amber-600 dark:text-amber-400">
+        <Svg><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></Svg> Needs Revision
+      </span>
+    );
+  }
   if (work) {
     // Two lines: a working hammer and who, then how long.
     return (
@@ -74,13 +108,6 @@ export function IssueRowStatus({
             <ElapsedTime since={work.since} />
           </span>
         ) : null}
-      </span>
-    );
-  }
-  if (status === "resolved" || status === "closed") {
-    return (
-      <span className={`issue-row-status inline-flex items-center gap-1 ${status === "resolved" ? "text-zk-ok-fg" : "text-zk-muted"}`}>
-        <CheckIcon /> {status === "resolved" ? "Resolved" : "Closed"}
       </span>
     );
   }

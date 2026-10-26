@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, type AgentLevel } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CONFIRMATION_REVIEWER_POINTS, reviewerPointsAt } from "@/lib/points/rules";
 
@@ -69,7 +69,7 @@ function bugRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function reviewer(id: string, ownerId: string, level: "observer" | "contributor" | "triager" | "reviewer" | "dispatcher" | "merger" = "reviewer") {
+function reviewer(id: string, ownerId: string, level: AgentLevel = "reviewer") {
   state.agents[id] = { id, ownerUserId: ownerId, level };
   return { agentId: id, name: id, ownerId, tenantId: "tenant_zedu", level, burst: false, keyId: `key-${id}` };
 }
@@ -265,21 +265,22 @@ describe("submitValidation: who may validate (#433)", () => {
     expect(state.validations).toHaveLength(0);
   });
 
-  it.each(["reviewer", "triager", "dispatcher", "merger"] as const)("blocks the assigned owner's %s even with independent credit", async (level) => {
+  it.each(["reviewer", "triager"] as const)("blocks the assigned owner's %s even with independent credit", async (level) => {
     db.bug.findFirst.mockResolvedValue(bugRow({ assigneeId: "rob" }));
     const body = level === "triager" ? clearTriage : acceptReal;
     expect(await submitValidation(reviewer("other-agent", "rob", level), "bug1", { ...body, onBehalfOfUserId: "another-person" })).toMatchObject({ status: 403, error: "not_independent" });
     expect(state.validations).toHaveLength(0);
   });
 
-  it.each(["reviewer", "triager", "dispatcher", "merger"] as const)("blocks a filer's other %s agent from reviewing or triaging", async (level) => {
+  it.each(["reviewer", "triager"] as const)("blocks a filer's other %s agent from reviewing or triaging", async (level) => {
     db.bug.findFirst.mockResolvedValue(bugRow({ reporterId: "rob", beneficiaryUserId: "another-person", createdByAgentId: "filing-agent", createdByAgent: { ownerUserId: "rob" } }));
     const body = level === "triager" ? clearTriage : acceptReal;
     expect(await submitValidation(reviewer("other-agent", "rob", level), "bug1", body)).toMatchObject({ status: 403, error: "not_independent" });
     expect(state.validations).toHaveLength(0);
   });
-  it("rejects a contributor before touching the issue", async () => {
-    const result = await submitValidation(reviewer("c1", "cara", "contributor"), "bug1", acceptReal);
+
+  it.each(["contributor", "dispatcher", "merger", "admin_merger"] as const)("rejects a %s before touching the issue", async (level) => {
+    const result = await submitValidation(reviewer("c1", "cara", level), "bug1", acceptReal);
     expect(result).toMatchObject({ status: 403, error: "insufficient_level" });
     expect(db.bug.findFirst).not.toHaveBeenCalled();
   });
@@ -736,11 +737,12 @@ describe("confirmation: the triage clearance (triager)", () => {
     expect(db.bug.findFirst).not.toHaveBeenCalled();
   });
 
-  it.each(["dispatcher", "merger"] as const)("counts a %s's inherited triage clearance", async (level) => {
-    await submitValidation(reviewer("r1", "rob"), "bug1", acceptReal);
-    await submitValidation(reviewer("r2", "sam"), "bug1", acceptReal);
-    await submitValidation(reviewer("r3", "kim", level), "bug1", clearTriage);
-    expect(await isConfirmed("bug1")).toBe(true);
+  it.each(["dispatcher", "merger", "admin_merger"] as const)("rejects a %s from clearing triage", async (level) => {
+    expect(await submitValidation(reviewer("r3", "kim", level), "bug1", clearTriage)).toMatchObject({
+      status: 403,
+      error: "insufficient_level",
+    });
+    expect(db.bug.findFirst).not.toHaveBeenCalled();
   });
 
   it("drops confirmation when the triage clearance is undone", async () => {

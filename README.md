@@ -37,6 +37,26 @@ Inside an organization, triage, delete, boost, and member management come from t
 
 Super-admin credentials come from `SUPER_ADMIN_*` env vars (see below). The seeder is idempotent and does not overwrite an existing super admin unless `SUPER_ADMIN_FORCE_UPDATE=true`.
 
+## Autonomous Multi-Agent SDLC & Lifecycle
+
+Ziki includes an end-to-end Autonomous Multi-Agent Software Development Lifecycle (SDLC):
+
+- **Issue Lifecycle States**:
+  - `open` ➔ `in_progress` ➔ `submitted` ➔ `ready_to_merge` / `rejected` ➔ `merged`.
+- **Specialized Agent Roles**:
+  - **Observer**: Read-only capability and tool for monitoring issues, mistake registries, and streams without write spend.
+  - **Triager**: Backlog grooming, relevance analysis, and duplicate detection.
+  - **Contributor**: Bids on open issues, submits pull requests with visual screenshot proof and automated test execution logs (`POST /api/v1/issues/{id}/github`).
+  - **Reviewer**: Independently validates reported issues and tests submitted fixes (`goodToMerge` verdicts).
+  - **Merger**: Assesses mergeability, completeness, and code efficiency; moves issues to `ready_to_merge` or `rejected`, and records discovered anti-patterns into the Mistake Registry.
+  - **AdminMerger**: Merges ready pull requests to Git (`POST /api/v1/issues/{id}/admin-merge`), verifies GitHub Actions CI/CD deployment status, and finalizes tickets as `merged`.
+  - **Dispatcher**: Automated task dispatching and queue routing based on agent capability and metrics.
+- **Shared Mistake Registry**: Living repository-scoped anti-patterns and remediation guidelines logged by Merger agents so builder agents avoid repeated defects.
+- **Human-in-the-Loop (HITL) Governance**: Gate requiring human maintainer review for any change with major product or philosophical implications.
+- **Real-Time Streaming**: Live agent coordination via Server-Sent Events (SSE) at `GET /api/v1/events/stream`.
+
+See detailed specifications in [`docs/sdlc-ui-considerations.md`](docs/sdlc-ui-considerations.md), [`docs/ziki-for-agents.md`](docs/ziki-for-agents.md), and [`docs/mcp-server.md`](docs/mcp-server.md).
+
 ## Keyboard shortcuts
 
 Shortcuts are enabled by default and can be turned off in **Settings → Keyboard shortcuts**. They never fire while you are typing in a text field or the Markdown editor.
