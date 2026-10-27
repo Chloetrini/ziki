@@ -118,6 +118,13 @@ async function loadOptional<T>(label: string, fallback: T, load: () => Promise<T
   }
 }
 
+/** A merger rejection's notes (#1429), from its audit payload. */
+function payloadNotes(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const notes = (payload as { notes?: unknown }).notes;
+  return typeof notes === "string" && notes.trim() ? notes : null;
+}
+
 /** The database error stays in the server log under `reference`. */
 function issueLoadError(reference: string) {
   return <LoadError title="This issue could not be loaded" reference={reference} />;
@@ -507,21 +514,38 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
                 onBehalfOf: { select: { name: true } },
               },
             }),
+            // #1429: a merger's rejection is a merge decision too.
             prisma.agentAuditEvent.findMany({
-              where: { bugId: id, action: "issue.accepted" },
+              where: { bugId: id, action: { in: ["issue.accepted", "issue.merge_rejected"] } },
               orderBy: { createdAt: "asc" },
-              select: { id: true, createdAt: true, agent: { select: { name: true, level: true } }, payload: true },
+              select: {
+                id: true,
+                createdAt: true,
+                action: true,
+                agent: { select: { name: true, level: true } },
+                payload: true,
+              },
             }),
           ]);
 
           const mergerDecisions: AgentDecision[] = accepted
             .filter((e) => e.agent.level === "merger" || e.agent.level === "admin_merger")
-            .map((e) => ({
-              id: `accepted-${e.id}`,
-              at: e.createdAt,
-              kind: "accepted",
-              agentName: e.agent.name,
-            }));
+            .map<AgentDecision>((e) =>
+              e.action === "issue.merge_rejected"
+                ? {
+                    id: `merge-rejected-${e.id}`,
+                    at: e.createdAt,
+                    kind: "merge_rejected",
+                    agentName: e.agent.name,
+                    notes: payloadNotes(e.payload),
+                  }
+                : {
+                    id: `accepted-${e.id}`,
+                    at: e.createdAt,
+                    kind: "accepted",
+                    agentName: e.agent.name,
+                  },
+            );
 
           const otherDecisions: AgentDecision[] = [
             ...validations.map<AgentDecision>((v) =>
@@ -562,7 +586,10 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
               goodToMerge: v.goodToMerge,
             })),
             ...accepted
-              .filter((e) => e.agent.level !== "merger" && e.agent.level !== "admin_merger")
+              .filter(
+                (e) =>
+                  e.action === "issue.accepted" && e.agent.level !== "merger" && e.agent.level !== "admin_merger",
+              )
               .map<AgentDecision>((e) => ({
                 id: `accepted-${e.id}`,
                 at: e.createdAt,
@@ -966,7 +993,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
             otherDecisions={agentDecisions.otherDecisions}
             mergerDecisions={agentDecisions.mergerDecisions}
             passed={
-              agentDecisions.mergerDecisions.length > 0 ||
+              agentDecisions.mergerDecisions.some((d) => d.kind === "accepted") ||
               intakeStage === "confirmed" ||
               intakeStage === "ready"
             }

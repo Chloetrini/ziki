@@ -610,6 +610,16 @@ describe("acceptFix: a successful accept (#434)", () => {
       data: { reviewStatus: "rejected" },
     });
     expect(db.agentMistake.create).toHaveBeenCalled();
+    // #1429: the rejection is a merge decision on the issue page.
+    expect(db.agentAuditEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        agentId: "m1",
+        action: "issue.merge_rejected",
+        target: "bug:bug1",
+        bugId: "bug1",
+        payload: expect.objectContaining({ reviewStatus: "rejected", notes: "Tests missing for edge case." }),
+      }),
+    });
   });
 
   it("rejecting a fix via action and feedback options sets reviewStatus to rejected", async () => {
@@ -625,6 +635,12 @@ describe("acceptFix: a successful accept (#434)", () => {
     expect(db.bug.update).toHaveBeenCalledWith({
       where: { id: "bug1" },
       data: { reviewStatus: "rejected" },
+    });
+    expect(db.agentAuditEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: "issue.merge_rejected",
+        payload: expect.objectContaining({ notes: "Feedback via action field." }),
+      }),
     });
   });
 

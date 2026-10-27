@@ -204,4 +204,26 @@ describe("IssueAgentActivity (#448)", () => {
     expect(items[1]).toHaveTextContent("fixer-agent");
     expect(items[2]).toHaveTextContent("merger-agent");
   });
+
+  it("labels a merger's rejection as not ready to merge and shows their notes (#1429)", () => {
+    render(
+      <IssueAgentActivity
+        decisions={[
+          {
+            id: "mr1",
+            at: "2026-01-01T10:00:00.000Z",
+            kind: "merge_rejected",
+            agentName: "merger-agent",
+            notes: "Please add the missing migration.",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Not ready to merge")).toBeInTheDocument();
+    expect(screen.getByRole("listitem")).toHaveTextContent(
+      "merger-agent rejected the fix and asked for changes before it can merge.",
+    );
+    expect(screen.getByText("Please add the missing migration.")).toBeInTheDocument();
+  });
 });

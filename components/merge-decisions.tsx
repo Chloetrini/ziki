@@ -1,4 +1,5 @@
 import { LocalTime } from "@/components/local-time";
+import { ExpandableText } from "@/components/expandable-text";
 import {
   decisionSentence,
   timeOf,
@@ -71,6 +72,13 @@ export function MergeDecisions({ decisions }: { decisions: ReadonlyArray<AgentDe
                     <LocalTime compact className="basis-full sm:ml-auto sm:basis-auto" date={decision.at} />
                   </div>
                   <p className="mt-2 text-[13.5px] leading-relaxed text-zk-text2">{decisionSentence(decision)}</p>
+                  {decision.kind === "merge_rejected" && decision.notes ? (
+                    <ExpandableText maxLines={3} expandText="View more" collapseText="View less">
+                      <blockquote className="mt-2 whitespace-pre-wrap break-words rounded-r-[10px] border-l-[3px] border-zk-border bg-zk-chip px-3.5 py-2.5 text-[13px] leading-relaxed text-zk-text2">
+                        {decision.notes}
+                      </blockquote>
+                    </ExpandableText>
+                  ) : null}
                 </article>
               </li>
             );

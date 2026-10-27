@@ -175,6 +175,15 @@ export async function acceptFix(
           metadata: { commentId: comment.id, commentPreview: commentPreview(rejectNotes), rejected: true, reviewStatus: "rejected" },
         },
       });
+      // #1429: the issue page lists merge decisions from the audit log, so a
+      // rejection needs its own row to show up next to the accepts.
+      await audit(
+        agent,
+        "issue.merge_rejected",
+        `bug:${bug.id}`,
+        { reviewStatus: "rejected", notes: rejectNotes, pullRequestUrl: bug.pullRequestUrl },
+        { bugId: bug.id, db: tx },
+      );
       await publish(tx, {
         tenantId: bug.tenantId,
         type: "issue.updated",

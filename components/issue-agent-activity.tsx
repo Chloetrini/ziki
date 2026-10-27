@@ -41,7 +41,16 @@ export type AgentDecision =
       waitingOnName?: string | null;
     }
   | { id: string; at: Date | string; kind: "verdict"; agentName: string; personName: string; goodToMerge: boolean }
-  | { id: string; at: Date | string; kind: "accepted"; agentName: string };
+  | { id: string; at: Date | string; kind: "accepted"; agentName: string }
+  | {
+      id: string;
+      at: Date | string;
+      /** #1429: a merger sent the fix back. Never an accept. */
+      kind: "merge_rejected";
+      agentName: string;
+      /** What the merger asked to change. */
+      notes: string | null;
+    };
 
 export function timeOf(decision: AgentDecision): number {
   return new Date(decision.at).getTime();
@@ -91,6 +100,12 @@ export function verdictVisual(decision: AgentDecision): VerdictVisual {
         chip: "bg-zk-ok-bg text-zk-ok-fg",
         iconWrap: "bg-zk-ok-bg text-zk-ok-fg",
       };
+    case "merge_rejected":
+      return {
+        label: "Not ready to merge",
+        chip: "bg-zk-warn-bg text-zk-warn-fg",
+        iconWrap: "bg-zk-warn-bg text-zk-warn-fg",
+      };
   }
 }
 
@@ -110,7 +125,7 @@ export function VerdictGlyph({ kind, goodToMerge }: { kind: AgentDecision["kind"
       </svg>
     );
   }
-  if (kind === "verdict" && !goodToMerge) {
+  if ((kind === "verdict" && !goodToMerge) || kind === "merge_rejected") {
     return (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={common} aria-hidden>
         <path d="M12 9v4M12 17h.01" strokeLinecap="round" />
@@ -190,6 +205,13 @@ export function decisionSentence(decision: AgentDecision) {
           issue resolved.
         </>
       );
+    case "merge_rejected":
+      return (
+        <>
+          <strong className="font-bold text-zk-text">{decision.agentName}</strong> rejected the fix and asked for
+          changes before it can merge.
+        </>
+      );
   }
 }
 
@@ -247,7 +269,7 @@ export function IssueAgentActivity({
                   <LocalTime compact className="text-xs text-zk-muted" date={decision.at} />
                 </div>
                 <p className="mt-1.5 text-sm leading-snug text-zk-text2">{decisionSentence(decision)}</p>
-                {decision.kind === "rejected" && decision.notes ? (
+                {(decision.kind === "rejected" || decision.kind === "merge_rejected") && decision.notes ? (
                   <ExpandableText maxLines={3} expandText="View more" collapseText="View less">
                     <blockquote className="mt-1.5 whitespace-pre-wrap break-words rounded-r-[10px] border-l-[3px] border-zk-border bg-zk-chip px-3.5 py-2.5 text-[13px] leading-relaxed text-zk-text2">
                       {decision.notes}

@@ -28,6 +28,8 @@ function shortSaying(decision: AgentDecision): string {
       return decision.goodToMerge ? "Fix is good to merge" : "Fix not ready to merge";
     case "accepted":
       return "Accepted the fix";
+    case "merge_rejected":
+      return "Fix rejected";
   }
 }
 
