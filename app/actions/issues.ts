@@ -835,6 +835,73 @@ export async function updateBugAction(
         // The new assignee starts watching (#216).
         await ensureWatching(tx, bugId, [data.assigneeId]);
       }
+      // Admin assignment follows the dispatcher (offer) flow: creating or
+      // reassigning an assignee produces an offered IssueClaim for that
+      // user's agent, mirroring POST /api/v1/issues/{id}/offer. Releasing
+      // any prior active/offered claim first keeps the cap slot free.
+      const assigneeChanged =
+        data.assigneeId !== undefined && data.assigneeId !== existing.assigneeId;
+      if (assigneeChanged) {
+        // Release prior claims held by the previous assignee's agent.
+        if (existing.assigneeId && typeof tx.issueClaim?.updateMany === "function") {
+          const priorClaims =
+            typeof tx.issueClaim.findMany === "function"
+              ? await tx.issueClaim.findMany({
+                  where: {
+                    bugId,
+                    beneficiaryUserId: existing.assigneeId,
+                    status: { in: ["offered", "active"] },
+                    releasedAt: null,
+                  },
+                  select: { id: true, agentId: true, beneficiaryUserId: true },
+                })
+              : [];
+          await tx.issueClaim.updateMany({
+            where: {
+              bugId,
+              beneficiaryUserId: existing.assigneeId,
+              status: { in: ["offered", "active"] },
+              releasedAt: null,
+            },
+            data: { status: "released", releasedAt: new Date(), releaseReason: "reassigned" },
+          });
+          for (const claim of priorClaims) {
+            await publish(tx, {
+              tenantId: existing.tenantId,
+              type: "claim.released",
+              actorAgentId: claim.agentId,
+              bugId,
+              payload: { claimId: claim.id, issueId: bugId, beneficiaryUserId: claim.beneficiaryUserId, reason: "reassigned" },
+            });
+          }
+        }
+        // Create an offered claim for the new assignee's agent, if any.
+        if (data.assigneeId && typeof tx.issueClaim?.create === "function") {
+          const agent = await tx.agent.findFirst({
+            where: { ownerUserId: data.assigneeId, defaultProjectId: existing.projectId },
+            select: { id: true },
+          });
+          if (agent) {
+            const claim = await tx.issueClaim.create({
+              data: {
+                bugId,
+                beneficiaryUserId: data.assigneeId,
+                agentId: agent.id,
+                status: "offered",
+                offeredAt: new Date(),
+                dispatcherUserId: userId,
+              },
+            });
+            await publish(tx, {
+              tenantId: existing.tenantId,
+              type: "claim.offered",
+              actorAgentId: agent.id,
+              bugId,
+              payload: { claimId: claim.id, issueId: bugId, beneficiaryUserId: data.assigneeId },
+            });
+          }
+        }
+      }
       // #428: resolving an issue earns its assignee solver points, once.
       if (data.status === "resolved" && existing.status !== "resolved") {
         await awardSolver(tx, {

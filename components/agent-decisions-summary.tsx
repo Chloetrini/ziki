@@ -83,14 +83,12 @@ function BotCard({
 }
 
 function DecisionSection({
-  title,
   decisions,
   open,
   setOpen,
   panelId,
   highlightId,
 }: {
-  title: string;
   decisions: ReadonlyArray<AgentDecision>;
   open: boolean;
   setOpen: (value: boolean | ((prev: boolean) => boolean)) => void;
@@ -108,9 +106,7 @@ function DecisionSection({
         onClick={() => setOpen((value) => !value)}
         className="mt-2.5 flex w-full items-center justify-between gap-2 rounded-xl border border-zk-border bg-zk-chip/50 px-3 py-2 text-[13px] font-semibold text-zk-text2 hover:bg-zk-chip focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-blue-strong"
       >
-        <span>
-          {open ? "Hide decisions" : `Show all ${decisions.length} ${title.toLowerCase()}`}
-        </span>
+        <span>{open ? "Hide decisions" : `Show all ${decisions.length} decisions`}</span>
         <svg
           viewBox="0 0 24 24"
           fill="none"
@@ -157,30 +153,14 @@ export function AgentDecisionsSummary({
   passed?: boolean;
 }) {
   const [otherOpen, setOtherOpen] = useState(false);
-  const [mergerOpen, setMergerOpen] = useState(false);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const otherPanelId = useId();
-  const mergerPanelId = useId();
 
   const showDecision = (id: string) => {
+    // Merger decisions live in their own Merge decisions card; the hash both
+    // scrolls there and marks the entry (:target).
     if (mergerDecisions.some((d) => d.id === id)) {
-      setMergerOpen(true);
-      setHighlightId(id);
-      requestAnimationFrame(() => {
-        document
-          .getElementById(`agent-decision-${id}`)
-          ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      });
-      return;
-    }
-    if (otherDecisions.some((d) => d.id === id)) {
-      setOtherOpen(true);
-      setHighlightId(id);
-      requestAnimationFrame(() => {
-        document
-          .getElementById(`agent-decision-${id}`)
-          ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      });
+      window.location.hash = `agent-decision-${id}`;
       return;
     }
     setOtherOpen(true);
@@ -253,34 +233,13 @@ export function AgentDecisionsSummary({
         )}
       </div>
 
-      {otherDecisions.length > 0 || mergerDecisions.length > 0 ? (
-        <div className="mt-3 flex flex-col gap-2">
-          <h3 className="px-1 text-xs font-bold uppercase tracking-[0.08em] text-zk-muted">Intake, claims & reviews</h3>
-          <DecisionSection
-            title="Intake, claims & reviews"
-            decisions={otherDecisions}
-            open={otherOpen}
-            setOpen={setOtherOpen}
-            panelId={otherPanelId}
-            highlightId={highlightId}
-          />
-          <h3 className="px-1 text-xs font-bold uppercase tracking-[0.08em] text-zk-muted">Merger decisions</h3>
-          {mergerDecisions.length > 0 ? (
-            <DecisionSection
-              title="Merger decisions"
-              decisions={mergerDecisions}
-              open={mergerOpen}
-              setOpen={setMergerOpen}
-              panelId={mergerPanelId}
-              highlightId={highlightId}
-            />
-          ) : (
-            <div className="rounded-xl border border-zk-border bg-zk-surface px-3 py-2 text-sm text-zk-muted">
-              No merger decision yet. Awaiting review by a merger.
-            </div>
-          )}
-        </div>
-      ) : null}
+      <DecisionSection
+        decisions={otherDecisions}
+        open={otherOpen}
+        setOpen={setOtherOpen}
+        panelId={otherPanelId}
+        highlightId={highlightId}
+      />
     </section>
   );
 }

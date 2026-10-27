@@ -134,7 +134,7 @@ export function VerdictGlyph({ kind, goodToMerge }: { kind: AgentDecision["kind"
   );
 }
 
-function sentence(decision: AgentDecision) {
+export function decisionSentence(decision: AgentDecision) {
   switch (decision.kind) {
     case "confirmed":
       return (
@@ -246,7 +246,7 @@ export function IssueAgentActivity({
                   </span>
                   <LocalTime compact className="text-xs text-zk-muted" date={decision.at} />
                 </div>
-                <p className="mt-1.5 text-sm leading-snug text-zk-text2">{sentence(decision)}</p>
+                <p className="mt-1.5 text-sm leading-snug text-zk-text2">{decisionSentence(decision)}</p>
                 {decision.kind === "rejected" && decision.notes ? (
                   <ExpandableText maxLines={3} expandText="View more" collapseText="View less">
                     <blockquote className="mt-1.5 whitespace-pre-wrap break-words rounded-r-[10px] border-l-[3px] border-zk-border bg-zk-chip px-3.5 py-2.5 text-[13px] leading-relaxed text-zk-text2">

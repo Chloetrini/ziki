@@ -94,6 +94,8 @@
 .issues-status-open { --issues-status-icon: url('/icons/issues-status-open.svg'); color: var(--zk-text2); background: var(--zk-surface); }
 .issues-status-in_progress { --issues-status-icon: url('/icons/issues-status-in_progress.svg'); color: var(--zk-accent); background: var(--zk-tint); }
 .issues-status-resolved { --issues-status-icon: url('/icons/issues-status-resolved.svg'); color: var(--zk-ok-fg); background: var(--zk-ok-bg); }
+.issues-status-ready_to_merge { --issues-status-icon: url('/icons/issues-status-ready_to_merge.svg'); color: var(--zk-ok-fg); background: var(--zk-ok-bg); }
+.issues-status-auto_merge { --issues-status-icon: url('/icons/issues-status-auto_merge.svg'); color: var(--zk-accent); background: var(--zk-tint); }
 .issues-status-closed { --issues-status-icon: url('/icons/issues-status-closed.svg'); color: var(--zk-muted); background: var(--zk-surface); }
 .issues-status-escalated { --issues-status-icon: url('/icons/issues-status-escalated.svg'); color: var(--zk-bad-fg); background: var(--zk-bad-bg); }
 .issues-status-nav a[aria-current] .issues-status-dot { background: white; color: var(--color-electric-blue-strong); }

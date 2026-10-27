@@ -39,6 +39,7 @@ import {
 import { ActivityTimeline, type ActivityEntry } from "@/components/activity-timeline";
 import { type AgentDecision } from "@/components/issue-agent-activity";
 import { AgentDecisionsSummary } from "@/components/agent-decisions-summary";
+import { MergeDecisions } from "@/components/merge-decisions";
 import { IssueEscalations, type TicketEscalation } from "@/components/issue-escalations";
 import { listBugEscalations } from "@/lib/agent-questions";
 import { IssueBids } from "@/components/issue-bids";
@@ -999,6 +1000,8 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
           <Suspense fallback={null}>
             <GoalBudgetSection tenantId={bug.tenantId} projectId={bug.projectId} bugId={bug.id} />
           </Suspense>
+
+          <MergeDecisions decisions={agentDecisions.mergerDecisions} />
 
               <section
                 id="conversation"

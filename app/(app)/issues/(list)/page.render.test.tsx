@@ -267,7 +267,7 @@ describe("issue list layout", () => {
     const row = html.match(/<div class="issues-tabs-row[\s\S]*?<\/nav>/)?.[0] ?? "";
     const status = row.slice(row.indexOf('<nav aria-label="Issue status"'));
     const labels = [...status.matchAll(/<\/span>([A-Za-z ]+)<span class="issues-status-count">/g)].map((m) => m[1]);
-    expect(labels).toEqual(["Open", "In progress", "Done", "All"]);
+    expect(labels).toEqual(["Open", "In progress", "Done", "Ready to Merge", "Auto Merge", "All"]);
     expect(row).toMatch(/class="issues-status-nav ml-auto/);
     const inbox = row.slice(0, row.indexOf('<nav aria-label="Issue status"'));
     expect(inbox).toMatch(/<a [^>]*href="\/issues"/);
