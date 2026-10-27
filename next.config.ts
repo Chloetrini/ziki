@@ -126,6 +126,7 @@ const nextConfig: NextConfig = {
           ? config.resolve.alias
           : {}),
         "@/lib/points/backfill-on-start": false,
+        "@/lib/cron/scheduler": false,
       };
     }
     return config;
