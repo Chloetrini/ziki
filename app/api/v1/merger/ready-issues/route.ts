@@ -19,7 +19,8 @@ export async function GET(request: NextRequest) {
     if (!params.get("projectId")) return NextResponse.json({ error: PROJECT_ID_REQUIRED }, { status: 400 });
     const scope = await issueProject(agent, params);
     const limit = Math.min(Math.max(parseInt(params.get("limit") ?? "50", 10) || 50, 1), 100);
-    return NextResponse.json({ issues: await findReadyToMergeIssues(agent, scope.projectId, limit) });
+    const reviewStatus = params.get("reviewStatus");
+    return NextResponse.json({ issues: await findReadyToMergeIssues(agent, scope.projectId, limit, reviewStatus) });
   });
 }
 

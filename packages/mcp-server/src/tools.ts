@@ -790,8 +790,12 @@ export const TOOLS: readonly ToolDef[] = [
     method: "GET",
     route: "/merger/ready-issues",
     projectScoped: true,
-    query: ["projectId", "limit"],
-    input: { projectId, limit: z.number().int().min(1).max(100).optional().describe("Maximum number of ready-to-merge issues to return (default 25).") },
+    query: ["projectId", "limit", "reviewStatus"],
+    input: {
+      projectId,
+      limit: z.number().int().min(1).max(100).optional().describe("Maximum number of ready-to-merge issues to return (default 25)."),
+      reviewStatus: z.enum(["submitted", "ready_to_merge", "all"]).optional().describe("Filter by review status: 'submitted' (awaiting merger review) or 'ready_to_merge' (accepted, awaiting admin-merge)."),
+    },
   },
   {
     name: "ziki_find_reviewable_issues",

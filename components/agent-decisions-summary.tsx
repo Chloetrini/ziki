@@ -82,27 +82,109 @@ function BotCard({
   );
 }
 
+function DecisionSection({
+  title,
+  decisions,
+  open,
+  setOpen,
+  panelId,
+  highlightId,
+}: {
+  title: string;
+  decisions: ReadonlyArray<AgentDecision>;
+  open: boolean;
+  setOpen: (value: boolean | ((prev: boolean) => boolean)) => void;
+  panelId: string;
+  highlightId: string | null;
+}) {
+  if (decisions.length === 0) return null;
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen((value) => !value)}
+        className="mt-2.5 flex w-full items-center justify-between gap-2 rounded-xl border border-zk-border bg-zk-chip/50 px-3 py-2 text-[13px] font-semibold text-zk-text2 hover:bg-zk-chip focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-blue-strong"
+      >
+        <span>
+          {open ? "Hide decisions" : `Show all ${decisions.length} ${title.toLowerCase()}`}
+        </span>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          className={`h-4 w-4 text-zk-muted motion-safe:transition-transform ${open ? "rotate-180" : ""}`}
+          aria-hidden
+        >
+          <path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      <div
+        id={panelId}
+        className={`grid motion-safe:transition-[grid-template-rows] motion-safe:duration-200 ${
+          open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        }`}
+        inert={!open}
+      >
+        <div className="min-h-0 overflow-clip">
+          <div className="px-1 pb-1 pt-3">
+            <IssueAgentActivity decisions={decisions} bare highlightId={highlightId} />
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 /**
  * Agent decisions at a glance: a count on the left and, on the right, a card
  * per decision (the bot and what it said) drifting right to left. clicking a card
  * opens the full timeline at that decision.
  */
 export function AgentDecisionsSummary({
-  decisions,
+  otherDecisions = [],
+  mergerDecisions = [],
   passed = false,
 }: {
-  decisions: ReadonlyArray<AgentDecision>;
+  otherDecisions?: ReadonlyArray<AgentDecision>;
+  mergerDecisions?: ReadonlyArray<AgentDecision>;
+  /** @deprecated Use otherDecisions/mergerDecisions */
+  decisions?: ReadonlyArray<AgentDecision>;
   /** The bots' checks passed (enough confirmations, or the fix was accepted). */
   passed?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [otherOpen, setOtherOpen] = useState(false);
+  const [mergerOpen, setMergerOpen] = useState(false);
   const [highlightId, setHighlightId] = useState<string | null>(null);
-  const panelId = useId();
+  const otherPanelId = useId();
+  const mergerPanelId = useId();
 
   const showDecision = (id: string) => {
-    setOpen(true);
+    if (mergerDecisions.some((d) => d.id === id)) {
+      setMergerOpen(true);
+      setHighlightId(id);
+      requestAnimationFrame(() => {
+        document
+          .getElementById(`agent-decision-${id}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+      return;
+    }
+    if (otherDecisions.some((d) => d.id === id)) {
+      setOtherOpen(true);
+      setHighlightId(id);
+      requestAnimationFrame(() => {
+        document
+          .getElementById(`agent-decision-${id}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+      return;
+    }
+    setOtherOpen(true);
     setHighlightId(id);
-    // Wait a frame so the panel is laid out before scrolling to the entry.
     requestAnimationFrame(() => {
       document
         .getElementById(`agent-decision-${id}`)
@@ -110,9 +192,11 @@ export function AgentDecisionsSummary({
     });
   };
 
-  const ordered = [...decisions].sort((a, b) => timeOf(a) - timeOf(b) || a.id.localeCompare(b.id));
+  const combined = [...otherDecisions, ...mergerDecisions].sort(
+    (a, b) => timeOf(a) - timeOf(b) || a.id.localeCompare(b.id),
+  );
   // Too few cards to fill the strip: show them still rather than looping a gap.
-  const animate = ordered.length >= 3;
+  const animate = combined.length >= 3;
 
   return (
     <section aria-label="Agent decisions" className="rounded-[20px] border border-zk-border bg-zk-surface p-3">
@@ -133,12 +217,12 @@ export function AgentDecisionsSummary({
               <span className="sr-only">Passed</span>
             </span>
           ) : null}
-          <span className="text-2xl font-bold leading-none text-zk-text tabular-nums">{ordered.length}</span>
+          <span className="text-2xl font-bold leading-none text-zk-text tabular-nums">{combined.length}</span>
           <h2 className="mt-1 text-[10px] font-bold uppercase leading-tight tracking-[0.08em] text-zk-muted">
             Agent decisions
           </h2>
         </div>
-        {ordered.length === 0 ? (
+        {combined.length === 0 ? (
           <p className="self-center text-sm text-zk-muted">No agent decisions yet.</p>
         ) : (
           <div
@@ -150,16 +234,16 @@ export function AgentDecisionsSummary({
           >
             <div
               className={animate ? "zk-marquee-track flex w-max" : "flex w-max"}
-              style={animate ? ({ "--zk-marquee-duration": `${ordered.length * 6}s` } as CSSProperties) : undefined}
+              style={animate ? ({ "--zk-marquee-duration": `${combined.length * 6}s` } as CSSProperties) : undefined}
             >
               <ul className="flex shrink-0 gap-2 pr-2">
-                {ordered.map((decision) => (
+                {combined.map((decision) => (
                   <BotCard key={decision.id} decision={decision} onSelect={showDecision} />
                 ))}
               </ul>
               {animate ? (
                 <ul aria-hidden="true" className="zk-marquee-copy flex shrink-0 gap-2 pr-2">
-                  {ordered.map((decision) => (
+                  {combined.map((decision) => (
                     <BotCard key={decision.id} decision={decision} onSelect={showDecision} copy />
                   ))}
                 </ul>
@@ -168,45 +252,34 @@ export function AgentDecisionsSummary({
           </div>
         )}
       </div>
-      {ordered.length > 0 ? (
-        <>
-          <button
-            type="button"
-            aria-expanded={open}
-            aria-controls={panelId}
-            onClick={() => setOpen((value) => !value)}
-            className="mt-2.5 flex w-full items-center justify-between gap-2 rounded-xl border border-zk-border bg-zk-chip/50 px-3 py-2 text-[13px] font-semibold text-zk-text2 hover:bg-zk-chip focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-blue-strong"
-          >
-            <span>{open ? "Hide decisions" : `Show all ${ordered.length} decisions`}</span>
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              className={`h-4 w-4 text-zk-muted motion-safe:transition-transform ${open ? "rotate-180" : ""}`}
-              aria-hidden
-            >
-              <path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-          {/* Grid rows animate from 0fr to 1fr, so the panel slides open to its natural height. */}
-          <div
-            id={panelId}
-            className={`grid motion-safe:transition-[grid-template-rows] motion-safe:duration-200 ${
-              open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
-            }`}
-            inert={!open}
-          >
-            {/* overflow-clip, not overflow-hidden: it clips without being a scroll
-                container, so scrolling to a decision mid-animation can't leave the
-                top of the timeline scrolled out of reach. min-h-0 lets the 0fr row collapse. */}
-            <div className="min-h-0 overflow-clip">
-              <div className="px-1 pb-1 pt-3">
-                <IssueAgentActivity decisions={decisions} bare highlightId={highlightId} />
-              </div>
+
+      {otherDecisions.length > 0 || mergerDecisions.length > 0 ? (
+        <div className="mt-3 flex flex-col gap-2">
+          <h3 className="px-1 text-xs font-bold uppercase tracking-[0.08em] text-zk-muted">Intake, claims & reviews</h3>
+          <DecisionSection
+            title="Intake, claims & reviews"
+            decisions={otherDecisions}
+            open={otherOpen}
+            setOpen={setOtherOpen}
+            panelId={otherPanelId}
+            highlightId={highlightId}
+          />
+          <h3 className="px-1 text-xs font-bold uppercase tracking-[0.08em] text-zk-muted">Merger decisions</h3>
+          {mergerDecisions.length > 0 ? (
+            <DecisionSection
+              title="Merger decisions"
+              decisions={mergerDecisions}
+              open={mergerOpen}
+              setOpen={setMergerOpen}
+              panelId={mergerPanelId}
+              highlightId={highlightId}
+            />
+          ) : (
+            <div className="rounded-xl border border-zk-border bg-zk-surface px-3 py-2 text-sm text-zk-muted">
+              No merger decision yet. Awaiting review by a merger.
             </div>
-          </div>
-        </>
+          )}
+        </div>
       ) : null}
     </section>
   );

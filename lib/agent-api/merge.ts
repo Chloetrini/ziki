@@ -24,8 +24,11 @@ import {
   parsePullRequestUrl,
   sameRepo,
   type GitHubClient,
+  type MergePullResult,
+  type PullRequest,
 } from "@/lib/github/merge-pr";
 import { recordMistake, type RecordMistakeInput } from "@/lib/agent-api/mistakes";
+import { notifyMergeFailed } from "@/lib/agent-notifications";
 
 /**
  * A merger accepting a fix (#434). The gate: the issue is confirmed, no
@@ -43,6 +46,7 @@ import { recordMistake, type RecordMistakeInput } from "@/lib/agent-api/mistakes
 
 const mergeBugSelect = {
   id: true,
+  title: true,
   tenantId: true,
   projectId: true,
   pullRequestUrl: true,
@@ -81,6 +85,7 @@ export type AcceptFixResult =
       accepted: boolean;
       readyToMerge?: boolean;
       merged?: boolean;
+      mergeCommitSha?: string;
       solverUserId?: string | null;
       rewardedReviewerUserIds?: string[];
       notes?: string;
@@ -90,17 +95,21 @@ export type AcceptFixResult =
   | {
       status: 409;
       error: "not_ready";
-      missing: "already_accepted" | "redesign" | "confirmation" | "verdicts" | "claim" | "pull_request" | "deployment_verification";
+      missing: "already_accepted" | "redesign" | "confirmation" | "verdicts" | "claim" | "pull_request" | "deployment_verification" | "github_merge_failed";
       message: string;
     };
 
 export type AcceptFixDeps = {
-  client?: GitHubClient;
+  client?: GitHubClient | null;
 };
 
 export type AcceptFixOptions = {
   verdict?: "accept" | "reject";
+  action?: "accept" | "reject";
   notes?: string;
+  feedback?: string;
+  commitSha?: string;
+  mergeCommitSha?: string;
   mistake?: Partial<RecordMistakeInput> & {
     title: string;
     antiPattern: string;
@@ -112,11 +121,12 @@ export async function executeAdminMerge(
   agent: AgentContext,
   bugId: string,
   deps: AcceptFixDeps = {},
+  options: AcceptFixOptions = {},
 ): Promise<AcceptFixResult> {
   if (!hasLevel(agent.level, "admin_merger")) {
     return { status: 403, error: "insufficient_level", message: "Only admin merger agents can execute the final merge." };
   }
-  return acceptFix(agent, bugId, deps, { verdict: "accept" }, true);
+  return acceptFix(agent, bugId, deps, { verdict: "accept", ...options }, true);
 }
 
 export async function acceptFix(
@@ -136,8 +146,11 @@ export async function acceptFix(
   });
   if (!bug) return { status: 404, error: "not_found", message: "No such issue in this agent's tenant." };
 
-  if (options.verdict === "reject") {
-    const rejectNotes = options.notes?.trim() || "Fix rejected by merger agent.";
+  const verdict = options.action ?? options.verdict ?? "accept";
+  const notes = options.feedback ?? options.notes;
+
+  if (verdict === "reject") {
+    const rejectNotes = notes?.trim() || "Fix rejected by merger agent.";
     await prisma.$transaction(async (tx) => {
       await tx.bug.update({
         where: { id: bug.id },
@@ -246,72 +259,72 @@ export async function acceptFix(
   }
   const reviewed: ReviewedBug = bug;
 
-  return prisma.$transaction(async (tx) => {
-    try {
-      await assertRedesignOpen(bug.id, tx);
-    } catch (error) {
-      if (error instanceof IssueApiError) {
-        return {
-          status: 409 as const,
-          error: "not_ready" as const,
-          missing: "redesign" as const,
-          message: error.message,
-        };
-      }
-      throw error;
-    }
-
-    if (!(await isConfirmed(bug.id, tx))) {
+  try {
+    await assertRedesignOpen(bug.id);
+  } catch (error) {
+    if (error instanceof IssueApiError) {
       return {
         status: 409 as const,
         error: "not_ready" as const,
-        missing: "confirmation" as const,
-        message: "This issue isn't confirmed yet: the project's required independent reviewers must accept it as real.",
+        missing: "redesign" as const,
+        message: error.message,
       };
     }
+    throw error;
+  }
 
-    const verdicts = await tx.testVerdict.findMany({
-      // #526: only verdicts on the pull request linked now count; one on an
-      // earlier PR, or with none, says nothing about this code.
-      where: { bugId: bug.id, goodToMerge: true, pullRequestUrl: bug.pullRequestUrl ?? "" },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      select: { id: true, headSha: true, onBehalfOfUserId: true, agent: { select: { id: true, ownerUserId: true } } },
-    });
+  if (!(await isConfirmed(bug.id))) {
+    return {
+      status: 409 as const,
+      error: "not_ready" as const,
+      missing: "confirmation" as const,
+      message: "This issue isn't confirmed yet: the project's required independent reviewers must accept it as real.",
+    };
+  }
 
-    const owners = new Set<string>();
-    const reviewers: string[] = [];
-    // #489: the acceptance is bound to the code the reviewers signed off on.
-    let acceptedHeadSha: string | null = bug.pullRequestHeadSha ?? null;
-    for (const verdict of verdicts) {
-      // Checked again now, not only when submitted: a claim taken since, or a
-      // verdict from the claim holder's own side, no longer counts.
-      if (claim && (verdict.agent.id === claim.agentId || verdict.agent.ownerUserId === claim.agent.ownerUserId)) {
-        continue;
-      }
-      if (reviewerConflict({ id: verdict.agent.id, ownerUserId: verdict.agent.ownerUserId }, reviewed)) continue;
-      if (reviewerCreditConflict(verdict.onBehalfOfUserId, reviewed)) continue;
-      if (owners.has(verdict.agent.ownerUserId)) continue;
-      owners.add(verdict.agent.ownerUserId);
-      reviewers.push(verdict.onBehalfOfUserId);
-      // The last counted verdict names the commit that may merge.
-      if (verdict.headSha) acceptedHeadSha = verdict.headSha;
+  const verdicts = await prisma.testVerdict.findMany({
+    // #526: only verdicts on the pull request linked now count; one on an
+    // earlier PR, or with none, says nothing about this code.
+    where: { bugId: bug.id, goodToMerge: true, pullRequestUrl: bug.pullRequestUrl ?? "" },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: { id: true, headSha: true, onBehalfOfUserId: true, agent: { select: { id: true, ownerUserId: true } } },
+  });
+
+  const owners = new Set<string>();
+  const reviewers: string[] = [];
+  // #489: the acceptance is bound to the code the reviewers signed off on.
+  let acceptedHeadSha: string | null = bug.pullRequestHeadSha ?? null;
+  for (const verdict of verdicts) {
+    // Checked again now, not only when submitted: a claim taken since, or a
+    // verdict from the claim holder's own side, no longer counts.
+    if (claim && (verdict.agent.id === claim.agentId || verdict.agent.ownerUserId === claim.agent.ownerUserId)) {
+      continue;
     }
+    if (reviewerConflict({ id: verdict.agent.id, ownerUserId: verdict.agent.ownerUserId }, reviewed)) continue;
+    if (reviewerCreditConflict(verdict.onBehalfOfUserId, reviewed)) continue;
+    if (owners.has(verdict.agent.ownerUserId)) continue;
+    owners.add(verdict.agent.ownerUserId);
+    reviewers.push(verdict.onBehalfOfUserId);
+    // The last counted verdict names the commit that may merge.
+    if (verdict.headSha) acceptedHeadSha = verdict.headSha;
+  }
 
-    const { verdictsNeeded } = await workflowFor(bug.projectId, tx);
-    if (reviewers.length < verdictsNeeded) {
-      return {
-        status: 409 as const,
-        error: "not_ready" as const,
-        missing: "verdicts" as const,
-        message: `This needs ${verdictsNeeded} reviewers saying it is good to merge; ${reviewers.length} count so far.`,
-      };
-    }
+  const { verdictsNeeded } = await workflowFor(bug.projectId);
+  if (reviewers.length < verdictsNeeded) {
+    return {
+      status: 409 as const,
+      error: "not_ready" as const,
+      missing: "verdicts" as const,
+      message: `This needs ${verdictsNeeded} reviewers saying it is good to merge; ${reviewers.length} count so far.`,
+    };
+  }
 
-    const rewardedReviewerUserIds = reviewers;
-    const solverUserId = claim?.beneficiaryUserId ?? bug.assigneeId;
-    const isAdminMerge = forceAdminMerge || agent.level === "admin_merger";
+  const rewardedReviewerUserIds = reviewers;
+  const solverUserId = claim?.beneficiaryUserId ?? bug.assigneeId;
+  const isAdminMerge = forceAdminMerge || agent.level === "admin_merger";
 
-    if (!isAdminMerge) {
+  if (!isAdminMerge) {
+    return prisma.$transaction(async (tx) => {
       // Merger role: Accepts fix, marks ready to merge without resolving or awarding points
       await tx.bug.update({
         where: { id: bug.id },
@@ -374,28 +387,142 @@ export async function acceptFix(
         solverUserId,
         rewardedReviewerUserIds,
       };
+    });
+  }
+
+  // Admin merger role: Finalizes resolution, awards points, and releases claim
+  // Must strictly verify GitHub state and execute the merge BEFORE resolving or disbursing points.
+  if (!ref) {
+    return {
+      status: 409 as const,
+      error: "not_ready" as const,
+      missing: "pull_request" as const,
+      message: "No pull request is linked to this issue.",
+    };
+  }
+
+  const hasAppConfig = Boolean(process.env.GITHUB_APP_ID && process.env.GITHUB_APP_PRIVATE_KEY);
+  const ghClient = deps.client !== undefined
+    ? deps.client
+    : (hasAppConfig ? clientForInstallation(bug.project?.githubInstallationId) : null);
+
+  let mergeCommitSha: string | null = options.mergeCommitSha ?? options.commitSha ?? null;
+
+  if (ghClient) {
+    // 1. Verify PR state directly from GitHub
+    let pullRequest: PullRequest;
+    try {
+      pullRequest = await ghClient.getPullRequest(ref);
+    } catch {
+      return {
+        status: 409 as const,
+        error: "not_ready" as const,
+        missing: "deployment_verification" as const,
+        message: "GitHub could not be reached to verify the pull request.",
+      };
     }
 
-    // Admin merger role: Finalizes resolution, awards points, and releases claim
-    if (ref && acceptedHeadSha) {
-      const hasAppConfig = Boolean(process.env.GITHUB_APP_ID && process.env.GITHUB_APP_PRIVATE_KEY);
-      const ghClient = deps.client ?? (hasAppConfig ? clientForInstallation(bug.project?.githubInstallationId) : null);
-      if (ghClient) {
-        let green = false;
-        try {
-          green = await ghClient.checksGreen(ref, acceptedHeadSha);
-        } catch {
-          green = false;
-        }
-        if (!green) {
-          return {
-            status: 409 as const,
-            error: "not_ready" as const,
-            missing: "deployment_verification" as const,
-            message: "GitHub Actions CI/CD checks or deployment runs have not passed for this pull request head commit.",
-          };
-        }
+    if (pullRequest.state === "closed" && !pullRequest.merged) {
+      return {
+        status: 409 as const,
+        error: "not_ready" as const,
+        missing: "pull_request" as const,
+        message: "That pull request is closed without being merged.",
+      };
+    }
+
+    const headToVerify = acceptedHeadSha || pullRequest.headSha;
+    if (pullRequest.headSha && headToVerify && pullRequest.headSha !== headToVerify) {
+      return {
+        status: 409 as const,
+        error: "not_ready" as const,
+        missing: "pull_request" as const,
+        message: "The pull request's head commit changed since verification. Please re-review.",
+      };
+    }
+
+    // 2. Verify CI/CD checks
+    let green = false;
+    try {
+      green = await ghClient.checksGreen(ref, headToVerify);
+    } catch {
+      green = false;
+    }
+    if (!green) {
+      return {
+        status: 409 as const,
+        error: "not_ready" as const,
+        missing: "deployment_verification" as const,
+        message: "GitHub Actions CI/CD checks or deployment runs have not passed for this pull request head commit.",
+      };
+    }
+
+    // 3. Execute GitHub merge if not already merged
+    if (!pullRequest.merged) {
+      let mergeResult: MergePullResult;
+      try {
+        mergeResult = await ghClient.mergePullRequest(ref, headToVerify);
+      } catch {
+        mergeResult = { merged: false };
       }
+
+      if (!mergeResult.merged) {
+        const failureReason = mergeResult.conflict
+          ? "The pull request changed after its checks were verified."
+          : mergeResult.forbidden
+            ? "The app is not allowed to merge this repository."
+            : mergeResult.noAllowedMethod
+              ? "The repository allows no merge method the app can use."
+              : "GitHub refused the merge.";
+
+        await publish(prisma, {
+          tenantId: bug.tenantId,
+          type: "github.merge_failed",
+          payload: { issueId: bug.id, reason: failureReason, pullRequestUrl: bug.pullRequestUrl },
+          actorAgentId: agent.agentId,
+          bugId: bug.id,
+        });
+        await audit(agent, "github.merge_failed", `bug:${bug.id}`, { reason: failureReason }, { bugId: bug.id, db: prisma });
+
+        const recipient = claim?.beneficiaryUserId ?? bug.assigneeId ?? null;
+        if (recipient) {
+          notifyMergeFailed({
+            bugId: bug.id,
+            bugTitle: bug.title,
+            recipientId: recipient,
+            reason: failureReason,
+            agent: { name: agent.name },
+          });
+        }
+
+        return {
+          status: 409 as const,
+          error: "not_ready" as const,
+          missing: "github_merge_failed" as const,
+          message: failureReason,
+        };
+      }
+
+      mergeCommitSha = mergeResult.sha ?? mergeCommitSha ?? null;
+    } else {
+      mergeCommitSha = pullRequest.headSha ?? mergeCommitSha ?? null;
+    }
+  } else {
+    mergeCommitSha = mergeCommitSha ?? acceptedHeadSha ?? null;
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const current = await tx.bug.findUnique({
+      where: { id: bug.id },
+      select: { status: true },
+    });
+    if (current?.status === "resolved") {
+      return {
+        status: 409 as const,
+        error: "not_ready" as const,
+        missing: "already_accepted" as const,
+        message: "This issue's fix has already been accepted.",
+      };
     }
 
     await tx.bug.update({ where: { id: bug.id }, data: { status: "resolved", reviewStatus: "merged" } });
@@ -468,6 +595,7 @@ export async function acceptFix(
         rewardedReviewerUserIds,
         pullRequestUrl: bug.pullRequestUrl,
         headSha: acceptedHeadSha,
+        mergeCommitSha,
         merged: true,
       },
       { bugId: bug.id, db: tx },
@@ -481,6 +609,7 @@ export async function acceptFix(
         rewardedReviewerUserIds,
         pullRequestUrl: bug.pullRequestUrl,
         headSha: acceptedHeadSha,
+        mergeCommitSha,
         status: "resolved",
         reviewStatus: "merged",
       },
@@ -492,6 +621,7 @@ export async function acceptFix(
       status: 200 as const,
       accepted: true as const,
       merged: true as const,
+      mergeCommitSha: mergeCommitSha ?? undefined,
       solverUserId,
       rewardedReviewerUserIds,
     };

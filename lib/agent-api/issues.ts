@@ -149,6 +149,7 @@ export const issueSelect = {
   // the verdict and merge gates read.
   pullRequestUrl: true,
   pullRequestHeadSha: true,
+  reviewStatus: true,
   area: { select: { id: true, name: true, slug: true } },
 } satisfies Prisma.BugSelect;
 
@@ -169,6 +170,8 @@ export async function listAgentIssues(scope: Scope, params: URLSearchParams) {
   const severity = enumFilter("severity", params.get("severity"), severitySchema.options);
   const assignee = params.get("assignee");
   const stage: IssueStage | null = enumFilter("stage", params.get("stage"), stageSchema.options);
+  const reviewStatusParam = params.get("reviewStatus");
+  const reviewStatus = enumFilter("reviewStatus", reviewStatusParam, ["submitted", "ready_to_merge", "rejected", "merged"]);
   let assigneeId: string | null | undefined;
   if (assignee) {
     if (assignee === "none") assigneeId = null;
@@ -203,6 +206,7 @@ export async function listAgentIssues(scope: Scope, params: URLSearchParams) {
     ...(status ? { status } : {}),
     ...(severity ? { severity } : {}),
     ...(assigneeId !== undefined ? { assigneeId } : {}),
+    ...(reviewStatus ? { reviewStatus } : {}),
     ...platformFilterWhere(requireKnownFilter("platform", params.get("platform"), parsePlatformFilter(params.get("platform"), platforms))),
     ...projectAreaFilterWhere(requireKnownFilter("area", requestedArea, parseProjectAreaFilter(requestedArea, areas))),
   };

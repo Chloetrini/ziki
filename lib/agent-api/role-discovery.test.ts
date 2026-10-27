@@ -68,6 +68,37 @@ describe("Role-based discovery functions", () => {
         verdictsCount: 2,
       });
     });
+
+    it("filters by reviewStatus parameter when provided", async () => {
+      db.bug.findMany.mockResolvedValue([
+        {
+          id: "bug-accepted",
+          number: 102,
+          title: "Accepted PR",
+          projectId: "p1",
+          pullRequestUrl: "https://github.com/org/repo/pull/2",
+          pullRequestHeadSha: "sha-2",
+          reviewStatus: "ready_to_merge",
+          reporterId: "user-1",
+          beneficiaryUserId: "user-1",
+          createdByAgentId: null,
+          createdAt: new Date(),
+          claims: [],
+          testVerdicts: [],
+        },
+      ]);
+
+      const issues = await findReadyToMergeIssues(merger, "p1", 50, "ready_to_merge");
+      expect(db.bug.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            reviewStatus: "ready_to_merge",
+          }),
+        }),
+      );
+      expect(issues).toHaveLength(1);
+      expect(issues[0].reviewStatus).toBe("ready_to_merge");
+    });
   });
 
   describe("findReviewableIssues", () => {

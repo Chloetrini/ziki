@@ -464,97 +464,119 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
       // #448: what agents decided on this issue — confirmations and rejections
       // (#1122), the claim, test verdicts, and whether an agent accepted the
       // fix. Sentences only; the raw audit payloads live on the audit page (#447).
-      loadOptional<AgentDecision[]>("agent decisions", [], async () => {
-        const [validations, claims, verdicts, accepted] = await Promise.all([
-          prisma.issueValidation.findMany({
-            where: { bugId: id, kind: "real" },
-            orderBy: { createdAt: "asc" },
-            select: {
-              id: true,
-              createdAt: true,
-              verdict: true,
-              severity: true,
-              notes: true,
-              agent: { select: { name: true } },
-              onBehalfOf: { select: { name: true } },
-            },
-          }),
-          prisma.issueClaim.findMany({
-            where: { bugId: id, status: "active", releasedAt: null },
-            orderBy: { createdAt: "asc" },
-            select: {
-              id: true,
-              createdAt: true,
-              deliverBy: true,
-              extendedAt: true,
-              waitingOnOwnerSince: true,
-              agent: { select: { name: true, owner: { select: { name: true } } } },
-              beneficiary: { select: { name: true } },
-            },
-          }),
-          prisma.testVerdict.findMany({
-            where: { bugId: id },
-            orderBy: { createdAt: "asc" },
-            select: {
-              id: true,
-              createdAt: true,
-              goodToMerge: true,
-              agent: { select: { name: true } },
-              onBehalfOf: { select: { name: true } },
-            },
-          }),
-          prisma.agentAuditEvent.findMany({
-            where: { bugId: id, action: "issue.accepted" },
-            orderBy: { createdAt: "asc" },
-            select: { id: true, createdAt: true, agent: { select: { name: true } } },
-          }),
-        ]);
-        return [
-          ...validations.map<AgentDecision>((v) =>
-            v.verdict === "reject"
-              ? {
-                  id: `validation-${v.id}`,
-                  at: v.createdAt,
-                  kind: "rejected",
-                  agentName: v.agent.name,
-                  personName: v.onBehalfOf.name,
-                  notes: v.notes,
-                }
-              : {
-                  id: `validation-${v.id}`,
-                  at: v.createdAt,
-                  kind: "confirmed",
-                  agentName: v.agent.name,
-                  personName: v.onBehalfOf.name,
-                  severity: v.severity,
-                },
-          ),
-          ...claims.map<AgentDecision>((c) => ({
-            id: `claim-${c.id}`,
-            at: c.createdAt,
-            kind: "claimed",
-            agentName: c.agent.name,
-            personName: c.beneficiary.name,
-            deliverBy: bug.pullRequestUrl ? null : c.deliverBy,
-            extendedAt: c.extendedAt,
-            waitingOnName: c.waitingOnOwnerSince ? c.agent.owner.name : null,
-          })),
-          ...verdicts.map<AgentDecision>((v) => ({
-            id: `verdict-${v.id}`,
-            at: v.createdAt,
-            kind: "verdict",
-            agentName: v.agent.name,
-            personName: v.onBehalfOf.name,
-            goodToMerge: v.goodToMerge,
-          })),
-          ...accepted.map<AgentDecision>((e) => ({
-            id: `accepted-${e.id}`,
-            at: e.createdAt,
-            kind: "accepted",
-            agentName: e.agent.name,
-          })),
-        ];
-      }),
+      loadOptional<{ otherDecisions: AgentDecision[]; mergerDecisions: AgentDecision[] }>(
+        "agent decisions",
+        { otherDecisions: [], mergerDecisions: [] },
+        async () => {
+          const [validations, claims, verdicts, accepted] = await Promise.all([
+            prisma.issueValidation.findMany({
+              where: { bugId: id, kind: "real" },
+              orderBy: { createdAt: "asc" },
+              select: {
+                id: true,
+                createdAt: true,
+                verdict: true,
+                severity: true,
+                notes: true,
+                agent: { select: { name: true } },
+                onBehalfOf: { select: { name: true } },
+              },
+            }),
+            prisma.issueClaim.findMany({
+              where: { bugId: id, status: "active", releasedAt: null },
+              orderBy: { createdAt: "asc" },
+              select: {
+                id: true,
+                createdAt: true,
+                deliverBy: true,
+                extendedAt: true,
+                waitingOnOwnerSince: true,
+                agent: { select: { name: true, owner: { select: { name: true } } } },
+                beneficiary: { select: { name: true } },
+              },
+            }),
+            prisma.testVerdict.findMany({
+              where: { bugId: id },
+              orderBy: { createdAt: "asc" },
+              select: {
+                id: true,
+                createdAt: true,
+                goodToMerge: true,
+                agent: { select: { name: true } },
+                onBehalfOf: { select: { name: true } },
+              },
+            }),
+            prisma.agentAuditEvent.findMany({
+              where: { bugId: id, action: "issue.accepted" },
+              orderBy: { createdAt: "asc" },
+              select: { id: true, createdAt: true, agent: { select: { name: true, level: true } }, payload: true },
+            }),
+          ]);
+
+          const mergerDecisions: AgentDecision[] = accepted
+            .filter((e) => e.agent.level === "merger" || e.agent.level === "admin_merger")
+            .map((e) => ({
+              id: `accepted-${e.id}`,
+              at: e.createdAt,
+              kind: "accepted",
+              agentName: e.agent.name,
+            }));
+
+          const otherDecisions: AgentDecision[] = [
+            ...validations.map<AgentDecision>((v) =>
+              v.verdict === "reject"
+                ? {
+                    id: `validation-${v.id}`,
+                    at: v.createdAt,
+                    kind: "rejected",
+                    agentName: v.agent.name,
+                    personName: v.onBehalfOf.name,
+                    notes: v.notes,
+                  }
+                : {
+                    id: `validation-${v.id}`,
+                    at: v.createdAt,
+                    kind: "confirmed",
+                    agentName: v.agent.name,
+                    personName: v.onBehalfOf.name,
+                    severity: v.severity,
+                  },
+            ),
+            ...claims.map<AgentDecision>((c) => ({
+              id: `claim-${c.id}`,
+              at: c.createdAt,
+              kind: "claimed",
+              agentName: c.agent.name,
+              personName: c.beneficiary.name,
+              deliverBy: bug.pullRequestUrl ? null : c.deliverBy,
+              extendedAt: c.extendedAt,
+              waitingOnName: c.waitingOnOwnerSince ? c.agent.owner.name : null,
+            })),
+            ...verdicts.map<AgentDecision>((v) => ({
+              id: `verdict-${v.id}`,
+              at: v.createdAt,
+              kind: "verdict",
+              agentName: v.agent.name,
+              personName: v.onBehalfOf.name,
+              goodToMerge: v.goodToMerge,
+            })),
+            ...accepted
+              .filter((e) => e.agent.level !== "merger" && e.agent.level !== "admin_merger")
+              .map<AgentDecision>((e) => ({
+                id: `accepted-${e.id}`,
+                at: e.createdAt,
+                kind: "accepted",
+                agentName: e.agent.name,
+              })),
+          ].sort((a, b) => {
+            const at = new Date(a.at).getTime() - new Date(b.at).getTime();
+            if (at !== 0) return at;
+            return a.id.localeCompare(b.id);
+          });
+
+          return { otherDecisions, mergerDecisions };
+        },
+      ),
       loadOptional<TicketEscalation[]>("escalations", [], () =>
         tenantId ? listBugEscalations(id, tenantId) : Promise.resolve([]),
       ),
@@ -940,11 +962,12 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
 
           {/* Agent decisions, summarized, in the spot the GitHub PR box had (that moved under People). */}
           <AgentDecisionsSummary
-            decisions={agentDecisions}
+            otherDecisions={agentDecisions.otherDecisions}
+            mergerDecisions={agentDecisions.mergerDecisions}
             passed={
+              agentDecisions.mergerDecisions.length > 0 ||
               intakeStage === "confirmed" ||
-              intakeStage === "ready" ||
-              agentDecisions.some((decision) => decision.kind === "accepted")
+              intakeStage === "ready"
             }
           />
 

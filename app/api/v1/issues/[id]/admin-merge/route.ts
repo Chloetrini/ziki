@@ -27,7 +27,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!budget.allowed) return agentBudgetExceededResponse(budget.retryAfterSeconds, budget);
 
   const { id } = await params;
-  const result = await executeAdminMerge(agent, id);
+  let options: Record<string, unknown> | undefined;
+  try {
+    const json = await req.json();
+    if (json && typeof json === "object") {
+      options = json;
+    }
+  } catch {
+    // Empty body is valid
+  }
+  const result = options
+    ? await executeAdminMerge(agent, id, {}, options)
+    : await executeAdminMerge(agent, id);
   const { status, ...body } = result;
   return withAgentBudgetHeaders(NextResponse.json(body, { status }), budget);
 }

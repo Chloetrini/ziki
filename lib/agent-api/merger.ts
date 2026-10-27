@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { AgentContext } from "@/lib/agents/require-agent";
 import { requireLevel } from "@/lib/agents/levels";
@@ -29,9 +30,23 @@ export async function findReadyToMergeIssues(
   agent: AgentContext,
   projectId: string,
   limit = 50,
+  reviewStatusFilter?: string | null,
 ): Promise<ReadyToMergeIssue[]> {
   requireLevel(agent, "merger");
   const { verdictsNeeded } = await workflowFor(projectId);
+
+  let reviewStatusCondition: Prisma.StringNullableFilter | string | undefined;
+  if (reviewStatusFilter === "ready_to_merge") {
+    reviewStatusCondition = "ready_to_merge";
+  } else if (reviewStatusFilter === "submitted") {
+    reviewStatusCondition = { in: ["submitted", null] } as unknown as Prisma.StringNullableFilter;
+  } else if (reviewStatusFilter === "all") {
+    reviewStatusCondition = { not: "rejected" };
+  } else if (agent.level === "admin_merger") {
+    reviewStatusCondition = "ready_to_merge";
+  } else {
+    reviewStatusCondition = { not: "rejected" };
+  }
 
   const candidates = await prisma.bug.findMany({
     where: {
@@ -39,14 +54,19 @@ export async function findReadyToMergeIssues(
       projectId,
       isDeleted: false,
       status: { in: ["open", "in_progress"] },
-      reviewStatus: { not: "rejected" },
+      reviewStatus: reviewStatusCondition,
       pullRequestUrl: { not: null },
-      claims: {
-        some: {
-          status: "active",
-          releasedAt: null,
+      OR: [
+        { reviewStatus: "ready_to_merge" },
+        {
+          claims: {
+            some: {
+              status: "active",
+              releasedAt: null,
+            },
+          },
         },
-      },
+      ],
     },
     take: limit * 2,
     orderBy: { createdAt: "asc" },
@@ -99,7 +119,7 @@ export async function findReadyToMergeIssues(
       owners.add(verdict.agent.ownerUserId);
     }
 
-    if (owners.size < verdictsNeeded) continue;
+    if (bug.reviewStatus !== "ready_to_merge" && owners.size < verdictsNeeded) continue;
 
     const reviewed = {
       reporterId: bug.reporterId,
