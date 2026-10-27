@@ -1,11 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const requireUser = vi.hoisted(() => vi.fn());
+const mockCurrentTenantIdFor = vi.hoisted(() => vi.fn());
+const mockIsTenantAdmin = vi.hoisted(() => vi.fn());
+
 vi.mock("@/lib/auth-helpers", () => ({ requireUser }));
+vi.mock("@/lib/tenant-context", () => ({ currentTenantIdFor: mockCurrentTenantIdFor }));
+vi.mock("@/lib/agents/membership", () => ({ isTenantAdmin: mockIsTenantAdmin }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: {
       findUnique: vi.fn(),
+    },
+    project: {
+      findMany: vi.fn(),
     },
   },
 }));
@@ -157,4 +165,63 @@ it("renders the display-name form on Account and keeps the profile route (#576)"
   expect(nodes.some((node) => node.props?.href === "/settings/profile")).toBe(true);
   expect(nodes.some((node) => node.type === DisplayNameForm)).toBe(true);
   expect(nodes.some((node) => node.props?.href === "/settings/security")).toBe(true);
+});
+
+describe("SettingsPage projects section", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    requireUser.mockResolvedValue({ id: "user-1", name: "Ada", email: "ada@example.com", role: "admin" });
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({ name: "Ada", email: "ada@example.com" } as never);
+    mockCurrentTenantIdFor.mockResolvedValue("tenant-1");
+    mockIsTenantAdmin.mockResolvedValue(true);
+  });
+
+  it("renders projects list with settings links for tenant admins", async () => {
+    vi.mocked(prisma.project.findMany).mockResolvedValueOnce([
+      {
+        id: "proj-web",
+        name: "Ziki Web",
+        slug: "web",
+        repoUrl: "https://github.com/emerjent/bug-tracker",
+        githubInstallationId: "12345",
+        createdAt: new Date("2026-01-01"),
+        _count: { bugs: 12 },
+      },
+      {
+        id: "proj-mobile",
+        name: "Ziki Mobile",
+        slug: "mobile",
+        repoUrl: null,
+        githubInstallationId: null,
+        createdAt: new Date("2026-01-02"),
+        _count: { bugs: 3 },
+      },
+    ] as never);
+
+    const page = await SettingsPage({
+      searchParams: Promise.resolve({ section: "projects" }),
+    });
+    expect(page).toBeDefined();
+
+    const hrefs = collectHrefs(page);
+    expect(hrefs).toContain("/projects/web/settings");
+    expect(hrefs).toContain("/projects/web/settings/github");
+    expect(hrefs).toContain("/issues?project=web");
+    expect(hrefs).toContain("/projects/mobile/settings");
+    expect(hrefs).toContain("/projects/mobile/settings/github");
+    expect(hrefs).toContain("/issues?project=mobile");
+    expect(hrefs).toContain("/projects");
+  });
+
+  it("renders empty state when tenant has no projects", async () => {
+    vi.mocked(prisma.project.findMany).mockResolvedValueOnce([]);
+
+    const page = await SettingsPage({
+      searchParams: Promise.resolve({ section: "projects" }),
+    });
+    expect(page).toBeDefined();
+
+    const hrefs = collectHrefs(page);
+    expect(hrefs).toContain("/projects");
+  });
 });

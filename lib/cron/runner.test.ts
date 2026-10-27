@@ -8,6 +8,7 @@ const mockSweepPromotions = vi.hoisted(() => vi.fn());
 const mockDispatch = vi.hoisted(() => vi.fn());
 const mockPruneAgent = vi.hoisted(() => vi.fn());
 const mockSweepAttachments = vi.hoisted(() => vi.fn());
+const mockSweepBids = vi.hoisted(() => vi.fn());
 const mockLogger = vi.hoisted(() => ({
   info: vi.fn(),
   error: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock("@/lib/agents/promotion", () => ({ sweepLevelPromotions: mockSweepPromot
 vi.mock("@/lib/webhooks/deliver", () => ({ dispatchDueDeliveries: mockDispatch }));
 vi.mock("@/lib/agent-retention", () => ({ pruneAgentRows: mockPruneAgent }));
 vi.mock("@/lib/attachment-retention", () => ({ sweepOrphanedAttachments: mockSweepAttachments }));
+vi.mock("@/lib/cron/bids", () => ({ sweepPendingBids: mockSweepBids }));
 
 import {
   runPlatformSweeps,
@@ -43,6 +45,7 @@ describe("runPlatformSweeps (#647)", () => {
     mockSweepJobReviewOffers.mockResolvedValue({ expired: 1, offered: 3 });
     mockSweepClaims.mockResolvedValue({ released: 1, offered: 1 });
     mockSweepOrphans.mockResolvedValue({ reopened: 2 });
+    mockSweepBids.mockResolvedValue({ invited: 1, assigned: 2, lapsed: 0, errors: [] });
     mockSweepPromotions.mockResolvedValue({ promoted: 1, demoted: 0 });
     mockDispatch.mockResolvedValue(4);
     mockPruneAgent.mockResolvedValue({
@@ -68,6 +71,7 @@ describe("runPlatformSweeps (#647)", () => {
       expect(result.sweeps.jobReviewOffers).toEqual({ status: "ok", expired: 1, offered: 3 });
       expect(result.sweeps.claims).toEqual({ status: "ok", released: 1, offered: 1 });
       expect(result.sweeps.orphanedIssues).toEqual({ status: "ok", reopened: 2 });
+      expect(result.sweeps.bids).toEqual({ status: "ok", invited: 1, assigned: 2, lapsed: 0 });
       expect(result.sweeps.promotions).toEqual({ status: "ok", promoted: 1, demoted: 0 });
       expect(result.sweeps.deliveries).toEqual({ status: "ok", processed: 4 });
       expect(result.sweeps.retention).toEqual({
