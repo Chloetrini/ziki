@@ -11,7 +11,7 @@ vi.mock("@/lib/workflow", () => ({
   workflowFor: vi.fn(async () => ({
     confirmationsNeeded: 2,
     verdictsNeeded: 2,
-    offerWindowSeconds: 60,
+    offerWindowSeconds: 1800,
   })),
 }));
 vi.mock("@/lib/agent-api/validation", () => ({

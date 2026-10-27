@@ -42,7 +42,9 @@ export function TeamAgentList({
           </p>
           {agent.currentWork.length > 0 ? (
             <div className="mt-2">
-              <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Current work</h4>
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Current work ({agent.currentWork.length})
+              </h4>
               <ul className="mt-1 space-y-1">
                 {agent.currentWork.map((issue) => (
                   <li key={issue.id} className="break-words text-sm">

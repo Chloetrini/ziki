@@ -124,7 +124,7 @@ describe("job review offer recovery (#616)", () => {
       id: "offer-bob",
       submissionId: "sub1",
       status: "offered",
-      offeredAt: new Date(Date.now() - 61_000),
+      offeredAt: new Date(Date.now() - 31 * 60_000),
       deadlineAt: null,
     });
     db.jobSubmission.findMany.mockResolvedValue([{ id: "sub1" }]);
@@ -174,7 +174,7 @@ describe("job review offer recovery (#616)", () => {
       submissionId: "sub1",
       agentId: "reviewer1",
       status: "offered",
-      offeredAt: new Date(Date.now() - 61_000),
+      offeredAt: new Date(Date.now() - 31 * 60_000),
       submission: { id: "sub1", job: { tenantId: "tenant1" } },
     });
     db.jobSubmission.findUnique.mockResolvedValue(pendingSubmission);

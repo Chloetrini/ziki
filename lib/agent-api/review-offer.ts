@@ -12,7 +12,7 @@ import {
 import { workflowFor } from "@/lib/workflow";
 import { DEFAULT_PROJECT_WORKFLOW } from "@/lib/workflow-config";
 
-export const REVIEW_OFFER_TTL_MS = 60_000; // 60 seconds to accept
+export const REVIEW_OFFER_TTL_MS = 30 * 60_000; // 30 minutes to accept
 export const REVIEW_DEADLINE_MS = 30 * 60_000; // 30 minutes to review after acceptance
 export const DEFAULT_REVIEW_VERDICTS_NEEDED = DEFAULT_PROJECT_WORKFLOW.verdictsNeeded;
 

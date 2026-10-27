@@ -36,7 +36,7 @@ function form(values: Record<string, string | number | boolean> = {}) {
   const merged = {
     confirmationsNeeded: 3,
     verdictsNeeded: 2,
-    offerWindowSeconds: 60,
+    offerWindowSeconds: 1800,
     heartbeatMinutes: 15,
     deliveryMinutes: 15,
     maxActiveClaims: 2,

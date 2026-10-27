@@ -28,6 +28,7 @@ import {
   answerEscalationAction,
   quickResolveEscalationAction,
 } from "./actions";
+import { revalidatePath } from "next/cache";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -46,9 +47,23 @@ beforeEach(() => {
 });
 
 describe("quickResolveEscalationAction (#763)", () => {
+  it("refuses another owner's private request without mutating or revalidating", async () => {
+    db.agentQuestion.findFirst.mockResolvedValue({ id: "esc-1", agentId: "agent-2", bugId: null, ownerUserId: "other-owner" });
+    expect(await quickResolveEscalationAction("esc-1", "approve")).toEqual({ ok: false, error: "Only the owner can answer this question." });
+    expect(db.agentQuestion.updateMany).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("reports a concurrent answer without revalidating", async () => {
+    db.agentQuestion.updateMany.mockResolvedValue({ count: 0 });
+    expect(await quickResolveEscalationAction("esc-1", "approve")).toEqual({ ok: false, error: "That question has already been answered." });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
   it("resolves escalation with approve message", async () => {
     const result = await quickResolveEscalationAction("esc-1", "approve");
     expect(result).toEqual({ ok: true });
+    expect(revalidatePath).toHaveBeenCalledWith("/activity");
     expect(db.agentQuestion.updateMany).toHaveBeenCalledWith({
       where: { id: "esc-1", answer: null },
       data: expect.objectContaining({
@@ -79,6 +94,7 @@ describe("answerEscalationAction (#763)", () => {
 
     const result = await answerEscalationAction(undefined, formData);
     expect(result).toEqual({ ok: true });
+    expect(revalidatePath).toHaveBeenCalledWith("/activity");
     expect(db.agentQuestion.updateMany).toHaveBeenCalledWith({
       where: { id: "esc-1", answer: null },
       data: expect.objectContaining({

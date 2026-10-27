@@ -54,7 +54,7 @@ export default async function AppLayout({
   try {
     tenantId = await currentTenantIdFor(user.id);
     activeTenantId = tenantId;
-    const memberships = await tenantsForUser(prisma, user.id);
+    const memberships = await tenantsForUser(prisma, user.id, user.role);
     workspaces = memberships
       .filter((tenant) => tenant.archivedAt === null)
       .map((tenant) => ({ id: tenant.id, name: tenant.name, slug: tenant.slug }));

@@ -506,6 +506,9 @@ export function AppHeader({
                 </MenuLink>
                 <AccountThemeSelector />
                 <div className="mx-2 h-px bg-zk-divider" />
+                <MenuLink href="/activity" active={isNavItemActive(pathname, "/activity")}>
+                  Activity &amp; Approvals
+                </MenuLink>
                 {showEscalations ? (
                   <MenuLink href="/escalations" active={isNavItemActive(pathname, "/escalations")}>
                     <span className="flex-1">Escalations</span>

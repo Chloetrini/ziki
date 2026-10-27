@@ -53,7 +53,7 @@ export default async function TenantsPage({
   const notice = typeof noticeParam === "string" ? noticeParam : "";
 
   const [tenants, currentTenantId, invite, zeduOwnerNeeded, openInvites] = await Promise.all([
-    tenantsForUser(prisma, user.id),
+    tenantsForUser(prisma, user.id, user.role),
     currentTenantIdFor(user.id),
     inviteId ? viewInvite(prisma, { inviteId }, user) : null,
     isSuperAdmin(user.role) ? zeduNeedsOwner(prisma) : false,
@@ -62,7 +62,7 @@ export default async function TenantsPage({
   const listedInvites = openInvites.filter((row) => row.id !== inviteId);
   const activeTenants = tenants.filter((tenant) => !tenant.archivedAt);
   const archivedTenants = tenants.filter(
-    (tenant) => tenant.archivedAt && tenant.role === "owner",
+    (tenant) => tenant.archivedAt && (tenant.role === "owner" || isSuperAdmin(user.role)),
   );
   const hasTenants = activeTenants.length > 0;
   // #537: names shared by two of your tenants, so their buttons say which is which.

@@ -146,14 +146,22 @@ export async function setActiveTenantCookie(tenantId: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /** Only the tenants the person belongs to, by name. Never anyone else's. */
-export async function tenantsForUser(db: Db, userId: string): Promise<TenantChoice[]> {
+export async function tenantsForUser(
+  db: Db,
+  userId: string,
+  userRole?: AppRole | null,
+): Promise<TenantChoice[]> {
   try {
     const memberships = await db.membership.findMany({
       where: { userId },
       select: tenantChoiceSelect,
       orderBy: { tenant: { name: "asc" } },
     });
-    return memberships.map(toChoice);
+    const choices = memberships.map(toChoice);
+    if (isSuperAdmin(userRole)) {
+      return choices.map((c) => ({ ...c, role: "owner" as const }));
+    }
+    return choices;
   } catch (error) {
     if (!archivedAtMissing(error)) {
       console.error("[tenants] tenantsForUser failed", error);
@@ -166,7 +174,11 @@ export async function tenantsForUser(db: Db, userId: string): Promise<TenantChoi
         select: tenantIdentitySelect,
         orderBy: { tenant: { name: "asc" } },
       });
-      return memberships.map(choiceWithoutArchive);
+      const choices = memberships.map(choiceWithoutArchive);
+      if (isSuperAdmin(userRole)) {
+        return choices.map((c) => ({ ...c, role: "owner" as const }));
+      }
+      return choices;
     } catch (retryError) {
       console.error("[tenants] tenantsForUser failed", retryError);
       return [];
@@ -573,6 +585,27 @@ export async function deleteTenant(
 // ---------------------------------------------------------------------------
 // Zedu's first owner
 // ---------------------------------------------------------------------------
+
+/**
+ * Ensure a user has an owner membership in the primary Zedu tenant (#536).
+ * Any super admin automatically gets owner privileges.
+ */
+export async function ensureZeduOwnerMembership(
+  userId: string,
+  db: Db,
+): Promise<void> {
+  const tenant = await db.tenant.upsert({
+    where: { slug: ZEDU_SLUG },
+    update: {},
+    create: { slug: ZEDU_SLUG, name: "Ziki" },
+  });
+
+  await db.membership.upsert({
+    where: { tenantId_userId: { tenantId: tenant.id, userId } },
+    update: { role: "owner" },
+    create: { tenantId: tenant.id, userId, role: "owner" },
+  });
+}
 
 /**
  * Everyone moved into Zedu by the migration is a member, never an owner

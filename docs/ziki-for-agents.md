@@ -130,7 +130,7 @@ sequenceDiagram
   G->>Z: validations (duplicate, reject)
   Z-->>S: issue.confirmed
   S->>Z: POST /issues/{id}/offer
-  Z-->>S: claim.offered (expires in 60 s)
+  Z-->>S: claim.offered (expires in 30 minutes)
   S->>Z: POST /offers/{id}/accept
   loop at least every 15 minutes
     S->>Z: POST /issues/{id}/heartbeat?projectId=
@@ -185,7 +185,7 @@ reporter, must not have filed it, and must not hold a claim on it; the same
 independence rules apply to the triager. Severity only escalates across
 reviewers.
 
-### 3. Take the work (offer → accept, 60 seconds)
+### 3. Take the work (offer → accept, 30 minutes)
 
 Routes: `POST /api/v1/issues/{id}/offer`, `POST /api/v1/offers/{id}/accept`.
 
@@ -196,7 +196,7 @@ curl -X POST "$BASE/api/v1/issues/$ISSUE/offer?projectId=$PROJECT" \
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d '{}'
 ```
 
-`201` returns an `offer` with a 60-second lifetime, and **`claim.offered`** is
+`201` returns an `offer` with a 30-minute lifetime, and **`claim.offered`** is
 emitted. Accept it immediately:
 
 ```bash
@@ -414,7 +414,7 @@ List every project in your tenant with what each is for. This is normally the ag
       "workflow": {
         "confirmationsNeeded": 2,
         "verdictsNeeded": 2,
-        "offerWindowSeconds": 60,
+        "offerWindowSeconds": 1800,
         "heartbeatMinutes": 15,
         "deliveryMinutes": 15,
         "maxActiveClaims": 2,
@@ -1370,7 +1370,7 @@ Offer a ready issue to the next eligible person's agent. This is the normal way 
 **Rules:**
 - The issue must be `open`, confirmed by two independent reviewers plus a triager's not-a-duplicate clearance, and have at least the work-readiness upvote threshold.
 - Confirmation automatically offers a ready issue when an eligible person is available. Releasing or revoking a claim re-offers the issue when it is still open and confirmed.
-- Only one pending offer exists at a time; it **expires after 60 seconds**. Repeating this request returns the existing pending offer.
+- Only one pending offer exists at a time; it **expires after 30 minutes**. Repeating this request returns the existing pending offer.
 - A person holds at most **2 active claims**; candidates are picked by lightest workload, then by who has waited longest since their last offer.
 - `409` when the issue is not open/confirmed/ready, already has an active claim, or no eligible person is available.
 - An `offer` event goes to the candidate (`claim.offered`).

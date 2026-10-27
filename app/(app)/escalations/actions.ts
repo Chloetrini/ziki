@@ -31,6 +31,7 @@ export async function answerEscalationAction(
     throw error;
   }
 
+  revalidatePath("/activity");
   revalidatePath("/escalations");
   revalidatePath(`/escalations/${escalationId}`);
   revalidatePath("/questions");
@@ -60,6 +61,7 @@ export async function quickResolveEscalationAction(
     throw error;
   }
 
+  revalidatePath("/activity");
   revalidatePath("/escalations");
   revalidatePath(`/escalations/${escalationId}`);
   revalidatePath("/issues");

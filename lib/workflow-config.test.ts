@@ -11,7 +11,7 @@ describe("project workflow defaults (#595)", () => {
     expect(DEFAULT_PROJECT_WORKFLOW).toEqual({
       confirmationsNeeded: 2,
       verdictsNeeded: 2,
-      offerWindowSeconds: 60,
+      offerWindowSeconds: 1800,
       heartbeatMinutes: 15,
       deliveryMinutes: 15,
       maxActiveClaims: 2,
@@ -38,7 +38,7 @@ describe("workflowSettingsSchema (#595)", () => {
       ...valid,
       confirmationsNeeded: WORKFLOW_LIMITS.confirmationsNeeded.min,
       verdictsNeeded: 5,
-      offerWindowSeconds: 600,
+      offerWindowSeconds: 3600,
       heartbeatMinutes: WORKFLOW_LIMITS.heartbeatMinutes.min,
       deliveryMinutes: WORKFLOW_LIMITS.deliveryMinutes.max,
       maxActiveClaims: 20,
@@ -63,7 +63,7 @@ describe("workflowSettingsSchema (#595)", () => {
       ["verdictsNeeded", 0],
       ["verdictsNeeded", 6],
       ["offerWindowSeconds", 29],
-      ["offerWindowSeconds", 601],
+      ["offerWindowSeconds", 3601],
     ] as const) {
       expect(workflowSettingsSchema.safeParse({ ...valid, [field]: value }).success).toBe(false);
     }
@@ -71,7 +71,7 @@ describe("workflowSettingsSchema (#595)", () => {
 
   it("refuses non-integers, wrong types and a non-boolean autoMerge", () => {
     expect(workflowSettingsSchema.safeParse({ ...valid, confirmationsNeeded: 2.5 }).success).toBe(false);
-    expect(workflowSettingsSchema.safeParse({ ...valid, offerWindowSeconds: "60" }).success).toBe(false);
+    expect(workflowSettingsSchema.safeParse({ ...valid, offerWindowSeconds: "1800" }).success).toBe(false);
     expect(workflowSettingsSchema.safeParse({ ...valid, autoMerge: "true" }).success).toBe(false);
   });
 });

@@ -13,6 +13,7 @@ import {
   switchProjectAction,
 } from "./actions";
 import { isTenantAdmin, isTenantAdminRole } from "@/lib/agents/membership";
+import { isSuperAdmin } from "@/lib/roles";
 import { MissionCoverage } from "./mission-coverage";
 import { ProjectRewardRulesDisplay } from "@/components/project-reward-rules-display";
 import {
@@ -96,7 +97,7 @@ export default async function ProjectsPage({
     getPlatformRewardConfig(prisma),
   ]);
   const platformDefaults = projectDefaultsFromPlatform(platformRewards);
-  const isOwner = membership?.role === "owner";
+  const isOwner = membership?.role === "owner" || isSuperAdmin(user.role);
   const canManageMissions = isTenantAdminRole(membership?.role, user.role);
   const activeProjects = projects.filter((project) => !project.archivedAt);
   const archivedProjects = projects.filter((project) => project.archivedAt);

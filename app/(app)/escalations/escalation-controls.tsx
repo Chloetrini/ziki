@@ -57,12 +57,16 @@ export function QuickResolveButtons({
   const handleResolve = (actionType: "approve" | "authorize") => {
     setError(null);
     startTransition(async () => {
-      const res = await quickResolveEscalationAction(escalationId, actionType);
-      if (res.ok) {
-        onResolved?.();
-        router.refresh();
-      } else {
-        setError(res.error);
+      try {
+        const res = await quickResolveEscalationAction(escalationId, actionType);
+        if (res.ok) {
+          onResolved?.();
+          router.refresh();
+        } else {
+          setError(res.error);
+        }
+      } catch {
+        setError("Could not send your response. Please try again.");
       }
     });
   };

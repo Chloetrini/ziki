@@ -44,14 +44,14 @@ describe("agent project discovery (#607)", () => {
       items: [
         { id: "project-web", slug: "web", name: "Web", goal: "Ship Ziki", repoUrl: "https://github.com/web", stagingUrl: "https://stage",
           workflow: {
-            confirmationsNeeded: 2, verdictsNeeded: 2, offerWindowSeconds: 60,
+            confirmationsNeeded: 2, verdictsNeeded: 2, offerWindowSeconds: 1800,
             heartbeatMinutes: 15, deliveryMinutes: 15, maxActiveClaims: 2,
             volunteerWindowSeconds: 120, autoMerge: true,
           }, openIssueCount: 3,
           rewardRules: { guidelines: null, reporter: 150, reviewer: 300, solver: { critical: 1800, high: 1200, low: 450, medium: 750 } } },
         { id: "project-api", slug: "api", name: "API", goal: null, repoUrl: null, stagingUrl: null,
           workflow: {
-            confirmationsNeeded: 2, verdictsNeeded: 2, offerWindowSeconds: 60,
+            confirmationsNeeded: 2, verdictsNeeded: 2, offerWindowSeconds: 1800,
             heartbeatMinutes: 15, deliveryMinutes: 15, maxActiveClaims: 2,
             volunteerWindowSeconds: 120, autoMerge: true,
           }, openIssueCount: 0,
@@ -102,7 +102,7 @@ describe("agent project discovery (#607)", () => {
     await expect(response.json()).resolves.toMatchObject({
       id: "project-web", goal: "Ship Ziki", openIssueCount: 7,
       workflow: {
-        confirmationsNeeded: 2, verdictsNeeded: 2, offerWindowSeconds: 60,
+        confirmationsNeeded: 2, verdictsNeeded: 2, offerWindowSeconds: 1800,
         heartbeatMinutes: 15, deliveryMinutes: 15, maxActiveClaims: 2,
         volunteerWindowSeconds: 120, autoMerge: true,
       },

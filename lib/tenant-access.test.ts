@@ -59,4 +59,21 @@ describe("tenant access", () => {
     expect(findUnique).not.toHaveBeenCalled();
     expect(access).toMatchObject({ tenantId: null, admin: true, membershipRole: null });
   });
+
+  it("grants owner membership role to the site super admin when tenant is selected", async () => {
+    currentTenantIdFor.mockResolvedValue("tenant-ziki");
+    findUnique.mockResolvedValue({
+      role: "member",
+      tenant: { name: "Ziki", slug: "ziki" },
+    });
+
+    const access = await currentTenantAccess("root", "super_admin");
+
+    expect(access).toMatchObject({
+      tenantId: "tenant-ziki",
+      tenantName: "Ziki",
+      membershipRole: "owner",
+      admin: true,
+    });
+  });
 });

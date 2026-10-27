@@ -327,6 +327,15 @@ describe("theme preference (#659)", () => {
 
 
 describe("Profile account navigation (#576)", () => {
+  it("links to Activity & Approvals and marks it current", async () => {
+    navigation.pathname = "/activity";
+    renderHeader();
+    await userEvent.setup().click(screen.getByRole("button", { name: /account menu/i }));
+    const activity = screen.getByRole("link", { name: "Activity & Approvals" });
+    expect(activity.getAttribute("href")).toBe("/activity");
+    expect(activity.getAttribute("aria-current")).toBe("page");
+  });
+
   it.each([
     ["/settings/profile", "Profile"],
     ["/settings", "Settings"],

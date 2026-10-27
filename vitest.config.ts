@@ -9,7 +9,7 @@ export default defineConfig({
     environment: "node",
     include: ["**/*.{test,spec}.{ts,tsx}"],
     // packages/* are standalone and run with their own dependencies (see ci.yml).
-    exclude: ["node_modules", ".next", "prisma", "e2e", "packages/**"],
+    exclude: ["node_modules", ".next", "prisma", "e2e", "packages/**", ".worktrees/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],

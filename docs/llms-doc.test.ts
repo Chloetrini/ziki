@@ -15,7 +15,7 @@ describe("llms.txt accuracy", () => {
   it("documents the offer → accept flow and retires /claim (#554)", () => {
     expect(doc).toContain("/api/v1/issues/{id}/offer");
     expect(doc).toContain("/api/v1/offers/{id}/accept");
-    expect(doc).toMatch(/60 s|60 seconds|one minute/i);
+    expect(doc).toMatch(/30 min|30 minutes|1800 s|1800 seconds/i);
     expect(doc).toContain("410");
     expect(doc).toMatch(/does not spend|do not spend|no write budget|without spending/i);
   });

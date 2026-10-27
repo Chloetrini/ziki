@@ -16,8 +16,9 @@ import { roleLabels } from "@/lib/roles";
 import { Badge } from "@/components/ui/badge";
 import { LocalTime } from "@/components/local-time";
 import { statusClass, statusLabels } from "@/lib/labels";
-import { teamAgentsForMember } from "@/lib/team-directory";
+import { teamAgentsForMember, teamAssignedWorkForMember } from "@/lib/team-directory";
 import { TeamAgentList } from "@/components/team-agent-list";
+import { MemberAssignedWork } from "@/components/member-assigned-work";
 import { isTenantAdmin } from "@/lib/agents/membership";
 import { settableLevels } from "@/lib/agents/levels";
 
@@ -116,6 +117,10 @@ export default async function ProfilePage({ params, searchParams }: ProfileProps
   const agents = tenantId && tenantMembership
     ? await teamAgentsForMember(prisma, tenantId, person.id)
     : [];
+  // #447: assigned to this person, not claimed by any of their agents.
+  const assignedWork = tenantId && tenantMembership
+    ? await teamAssignedWorkForMember(prisma, tenantId, person.id, agents)
+    : [];
   const manageLevels = tenantId && viewer.id !== person.id && (await isTenantAdmin(viewer, tenantId))
     ? settableLevels({ isOwner: false, isTenantAdmin: true })
     : null;
@@ -192,6 +197,7 @@ export default async function ProfilePage({ params, searchParams }: ProfileProps
           Agents
         </h2>
         <TeamAgentList agents={agents} manageLevels={manageLevels} />
+        <MemberAssignedWork work={assignedWork} className="mt-3" />
       </section>
 
       <IssueList

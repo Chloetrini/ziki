@@ -191,6 +191,26 @@ describe("project lifecycle actions (#573)", () => {
     expect(redirect).toHaveBeenCalledWith(expect.stringContaining("/projects?error="));
   });
 
+  it("allows archiving and deleting for a super_admin even if membership is member", async () => {
+    requireUser.mockResolvedValue({ id: "user-super", role: "super_admin" });
+    membership.mockResolvedValue({ role: "member" });
+
+    await expectRedirect(
+      setProjectArchivedAction(form({ projectId: project.id, archived: "true" })),
+    );
+    expect(update).toHaveBeenCalledWith({
+      where: { id: project.id },
+      data: { archivedAt: expect.any(Date) },
+    });
+    expect(redirect).toHaveBeenCalledWith("/projects?notice=Project%20archived.");
+
+    await expectRedirect(
+      deleteProjectAction(form({ projectId: project.id, confirmName: project.name })),
+    );
+    expect(remove).toHaveBeenCalledWith({ where: { id: project.id } });
+    expect(redirect).toHaveBeenCalledWith("/projects?notice=Project%20deleted.");
+  });
+
   it("archives and restores a project", async () => {
     await expectRedirect(
       setProjectArchivedAction(form({ projectId: project.id, archived: "true" })),

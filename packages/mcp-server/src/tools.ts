@@ -224,7 +224,7 @@ export const TOOLS: readonly ToolDef[] = [
   {
     name: "ziki_request_offer",
     summary:
-      "Ask for an offer on a ready issue. The server picks the next eligible person; the offer lasts 60 seconds, so accept it straight away.",
+      "Ask for an offer on a ready issue. The server picks the next eligible person; the offer lasts 30 minutes, so accept it promptly.",
     level: "contributor",
     method: "POST",
     route: "/issues/{id}/offer",

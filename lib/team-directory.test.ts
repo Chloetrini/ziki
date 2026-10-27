@@ -3,7 +3,10 @@ import {
   TEAM_ONLINE_WINDOW_MS,
   isTeamAgentOnline,
   teamAgentsForMembers,
+  teamAssignedWorkForMember,
+  teamAssignedWorkForMembers,
   teamMetricSince,
+  type TeamAgent,
 } from "./team-directory";
 
 describe("team directory metrics", () => {
@@ -161,5 +164,57 @@ describe("team directory metrics", () => {
 
     await expect(teamAgentsForMembers(db as never, "tenant-1", [], now)).resolves.toEqual(new Map());
     expect(agentFindMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("assigned work no agent has claimed (Ziki #447)", () => {
+  const work = (id: string) => ({ id, title: id, categoryId: null, categoryName: null, areaId: null, areaName: null });
+  const agent = (id: string, currentWork: string[]): TeamAgent => ({
+    id, name: id, model: null, level: "contributor", online: false, acceptedFixes: 0, currentWork: currentWork.map(work),
+  });
+  const bug = (id: string, assigneeId: string | null) => ({
+    id, title: id, assigneeId, categoryId: "cat", category: { name: "Web" }, areaId: "area", area: { name: "Checkout" },
+  });
+
+  it("reads open and in-progress, non-deleted issues assigned to the members, in this tenant", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    await teamAssignedWorkForMembers({ bug: { findMany } } as never, "tenant-1", new Map([["p1", []], ["p2", []]]));
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { tenantId: "tenant-1", isDeleted: false, status: { in: ["open", "in_progress"] }, assigneeId: { in: ["p1", "p2"] } },
+    }));
+  });
+
+  it("lists an assignee-only issue for the member, with its category and area", async () => {
+    const db = { bug: { findMany: vi.fn().mockResolvedValue([bug("issue-a", "p1")]) } };
+    const result = await teamAssignedWorkForMembers(db as never, "tenant-1", new Map([["p1", [agent("agent-1", [])]]]));
+    expect(result.get("p1")).toEqual([{ id: "issue-a", title: "issue-a", categoryId: "cat", categoryName: "Web", areaId: "area", areaName: "Checkout" }]);
+  });
+
+  it("leaves out an issue already on one of the member's agent cards, so it counts once", async () => {
+    const db = { bug: { findMany: vi.fn().mockResolvedValue([bug("claimed", "p1"), bug("manual", "p1")]) } };
+    const agents = new Map([["p1", [agent("agent-1", []), agent("agent-2", ["claimed"])]]]);
+    const result = await teamAssignedWorkForMembers(db as never, "tenant-1", agents);
+    expect(result.get("p1")?.map((w) => w.id)).toEqual(["manual"]);
+  });
+
+  it("keeps several assigned issues, once each, for a member with several agents", async () => {
+    const db = { bug: { findMany: vi.fn().mockResolvedValue([bug("one", "p1"), bug("two", "p1"), bug("other", "p2")]) } };
+    const agents = new Map([["p1", [agent("agent-1", []), agent("agent-2", [])]], ["p2", []]]);
+    const result = await teamAssignedWorkForMembers(db as never, "tenant-1", agents);
+    expect(result.get("p1")?.map((w) => w.id)).toEqual(["one", "two"]);
+    expect(result.get("p2")?.map((w) => w.id)).toEqual(["other"]);
+  });
+
+  it("still lists an issue whose only claim is held by a revoked agent", async () => {
+    // Revoked agents aren't loaded, so their claim is on no card here.
+    const db = { bug: { findMany: vi.fn().mockResolvedValue([bug("revoked-claim", "p1")]) } };
+    const result = await teamAssignedWorkForMember(db as never, "tenant-1", "p1", []);
+    expect(result.map((w) => w.id)).toEqual(["revoked-claim"]);
+  });
+
+  it("skips the read when there are no members", async () => {
+    const findMany = vi.fn();
+    expect(await teamAssignedWorkForMembers({ bug: { findMany } } as never, "tenant-1", new Map())).toEqual(new Map());
+    expect(findMany).not.toHaveBeenCalled();
   });
 });

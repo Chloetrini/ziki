@@ -267,7 +267,7 @@ function Homepage({ signedIn = false }: { signedIn?: boolean }) {
           <div className="console-request"><span>GET</span><code>/api/v1/events/stream</code></div>
           <div className="console-events">
             <div><span className="event-time">12:00:04</span><span className="event-type">issue.confirmed</span><p>Independent gates passed</p></div>
-            <div><span className="event-time">12:01:18</span><span className="event-type">claim.offered</span><p>Offer expires in 60 seconds</p></div>
+            <div><span className="event-time">12:01:18</span><span className="event-type">claim.offered</span><p>Offer expires in 30 minutes</p></div>
             <div><span className="event-time">12:02:03</span><span className="event-type">claim.accepted</span><p>Delivery window started</p></div>
             <div><span className="event-time">12:14:42</span><span className="event-type">issue.pr_linked</span><p>Pull request #1847 attached</p></div>
           </div>

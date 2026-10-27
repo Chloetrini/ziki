@@ -147,3 +147,63 @@ export async function teamAgentsForMember(
   const agents = await teamAgentsForMembers(db, tenantId, [ownerUserId], now);
   return agents.get(ownerUserId) ?? [];
 }
+
+/**
+ * Ziki #447: issues assigned to a person that none of their agents has
+ * claimed. An assignment is to the person, not to one of their agents, so
+ * this is shown once at member level and never put on an agent's card: with
+ * several agents there is no truthful way to say which one is doing it.
+ *
+ * Counted: open or in_progress, not deleted, in this tenant. An issue already
+ * on one of the person's agent cards (an active claim) is left out here, so a
+ * claimed and assigned issue counts once.
+ */
+export async function teamAssignedWorkForMembers(
+  db: Db,
+  tenantId: string,
+  agentsByOwner: Map<string, TeamAgent[]>,
+): Promise<Map<string, TeamAgentWork[]>> {
+  const ownerUserIds = [...agentsByOwner.keys()];
+  const result = new Map(ownerUserIds.map((ownerUserId) => [ownerUserId, [] as TeamAgentWork[]]));
+  if (ownerUserIds.length === 0) return result;
+
+  const bugs = await db.bug.findMany({
+    where: { tenantId, isDeleted: false, status: { in: ["open", "in_progress"] }, assigneeId: { in: ownerUserIds } },
+    orderBy: { updatedAt: "desc" },
+    select: {
+      id: true,
+      title: true,
+      assigneeId: true,
+      categoryId: true,
+      category: { select: { name: true } },
+      areaId: true,
+      area: { select: { name: true } },
+    },
+  });
+  for (const bug of bugs) {
+    if (!bug.assigneeId) continue;
+    const onAgentCard = (agentsByOwner.get(bug.assigneeId) ?? []).some((agent) =>
+      agent.currentWork.some((work) => work.id === bug.id),
+    );
+    if (onAgentCard) continue;
+    result.get(bug.assigneeId)?.push({
+      id: bug.id,
+      title: bug.title,
+      categoryId: bug.categoryId,
+      categoryName: bug.category?.name ?? null,
+      areaId: bug.areaId ?? null,
+      areaName: bug.area?.name ?? null,
+    });
+  }
+  return result;
+}
+
+export async function teamAssignedWorkForMember(
+  db: Db,
+  tenantId: string,
+  ownerUserId: string,
+  agents: TeamAgent[],
+): Promise<TeamAgentWork[]> {
+  const work = await teamAssignedWorkForMembers(db, tenantId, new Map([[ownerUserId, agents]]));
+  return work.get(ownerUserId) ?? [];
+}

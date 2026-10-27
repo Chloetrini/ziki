@@ -76,6 +76,8 @@ const BUG = {
   id: "bug-1",
   number: 7,
   title: "Login button does nothing",
+  description: "## Summary\nLogin button does nothing\n\n## Acceptance Criteria\n- [ ] Fix login",
+  createdByAgentId: null,
   status: "open",
   severity: "high",
   voteCount: 2,
@@ -278,15 +280,16 @@ describe("issue list layout", () => {
     expect(findMany.mock.calls.at(-1)![0].where.agentQuestions).toEqual({ some: { answeredAt: null } });
   });
 
-  it("opens the Inbox with how it works, then its lists: Need your input, Design feedback needed, New ideas", async () => {
+  it("opens the Inbox with how it works, then its lists: Need your input, Design feedback needed, New ideas, Drafted ideas", async () => {
     const html = await renderList({ status: "escalated" });
     expect(html).toContain('aria-label="How the Inbox works"');
     const tabs = html.match(/<nav aria-label="Inbox lists"[\s\S]*?<\/nav>/)?.[0] ?? "";
     const labels = [...tabs.matchAll(/<a [^>]*>([A-Za-z ]+)<span/g)].map((m) => m[1]);
-    expect(labels).toEqual(["Need your input", "Design feedback needed", "New ideas"]);
+    expect(labels).toEqual(["Need your input", "Design feedback needed", "New ideas", "Drafted ideas"]);
     expect(tabs).toMatch(/aria-current="page"[^>]*>Need your input/);
     expect(tabs).toContain('href="/issues?inbox=design"');
     expect(tabs).toContain('href="/issues?inbox=ideas"');
+    expect(tabs).toContain('href="/issues?inbox=drafts"');
     expect(html.indexOf('aria-label="How the Inbox works"')).toBeLessThan(html.indexOf('aria-label="Inbox lists"'));
     expect(html).not.toContain('aria-label="Filter all issues"');
   });
@@ -317,7 +320,7 @@ describe("issue list layout", () => {
     expect(html).toContain('href="/settings/agents"');
   });
 
-  it("lists issues with an open redesign under Design feedback needed, and reported issues under New ideas", async () => {
+  it("lists issues with an open redesign under Design feedback needed, reported issues under New ideas, and drafts under Drafted ideas", async () => {
     await renderList({ status: "escalated", inbox: "design" });
     let where = findMany.mock.calls.at(-1)![0].where;
     expect(where.redesigns).toEqual({ some: { status: "proposed" } });
@@ -328,6 +331,11 @@ describe("issue list layout", () => {
     where = findMany.mock.calls.at(-1)![0].where;
     expect(where.id).toEqual({ in: ["bug-1"] });
     expect(where).not.toHaveProperty("agentQuestions");
+
+    await renderList({ status: "escalated", inbox: "drafts" });
+    where = findMany.mock.calls.at(-1)![0].where;
+    expect(where).not.toHaveProperty("agentQuestions");
+    expect(where.createdByAgentId).toBeNull();
   });
 
   it("drops the Inbox list choice when moving to another tab", async () => {

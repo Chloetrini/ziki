@@ -36,6 +36,7 @@ vi.mock("@/lib/prisma", () => ({
     agent: { findMany: vi.fn() },
     issueClaim: { findMany: vi.fn(), groupBy: vi.fn() },
     pointEntry: { groupBy: vi.fn() },
+    bug: { findMany: vi.fn() },
   },
 }));
 
@@ -104,6 +105,7 @@ beforeEach(() => {
   vi.mocked(prisma.pointEntry.groupBy).mockResolvedValue([
     { userId: "viewer-1", _sum: { points: 12 } },
   ] as never);
+  vi.mocked(prisma.bug.findMany).mockResolvedValue([] as never);
 });
 
 describe("ranking: leaderboard on top", () => {
@@ -172,6 +174,24 @@ describe("ranking: the whole team below", () => {
     expect(doc.querySelector(".team-agent-role")?.textContent).toBe("Reviewer");
     expect(html).toContain("No agents");
     expect(html).toContain("active claims count the selected project");
+  });
+
+  it("counts an agent's work and lists unclaimed assigned issues once for the member (Ziki #447)", async () => {
+    vi.mocked(prisma.bug.findMany).mockResolvedValue([
+      // Claimed by Ada's agent and assigned to Ada: stays on the agent's row only.
+      { id: "issue-1", title: "Fix the app", assigneeId: "viewer-1", categoryId: null, category: null, areaId: null, area: null },
+      { id: "issue-2", title: "Assigned by hand", assigneeId: "viewer-1", categoryId: null, category: null, areaId: null, area: null },
+    ] as never);
+    const html = await render();
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const panel = doc.getElementById("team-agents-viewer-1");
+    expect(panel?.querySelector(".team-agent-table")?.textContent).toContain("Working on 1 issue");
+    expect(panel?.textContent).toContain("Assigned, no agent claim (1)");
+    expect(panel?.querySelectorAll('a[href="/issues/issue-1"]')).toHaveLength(1);
+    expect(panel?.querySelectorAll('a[href="/issues/issue-2"]')).toHaveLength(1);
+    expect(prisma.bug.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { tenantId: "tenant-1", isDeleted: false, status: { in: ["open", "in_progress"] }, assigneeId: { in: ["viewer-1", "member-2"] } },
+    }));
   });
 
   it("scopes every read to the workspace and the active project", async () => {

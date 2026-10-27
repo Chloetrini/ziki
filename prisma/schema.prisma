@@ -673,7 +673,7 @@ model ProjectWorkflow {
   projectId              String   @id
   confirmationsNeeded    Int      @default(2)
   verdictsNeeded         Int      @default(2)
-  offerWindowSeconds     Int      @default(60)
+  offerWindowSeconds     Int      @default(1800)
   heartbeatMinutes       Int      @default(15)
   deliveryMinutes        Int      @default(15)
   maxActiveClaims        Int      @default(2)

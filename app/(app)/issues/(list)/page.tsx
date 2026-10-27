@@ -9,6 +9,7 @@ import { activeBulkOptions, loadBulkAssignees } from "@/lib/admin-list-lookups";
 import { auth } from "@/auth";
 import { requireUser } from "@/lib/auth-helpers";
 import { InboxButton } from "@/components/inbox-button";
+import { MergeIcon } from "@/components/merge-path";
 import { InboxAgents } from "@/components/inbox-agents";
 import { loadOwnAgents, type DashboardAgent } from "@/lib/dashboard-overview";
 import { agentWorkDone, describeWorkDone, type AgentWorkDone } from "@/lib/agent-work";
@@ -83,6 +84,7 @@ import { LoadError } from "@/components/load-error";
 import { logLoadFailure } from "@/lib/load-error";
 import { AREA_PARAM, parseProjectAreaFilter, projectAreaFilterWhere } from "@/lib/project-area-filter";
 import { openIssueStages, parseIssueStageView, type IssueStage } from "@/lib/issue-stage";
+import { isUnstructuredDraft } from "@/lib/ideas";
 import { issuePath } from "@/lib/issue-ref";
 import { PROJECT_ALL_PARAM, showsAllProjects } from "@/lib/issue-list-filters";
 
@@ -101,11 +103,12 @@ const ESCALATED_WHERE = { some: { answeredAt: null } } satisfies Prisma.AgentQue
  * waiting on a decision, and new ideas (reported, not yet confirmed).
  */
 const INBOX_PARAM = "inbox";
-type InboxView = "input" | "design" | "ideas";
+type InboxView = "input" | "design" | "ideas" | "drafts";
 const INBOX_TABS: { view: InboxView; label: string }[] = [
   { view: "input", label: "Need your input" },
   { view: "design", label: "Design feedback needed" },
   { view: "ideas", label: "New ideas" },
+  { view: "drafts", label: "Drafted ideas" },
 ];
 const DESIGN_WHERE = { some: { status: "proposed" } } satisfies Prisma.RedesignProposalListRelationFilter;
 const AGENT_ORDER = { waiting: 0, working: 1, idle: 2, offline: 3 } as const;
@@ -332,13 +335,15 @@ export default async function BugsPage({
   const inboxParam = toSingleQueryParam(params[INBOX_PARAM]);
   const inboxView: InboxView | null = !isEscalatedView
     ? null
-    : inboxParam === "design" || inboxParam === "ideas"
+    : inboxParam === "design" || inboxParam === "ideas" || inboxParam === "drafts"
       ? inboxParam
       : "input";
   if (inboxView === "input") {
     where.agentQuestions = ESCALATED_WHERE;
   } else if (inboxView === "design") {
     where.redesigns = DESIGN_WHERE;
+  } else if (inboxView === "drafts") {
+    where.createdByAgentId = null;
   }
   if (statusParam === REJECTED_STATUS && !isDeletedView) {
     where.validations = REJECTED_WHERE;
@@ -402,10 +407,10 @@ export default async function BugsPage({
     }
   }
 
-  // New ideas in the Inbox are the issues still at the reported stage.
+  // New ideas and Drafted ideas in the Inbox are the issues still at the reported stage.
   const stageView: IssueStage | null = isDeletedView
     ? null
-    : inboxView === "ideas"
+    : inboxView === "ideas" || inboxView === "drafts"
       ? "reported"
       : parseIssueStageView(toSingleQueryParam(params.stage));
   let stages = new Map<string, IssueStage>();
@@ -715,17 +720,22 @@ export default async function BugsPage({
   const allCount = statusCounts.reduce((sum, row) => sum + row._count._all, 0);
   const allFilterCount = (value: string) =>
     value === ALL_STATUS ? allCount : value === REJECTED_STATUS ? rejectedCount : value === DUPLICATE_STATUS ? duplicateCount : value === READY_TO_MERGE_STATUS ? readyToMergeCount : countForStatus(value);
-  // The Inbox's other two lists, counted only while it is open.
+  // The Inbox's other lists, counted only while it is open.
   const liveTabWhere = { ...statusTabWhere, status: defaultStatusWhere(false) };
-  const [designCount, ideasCount] = inboxView && tenantId ? await Promise.all([
+  const [designCount, ideasCount, draftsCount] = inboxView && tenantId ? await Promise.all([
     loadOrEmpty("design inbox", () => prisma.bug.count({ where: { ...liveTabWhere, redesigns: DESIGN_WHERE } }), 0),
     loadOrEmpty(
       "ideas inbox",
       async () => [...(await openIssueStages(prisma, liveTabWhere)).values()].filter((stage) => stage === "reported").length,
       0,
     ),
-  ]) : [0, 0];
-  const inboxCounts: Record<InboxView, number> = { input: escalatedCount, design: designCount, ideas: ideasCount };
+    loadOrEmpty(
+      "drafts inbox",
+      () => prisma.bug.count({ where: { ...liveTabWhere, createdByAgentId: null } }),
+      0,
+    ),
+  ]) : [0, 0, 0];
+  const inboxCounts: Record<InboxView, number> = { input: escalatedCount, design: designCount, ideas: ideasCount, drafts: draftsCount };
   // Your agents and what they've done, for the right half of the Inbox's top box.
   let inboxAgents: DashboardAgent[] = [];
   let inboxWork = new Map<string, AgentWorkDone>();
@@ -841,6 +851,16 @@ export default async function BugsPage({
         <div className="issues-tabs-row flex items-center gap-2.5">
           {!isDeletedView ? (
             <InboxButton href={statusHref(null)} active={isEscalatedView} count={escalatedCount} />
+          ) : null}
+          {!isDeletedView ? (
+            <Link
+              href="/issues/history"
+              aria-label="Merge history"
+              title="Merge history"
+              className="inline-flex h-[42px] shrink-0 items-center gap-2 rounded-[10px] border border-zk-divider bg-zk-chip px-3 text-[13px] font-semibold text-zk-text hover:bg-zk-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zk-accent max-sm:h-9"
+            >
+              <MergeIcon size={16} />
+            </Link>
           ) : null}
           {!isDeletedView ? (
             <nav aria-label="Issue status" className="issues-status-nav ml-auto min-w-0">
@@ -978,7 +998,9 @@ export default async function BugsPage({
                   ? "No redesign proposals are waiting for a decision."
                   : inboxView === "ideas"
                     ? "Newly reported issues show up here until they're confirmed."
-                    : isWatchingView
+                    : inboxView === "drafts"
+                      ? "No unstructured draft ideas are waiting to be structured."
+                      : isWatchingView
                 ? "You watch issues you report, are assigned to or comment on, and any you choose to watch from the issue page."
                 : emptyPlatform
                   ? "Issues tagged for this platform will show up here."

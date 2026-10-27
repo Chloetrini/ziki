@@ -9,6 +9,7 @@ import type { Prisma } from "@prisma/client";
 import { setActiveProjectCookie } from "@/lib/project-context";
 import { currentTenantIdFor, NO_TENANT_MESSAGE } from "@/lib/tenant-context";
 import { isTenantAdmin } from "@/lib/agents/membership";
+import { isSuperAdmin, type AppRole } from "@/lib/roles";
 import { createMissionSchema, createTestMissions } from "@/lib/missions";
 import {
   nextProjectSlug,
@@ -34,12 +35,17 @@ function projectsMessage(key: "error" | "notice", message: string): string {
   return `/projects?${key}=${encodeURIComponent(message)}`;
 }
 
-/** The current tenant, only when the signed-in person owns it. */
+/** The current tenant, only when the signed-in person owns it or is super admin. */
 async function ownerTenantFor(
   userId: string,
+  userRole?: AppRole | null,
 ): Promise<{ tenantId: string } | { error: string }> {
   const tenantId = await currentTenantIdFor(userId);
   if (!tenantId) return { error: NO_TENANT_MESSAGE };
+
+  if (isSuperAdmin(userRole)) {
+    return { tenantId };
+  }
 
   const membership = await prisma.membership.findUnique({
     where: { tenantId_userId: { tenantId, userId } },
@@ -252,7 +258,7 @@ export async function switchProjectAction(formData: FormData): Promise<void> {
 /** Archive or restore a project the tenant owner owns. */
 export async function setProjectArchivedAction(formData: FormData): Promise<void> {
   const user = await requireUser();
-  const owner = await ownerTenantFor(user.id);
+  const owner = await ownerTenantFor(user.id, user.role);
   if ("error" in owner) redirect(projectsMessage("error", owner.error));
 
   const project = await projectInTenant(owner.tenantId, String(formData.get("projectId") ?? ""));
@@ -275,7 +281,7 @@ export async function setProjectArchivedAction(formData: FormData): Promise<void
 /** Delete a project after the owner types its name, and only when it has no issues. */
 export async function deleteProjectAction(formData: FormData): Promise<void> {
   const user = await requireUser();
-  const owner = await ownerTenantFor(user.id);
+  const owner = await ownerTenantFor(user.id, user.role);
   if ("error" in owner) redirect(projectsMessage("error", owner.error));
 
   const project = await projectInTenant(owner.tenantId, String(formData.get("projectId") ?? ""));

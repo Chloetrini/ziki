@@ -144,7 +144,8 @@ export default async function TenantPage({
   const canManage = !tenant.archivedAt && canInvite(tenant.role);
   const canChangeRoles =
     !tenant.archivedAt && (tenant.role === "owner" || isSuperAdmin(user.role));
-  const canManageSettings = tenant.role === "owner" && !tenant.archivedAt;
+  const canManageSettings =
+    !tenant.archivedAt && (tenant.role === "owner" || isSuperAdmin(user.role));
   const [currentTenantId, summary, invites, members, shareLinks, joinRequests] = await Promise.all([
     currentTenantIdFor(user.id),
     loadQuietly("summary", tenantSummary(prisma, tenant.id), null),
@@ -192,7 +193,7 @@ export default async function TenantPage({
             Archived organizations are hidden from the switcher and can&apos;t be opened. Its issues and
             members stay here, read-only, until an owner restores it.
           </p>
-          {tenant.role === "owner" ? (
+          {tenant.role === "owner" || isSuperAdmin(user.role) ? (
             <form action={setTenantArchivedAction} className="mt-3">
               <input type="hidden" name="tenantId" value={tenant.id} />
               <input type="hidden" name="archived" value="false" />

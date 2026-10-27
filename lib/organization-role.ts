@@ -16,3 +16,16 @@ export function isOrganizationAdmin(
 ): boolean {
   return membershipRole === "owner" || membershipRole === "admin" || isSuperAdmin(appRole);
 }
+
+/**
+ * Owner powers inside one organization.
+ *
+ * An owner of that organization has them. The site's super admin
+ * does too across all organizations.
+ */
+export function isOrganizationOwner(
+  membershipRole: OrganizationRole | null | undefined,
+  appRole?: AppRole | null,
+): boolean {
+  return membershipRole === "owner" || isSuperAdmin(appRole);
+}

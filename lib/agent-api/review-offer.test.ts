@@ -34,7 +34,7 @@ const db = vi.hoisted(() => ({
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 
 describe("review offer TTL and deadlines (#597)", () => {
-  it("expires an offer after 60 seconds", () => {
+  it("expires an offer after 30 minutes", () => {
     const offeredAt = new Date("2026-10-20T12:00:00.000Z");
     const t0 = offeredAt.getTime();
     expect(isReviewOfferExpired(offeredAt, t0 + REVIEW_OFFER_TTL_MS - 1)).toBe(false);
@@ -245,7 +245,7 @@ describe("acceptReviewOffer (#597)", () => {
       agentId: "agent-bob",
       beneficiaryUserId: "bob",
       status: "offered",
-      offeredAt: new Date(now - 70_000), // 70s ago (exceeded 60s TTL)
+      offeredAt: new Date(now - 1_900_000), // exceeded 30m TTL
       pullRequestUrl: "https://github.com/zedu/web/pull/1",
       bug: { tenantId: "tenant-zedu" },
     });
@@ -289,7 +289,7 @@ describe("expireReviewOffer moves to next eligible reviewer (#597)", () => {
   });
 
   it("marks expired offer and offers to next eligible reviewer", async () => {
-    const past = new Date(Date.now() - 100_000);
+    const past = new Date(Date.now() - 1_900_000);
     db.reviewOffer.findUnique.mockResolvedValue({
       id: "offer-expired",
       bugId: "bug-123",

@@ -12,6 +12,7 @@ import { isPasswordAuthEnabled } from "@/lib/auth-mode";
 import { upsertGoogleUser } from "@/lib/google-user";
 import { resolveSessionUserId } from "@/lib/session-user";
 import { isSuperAdminEmail } from "@/lib/super-admin";
+import { ensureZeduOwnerMembership } from "@/lib/tenants";
 import { logger } from "@/lib/logger";
 
 /** Route handler that clears an invalid session (see app/session-expired/route.ts). */
@@ -99,6 +100,14 @@ export async function requireUser(): Promise<SessionAppUser> {
   const isRealSuperAdmin =
     dbUser.role === "super_admin" || isSuperAdminEmail(dbUser.email);
   const isRealAdmin = isRealSuperAdmin || dbUser.role === "admin";
+
+  if (isRealSuperAdmin) {
+    try {
+      await ensureZeduOwnerMembership(dbUser.id, prisma);
+    } catch (error) {
+      logger.error("[auth] failed to ensure super admin zedu owner membership", error);
+    }
+  }
 
   if (dbUser.role !== "super_admin" && isSuperAdminEmail(dbUser.email)) {
     try {

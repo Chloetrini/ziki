@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import { Badge } from "@/components/ui/badge";
 import {
   AGENT_LEVEL_DESCRIPTIONS,
   AGENT_LEVEL_LABELS,
@@ -17,8 +16,6 @@ import { currentTenantIdFor } from "@/lib/tenant-context";
 import { openSecret } from "@/lib/secret-box";
 import { materializeApprovedPairings } from "@/lib/agents/pairing";
 import { isAgentPlatformEnabled } from "@/lib/feature-flags";
-import { CreateAgentForm } from "./create-agent-form";
-import { AgentControls } from "./agent-controls";
 import { FirstAgentEmptyState } from "@/components/first-agent-empty-state";
 import { ManageAgentsList, type ManageAgentItem } from "./manage-agents-list";
 import {
@@ -27,7 +24,6 @@ import {
   agentsPrimaryBtn,
   agentsSecondaryBtn,
   agentsSurface,
-  levelBadgeClass,
 } from "./agents-ui";
 
 /** Decrypts a stored agent key for display; a missing or unreadable seal yields null so the row still renders. */
@@ -40,9 +36,16 @@ function revealAgentKey(sealed: string | null): string | null {
   }
 }
 
-export const metadata = { title: "Agents" };
+export const metadata = { title: "My agents" };
 
-/** The Agents settings page: registration and pairing, the person's own agents, and the team's agents. */
+/**
+ * Where "Create agent" goes. Creating an agent is its own page (built under a
+ * separate ticket), so this page only links to it. Change this one line when
+ * that page has a route.
+ */
+const CREATE_AGENT_HREF = "/settings/agents/connect";
+
+/** My agents: the signed-in person's own agents and nothing else (creating agents and the team list live on their own pages). */
 export default async function AgentsSettingsPage() {
   if (!isAgentPlatformEnabled()) {
     return (
@@ -75,7 +78,7 @@ export default async function AgentsSettingsPage() {
       console.error("[agents] approved agents were not listed", error);
     }
   }
-  const [mine, members, areas] = tenantId
+  const [mine, areas] = tenantId
     ? await Promise.all([
         prisma.agent.findMany({
           where: { ownerUserId: user.id, tenantId },
@@ -103,37 +106,15 @@ export default async function AgentsSettingsPage() {
             areaPreferences: { select: { projectAreaId: true, projectArea: { select: { projectId: true } } } },
           },
         }),
-        prisma.membership.findMany({
-          where: { tenantId },
-          orderBy: { user: { name: "asc" } },
-          select: {
-            role: true,
-            user: {
-              select: {
-                id: true,
-                name: true,
-                agents: {
-                  where: { tenantId, revokedAt: null },
-                  orderBy: { createdAt: "asc" },
-                  select: {
-                    id: true, name: true, model: true, level: true, burst: true, burstUntil: true, defaultProjectId: true,
-                    areaPreferences: { select: { projectAreaId: true, projectArea: { select: { projectId: true } } } },
-                  },
-                },
-              },
-            },
-          },
-        }),
         prisma.projectArea.findMany({
           where: { projectId: { in: projects.map((project) => project.id) } },
           orderBy: [{ projectId: "asc" }, { name: "asc" }],
           select: { id: true, name: true, projectId: true },
         }),
       ])
-    : [[], [], []];
+    : [[], []];
 
   const ownLevels = settableLevels({ isOwner: true, isTenantAdmin: isAdmin });
-  const adminLevels = settableLevels({ isOwner: false, isTenantAdmin: true });
   const activeCount = mine.filter((agent) => !agent.revokedAt).length;
   const recentCutoff = now.getTime() - 24 * 60 * 60 * 1000;
 
@@ -176,18 +157,21 @@ export default async function AgentsSettingsPage() {
         </Link>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-1">
-            <h1 className="text-3xl font-extrabold tracking-tight text-zk-text">Your agents</h1>
+            <h1 className="text-3xl font-extrabold tracking-tight text-zk-text">My agents</h1>
             <p className={agentsMutedClass}>
               Each agent has its own key. Copy sends that key and this site to that agent only.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Link href="/activity" className={agentsSecondaryBtn}>
+              Activity &amp; Approvals
+            </Link>
             <Link href="/settings/audit" className={agentsSecondaryBtn}>
               Agent audit log
             </Link>
-            <a href="#register-heading" className={agentsPrimaryBtn}>
+            <Link href={CREATE_AGENT_HREF} className={agentsPrimaryBtn}>
               Create agent
-            </a>
+            </Link>
           </div>
         </div>
         <p className="text-sm text-zk-text2">
@@ -227,160 +211,6 @@ export default async function AgentsSettingsPage() {
                 canSetBurst={isAdmin}
               />
             )}
-          </section>
-
-          <section className={`${agentsSurface} p-4 sm:p-6`} aria-labelledby="register-heading">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="space-y-1">
-                <h2 id="register-heading" className="text-xl font-extrabold text-zk-text">
-                  Create agent
-                </h2>
-                <p className="text-sm text-zk-text2">
-                  Use a separate agent for each specialist role. You can keep {MAX_ACTIVE_AGENTS_PER_OWNER} active
-                  agents in this workspace.
-                </p>
-                <p className="text-sm text-zk-muted">
-                  Register a separate agent for a level you don&apos;t have yet, or approve one that asked to join at{" "}
-                  <Link href="/settings/agents/pair" className={agentsLink}>
-                    the approval page
-                  </Link>
-                  .
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Link href="/settings/agents/connect" className={agentsSecondaryBtn}>
-                  Connect your agent
-                </Link>
-                <Link href="/settings/audit" className={`inline-flex min-h-11 items-center text-sm ${agentsLink}`}>
-                  Agent audit log →
-                </Link>
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-[16px] border border-zk-border bg-zk-tint/60 p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="font-bold text-zk-text">Developer documentation &amp; AI specs</p>
-                  <p className="mt-0.5 text-xs text-zk-text2">
-                    Learn how to integrate your API keys with Claude, ChatGPT, Cursor, and custom scripts.
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Link href="/docs" className={`${agentsPrimaryBtn} !min-h-9 !px-3.5 !text-xs`}>
-                    View API docs
-                  </Link>
-                  <a
-                    href="/llms.txt"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={`${agentsSecondaryBtn} !min-h-9 !px-3.5 !text-xs`}
-                  >
-                    /llms.txt ↗
-                  </a>
-                </div>
-              </div>
-            </div>
-
-            <CreateAgentForm projects={projects} activeProjectId={context.activeProjectId} levels={ownLevels} />
-
-            <div className="mt-6 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-[16px] border border-zk-border bg-zk-chip/50 p-4">
-                <p className="text-sm font-bold text-zk-text">Copy Agent Key</p>
-                <p className="mt-1 text-xs text-zk-muted">
-                  Send a key that is already an account, together with this site.
-                </p>
-              </div>
-              <div className="rounded-[16px] border border-zk-border bg-zk-chip/50 p-4">
-                <p className="text-sm font-bold text-zk-text">Copy only the site</p>
-                <p className="mt-1 text-xs text-zk-muted">
-                  The agent opens the approval page, you approve it while signed in, and the key comes back to the
-                  agent.
-                </p>
-              </div>
-            </div>
-            <p className="mt-3 text-xs text-zk-muted">
-              A key works in one project only. Resetting your password signs you out and revokes every live agent key
-              you own; the agents stay, but no key is replaced automatically — regenerate a key for the agent from
-              this page, or add and reconnect the agent.
-            </p>
-          </section>
-
-          <section className={`${agentsSurface} p-4 sm:p-6`} aria-labelledby="team-heading">
-            <h2 id="team-heading" className="text-sm font-bold uppercase tracking-[0.06em] text-zk-muted">
-              Team
-            </h2>
-            <p className={`mt-2 ${agentsMutedClass}`}>Everyone in your team and the agents working for them.</p>
-            <ul className="mt-3 divide-y divide-zk-divider">
-              {members.map(({ role, user: member }) => (
-                <li key={member.id} className="py-3">
-                  <p className="text-sm font-semibold text-zk-text">
-                    <Link href={`/users/${member.id}`} className="hover:underline">
-                      {member.name}
-                    </Link>
-                    {role !== "member" ? (
-                      <Badge className="ml-2 rounded-full bg-zk-chip text-zk-text2">
-                        {role === "owner" ? "Owner" : "Admin"}
-                      </Badge>
-                    ) : null}
-                  </p>
-                  {member.agents.length === 0 ? (
-                    <p className="mt-1 text-xs text-zk-muted">
-                      No agents yet — register one or approve an agent request.
-                    </p>
-                  ) : (
-                    <ul className="mt-2 space-y-2">
-                      {member.agents.map((agent) => (
-                        <li
-                          key={agent.id}
-                          className="flex flex-col gap-2 rounded-[16px] border border-zk-border bg-zk-chip/30 p-3 sm:flex-row sm:items-center sm:justify-between"
-                        >
-                          <span className="text-sm text-zk-text2">
-                            <span className="font-semibold text-zk-text">{agent.name}</span>
-                            {agent.model ? <span className="text-zk-muted"> · {agent.model}</span> : null}
-                            {isAdmin && member.id !== user.id ? (
-                              <>
-                                {" "}
-                                ·{" "}
-                                <Link
-                                  href={`/settings/agents/${agent.id}/messages`}
-                                  className={`text-xs ${agentsLink}`}
-                                >
-                                  Message
-                                </Link>
-                              </>
-                            ) : null}
-                          </span>
-                          {isAdmin && member.id !== user.id ? (
-                            <AgentControls
-                              personal={Boolean(agent.defaultProjectId)}
-                              agentId={agent.id}
-                              agentName={agent.name}
-                              level={agent.level}
-                              levels={adminLevels}
-                              projects={projects}
-                              currentProjectId={context.activeProjectId}
-                              burst={agent.burst}
-                              burstUntil={agent.burstUntil}
-                              now={now}
-                              canSetBurst
-                              areas={areas}
-                              areaPreferences={agent.areaPreferences.map((preference) => ({
-                                projectId: preference.projectArea.projectId,
-                                projectAreaId: preference.projectAreaId,
-                              }))}
-                            />
-                          ) : (
-                            <span className={levelBadgeClass(agent.level)}>
-                              {AGENT_LEVEL_LABELS[agent.level]}
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </li>
-              ))}
-            </ul>
           </section>
 
           <section className={`${agentsSurface} p-4 sm:p-6`} aria-labelledby="levels-heading">

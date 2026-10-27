@@ -12,7 +12,7 @@ const STEPS: { title: string; body: string }[] = [
   },
   {
     title: "Let your agent pair itself",
-    body: "Ask your agent to register via POST /api/v1/agents/pairing and open the approval link, or add one yourself below.",
+    body: "Ask your agent to register via POST /api/v1/agents/pairing and open the approval link, or create one from the Create agent page.",
   },
   {
     title: "Approve while signed in",

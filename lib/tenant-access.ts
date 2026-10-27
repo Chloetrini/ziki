@@ -2,7 +2,7 @@ import { cache } from "react";
 import type { MembershipRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { isOrganizationAdmin, type OrganizationRole } from "@/lib/organization-role";
-import type { AppRole } from "@/lib/roles";
+import { isSuperAdmin, type AppRole } from "@/lib/roles";
 import { currentTenantIdFor } from "@/lib/tenant-context";
 
 /**
@@ -10,7 +10,7 @@ import { currentTenantIdFor } from "@/lib/tenant-context";
  *
  * The answer comes from their membership in that organization. The site-wide
  * admin role is not consulted, except for the site super admin, who can
- * administer every organization.
+ * administer every organization and acts as owner.
  */
 
 export type TenantAccess = {
@@ -26,12 +26,13 @@ function accessFrom(
   membership: { role: MembershipRole; tenant: { name: string; slug: string } } | null,
   appRole: AppRole | null | undefined,
 ): TenantAccess {
+  const isSuper = isSuperAdmin(appRole);
   return {
     tenantId,
     tenantName: membership?.tenant.name ?? null,
     tenantSlug: membership?.tenant.slug ?? null,
-    membershipRole: membership?.role ?? null,
-    admin: isOrganizationAdmin(membership?.role, appRole),
+    membershipRole: !tenantId ? null : isSuper ? "owner" : (membership?.role ?? null),
+    admin: isSuper || isOrganizationAdmin(membership?.role, appRole),
   };
 }
 

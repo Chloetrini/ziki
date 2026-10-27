@@ -10,6 +10,7 @@ import {
   ACTIVE_TENANT_COOKIE,
   createTenant,
   deleteTenant,
+  ensureZeduOwnerMembership,
   homePathFor,
   landingPath,
   memberTenantById,
@@ -126,6 +127,13 @@ describe("the person's tenants (#444)", () => {
       { ...ZEDU, role: "member" },
     ]);
     expect(await tenantsForUser(db as never, "new-account")).toEqual([]);
+  });
+
+  it("elevates tenant role to owner for site super admin", async () => {
+    const db = membershipDb();
+    expect(await tenantsForUser(db as never, "zed", "super_admin")).toEqual([
+      { ...ZEDU, role: "owner" },
+    ]);
   });
 
   it("finds a tenant by slug only for its members: a guessed slug reveals nothing", async () => {
@@ -567,5 +575,29 @@ describe("tenant lifecycle (#573)", () => {
       });
       expect(db.remove).not.toHaveBeenCalled();
     }
+  });
+});
+
+describe("ensureZeduOwnerMembership", () => {
+  it("upserts zedu tenant and owner membership for user", async () => {
+    const upsertTenant = vi.fn().mockResolvedValue({ id: "tenant-zedu", slug: "zedu" });
+    const upsertMembership = vi.fn().mockResolvedValue({ id: "mem-1", role: "owner" });
+    const db = {
+      tenant: { upsert: upsertTenant },
+      membership: { upsert: upsertMembership },
+    };
+
+    await ensureZeduOwnerMembership("user-super", db as never);
+
+    expect(upsertTenant).toHaveBeenCalledWith({
+      where: { slug: "zedu" },
+      update: {},
+      create: { slug: "zedu", name: "Ziki" },
+    });
+    expect(upsertMembership).toHaveBeenCalledWith({
+      where: { tenantId_userId: { tenantId: "tenant-zedu", userId: "user-super" } },
+      update: { role: "owner" },
+      create: { tenantId: "tenant-zedu", userId: "user-super", role: "owner" },
+    });
   });
 });

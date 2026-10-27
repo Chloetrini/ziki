@@ -20,8 +20,8 @@ export const DEFAULT_PROJECT_WORKFLOW: Readonly<ProjectWorkflowValues> = Object.
   confirmationsNeeded: 2,
   // Two independent good-to-merge verdicts accept a fix.
   verdictsNeeded: 2,
-  // A claim offer lasts one minute.
-  offerWindowSeconds: 60,
+  // A claim offer lasts 30 minutes.
+  offerWindowSeconds: 1800,
   // A claim with no heartbeat for 15 minutes is released.
   heartbeatMinutes: 15,
   // The base delivery window. High and critical work keeps its 60-minute floor.
@@ -35,7 +35,7 @@ export const DEFAULT_PROJECT_WORKFLOW: Readonly<ProjectWorkflowValues> = Object.
 });
 
 /**
- * Explicit issue ranges are fixed: confirmations/verdicts 1–5, offer 30–600
+ * Explicit issue ranges are fixed: confirmations/verdicts 1–5, offer 30–3600
  * seconds. The remaining settings had no documented limits, so these are
  * practical guardrails, not product rules. Positive values are enforced in the
  * database too; the upper bounds keep a typo from disabling a workflow.
@@ -43,7 +43,7 @@ export const DEFAULT_PROJECT_WORKFLOW: Readonly<ProjectWorkflowValues> = Object.
 export const WORKFLOW_LIMITS = {
   confirmationsNeeded: { min: 1, max: 5 },
   verdictsNeeded: { min: 1, max: 5 },
-  offerWindowSeconds: { min: 30, max: 600 },
+  offerWindowSeconds: { min: 30, max: 3600 },
   heartbeatMinutes: { min: 1, max: 1440 },
   deliveryMinutes: { min: 1, max: 10080 },
   maxActiveClaims: { min: 1, max: 20 },
