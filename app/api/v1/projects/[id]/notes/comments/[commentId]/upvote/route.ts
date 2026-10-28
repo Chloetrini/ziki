@@ -1,0 +1,20 @@
+import type { NextRequest } from "next/server";
+import { notesRequest, type NotesRouteContext } from "@/lib/agent-api/notes";
+import { voteNoteComment } from "@/lib/project-notes";
+import { createMethodNotAllowed, createOptions } from "@/lib/agent-api/http-errors";
+
+export const runtime = "nodejs";
+
+export async function PUT(request: NextRequest, context: NotesRouteContext) {
+  return notesRequest(request, context, "notes.vote", true, (actor, params) => voteNoteComment(actor, params.commentId!, true));
+}
+export async function DELETE(request: NextRequest, context: NotesRouteContext) {
+  return notesRequest(request, context, "notes.vote", true, (actor, params) => voteNoteComment(actor, params.commentId!, false));
+}
+
+const apiMethodNotAllowed = createMethodNotAllowed(["PUT", "DELETE", "OPTIONS"]);
+export const GET = apiMethodNotAllowed;
+export const POST = apiMethodNotAllowed;
+export const PATCH = apiMethodNotAllowed;
+export const HEAD = apiMethodNotAllowed;
+export const OPTIONS = createOptions(["PUT", "DELETE", "OPTIONS"]);

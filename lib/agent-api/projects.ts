@@ -50,6 +50,8 @@ export async function listAgentProjects(tenantId: string) {
   const openByProject = new Map(openCounts.map((row) => [row.projectId, row._count._all]));
   return projects.map((project) => ({
     ...project,
+    notesUrl: `/api/v1/projects/${project.id}/notes`,
+    notesCommentsUrl: `/api/v1/projects/${project.id}/notes/comments`,
     rewardRules: parseProjectRewardConfig(project.rewardConfig, base),
     workflow: workflowValues(project.workflow),
     openIssueCount: openByProject.get(project.id) ?? 0,
@@ -71,6 +73,8 @@ export async function getAgentProject(tenantId: string, projectId: string) {
   });
   return {
     ...project,
+    notesUrl: `/api/v1/projects/${project.id}/notes`,
+    notesCommentsUrl: `/api/v1/projects/${project.id}/notes/comments`,
     rewardRules: parseProjectRewardConfig(project.rewardConfig, projectDefaultsFromPlatform(platform)),
     workflow: workflowValues(project.workflow),
     openIssueCount,

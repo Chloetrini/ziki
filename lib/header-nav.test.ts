@@ -72,6 +72,8 @@ describe("headerNavItems (#761)", () => {
 describe("isNavItemActive", () => {
   it("marks Issues active on the list and on an issue, not on the new-issue form", () => {
     expect(isNavItemActive("/issues", "/issues")).toBe(true);
+    expect(isNavItemActive("/notes", "/issues")).toBe(true);
+    expect(isNavItemActive("/notes", "/marketing")).toBe(false);
     expect(isNavItemActive("/issues/", "/issues")).toBe(true);
     expect(isNavItemActive("/issues/abc123", "/issues")).toBe(true);
     expect(isNavItemActive("/issues/new", "/issues")).toBe(false);

@@ -139,6 +139,8 @@ export type MarkdownEditorProps = {
    */
   labelId?: string;
   onUploadingChange?: (uploading: boolean) => void;
+  /** Disable file uploads for surfaces without attachment linking. */
+  allowUploads?: boolean;
 } & Omit<
   TextareaHTMLAttributes<HTMLTextAreaElement>,
   "value" | "onChange" | "children"
@@ -212,6 +214,7 @@ export const MarkdownEditor = forwardRef<
     onInvalid,
     labelId,
     onUploadingChange,
+    allowUploads = true,
     ...rest
   },
   ref,
@@ -404,6 +407,10 @@ export const MarkdownEditor = forwardRef<
    */
   const uploadFiles = (files: File[], pasted: boolean) => {
     if (files.length === 0 || disabled) return;
+    if (!allowUploads) {
+      setUploadError("File uploads are not supported here. Add a link instead.");
+      return;
+    }
     setUploadError(null);
     const tooLarge = files.filter((file) => file.size > MAX_ATTACHMENT_BYTES);
     if (tooLarge.length) {
@@ -745,7 +752,7 @@ export const MarkdownEditor = forwardRef<
         {footer}
         {maxLength ? (
           <div className="ml-auto flex shrink-0 items-center gap-2">
-            {!disabled ? <span className="text-xs text-zk-muted">Paste or drop images · </span> : null}
+            {!disabled && allowUploads ? <span className="text-xs text-zk-muted">Paste or drop images · </span> : null}
             <CharacterCounter
               length={value.length}
               max={maxLength}

@@ -2,6 +2,7 @@
 
 import { Children, isValidElement, useEffect, useId, useRef, useState, useTransition, type ReactNode } from "react";
 import Image from "next/image";
+import { ProjectNotesLink } from "@/components/project-notes-link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { severities, statuses } from "@/lib/validations/issue";
 import { severityLabel, statusLabel } from "@/lib/labels";
@@ -592,6 +593,7 @@ export function IssueFilters({
           </div>
         </div>
 
+        {compact ? <ProjectNotesLink /> : null}
         <button type="button" onClick={applyQueryNow} disabled={isSearching} className={`inline-flex h-[42px] shrink-0 items-center gap-1.5 rounded-full border-0 bg-electric-blue-strong px-4 text-sm font-bold text-white shadow-[0_8px_20px_rgba(46,111,239,0.30)] transition-colors hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-blue focus-visible:ring-offset-2 disabled:cursor-default disabled:opacity-70 ${compact ? "issues-search-submit" : ""}`}>
           {isSearching ? (
             <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>

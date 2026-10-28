@@ -177,3 +177,17 @@ describe("MarkdownEditor upload rejects oversized files client-side (#540)", () 
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
+
+describe("MarkdownEditor surfaces without attachment linking", () => {
+  it("rejects file drops without uploading or changing the draft", () => {
+    const onChange = vi.fn();
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const { container } = render(<MarkdownEditor value="Project guidance" onChange={onChange} allowUploads={false} aria-label="Notes" />);
+    dropScreenshot(container.querySelector("textarea")!);
+    expect(screen.queryByText(/Paste or drop images/)).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("Add a link instead");
+  });
+});

@@ -1,0 +1,32 @@
+Node 22.23.4
+
+pnpm check: PASS (exit 0)
+Worker limits: VITEST_MAX_FORKS=2 VITEST_MIN_FORKS=1 VITEST_MAX_THREADS=2 VITEST_MIN_THREADS=1
+Lint: PASS; one pre-existing unused-import warning in issues/(list)/page.tsx.
+Typecheck: PASS
+ Test Files  479 passed | 1 skipped (480)
+      Tests  4942 passed | 5 skipped (4947)
+   Duration  206.95s (transform 11.74s, setup 0ms, collect 110.42s, tests 58.68s, environment 53.25s, prepare 59.58s)
+
+Disposable PostgreSQL integration suite: PASS
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+   Duration  12.31s (transform 1.18s, setup 0ms, collect 3.35s, tests 6.66s, environment 0ms, prepare 422ms)
+
+Production build: PASS (exit 0)
+
+Live API: owner edit, ordinary-agent denial, project isolation, comments and duplicate vote checks passed.
+Browser: toolbar placement, /notes navigation, human save, history restore, desktop/mobile rendering and no horizontal overflow passed.
+
+Mobile interaction: normal scrolling and save click passed without forced clicks or navigation interception.
+
+Fresh pre-push pnpm check: PASS (Node 22, two workers)
+ Test Files  479 passed | 1 skipped (480)
+      Tests  4942 passed | 5 skipped (4947)
+   Duration  332.40s (transform 19.74s, setup 0ms, collect 178.28s, tests 86.94s, environment 96.12s, prepare 100.17s)
+
+Publication target: emerjent/ziki main 1b40b2f656156fd5d769e627b88244d4ee8c8d9f
+Post-rebase pnpm check: PASS (Node 22, two workers)
+ Test Files  479 passed | 1 skipped (480)
+      Tests  4954 passed | 5 skipped (4959)
+   Duration  232.19s (transform 14.83s, setup 0ms, collect 123.84s, tests 62.57s, environment 57.57s, prepare 66.73s)

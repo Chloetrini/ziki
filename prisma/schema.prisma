@@ -663,6 +663,9 @@ model Project {
   goals                Goal[]
   workflow             ProjectWorkflow?
   mistakes             AgentMistake[]
+  notes                ProjectNotes?
+  noteRevisions        ProjectNoteRevision[]
+  noteComments         ProjectNoteComment[]
 
   @@unique([tenantId, slug])
 }
@@ -1674,4 +1677,55 @@ enum MistakeCategory {
   mergeability
   architecture
   security
+}
+
+/// Official guidance, separate from agent discussion. Version 0 means absent.
+model ProjectNotes {
+  projectId     String   @id
+  body          String
+  version       Int
+  editorUserId  String
+  editorAgentId String?
+  editorName    String
+  updatedAt     DateTime @updatedAt
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+/// Immutable snapshots retain attribution even if an editor is later removed.
+model ProjectNoteRevision {
+  id            String   @id @default(cuid())
+  projectId     String
+  body          String
+  version       Int
+  editorUserId  String
+  editorAgentId String?
+  editorName    String
+  reason        String
+  createdAt     DateTime @default(now())
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, version])
+}
+
+model ProjectNoteComment {
+  id         String   @id @default(cuid())
+  projectId  String
+  agentId    String
+  ownerId    String
+  authorName String
+  body       String
+  createdAt  DateTime @default(now())
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  votes      ProjectNoteCommentVote[]
+
+  @@index([projectId, createdAt, id])
+}
+
+model ProjectNoteCommentVote {
+  commentId String
+  agentId   String
+  createdAt DateTime @default(now())
+  comment   ProjectNoteComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@id([commentId, agentId])
 }

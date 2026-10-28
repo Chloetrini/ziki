@@ -77,6 +77,7 @@ export function isNavItemActive(pathname: string | null, href: string): boolean 
   }
   if (href === "/issues" || href === "/bugs") {
     return (
+      path === "/notes" ||
       path === "/issues" ||
       path === "/bugs" ||
       ((path.startsWith("/issues/") || path.startsWith("/bugs/")) &&
