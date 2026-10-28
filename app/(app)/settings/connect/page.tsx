@@ -1,144 +1,89 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { currentTenantIdFor } from "@/lib/tenant-context";
 import { projectContextFor } from "@/lib/project-context";
-import { getSiteUrl } from "@/lib/site-url";
 import { isAgentPlatformEnabled } from "@/lib/feature-flags";
-import { getAgentTemplates } from "@/lib/agents/templates";
-import { findPendingPairing } from "@/lib/agents/pairing";
-import { AGENT_INSTRUCTIONS_MAX } from "@/lib/agent-messages";
-import { ConnectAgentView } from "@/app/(app)/settings/agents/connect/connect-agent-view";
-import { PairForm } from "@/app/(app)/settings/agents/pair/pair-form";
+import { ConnectAgentFlow } from "@/app/(app)/settings/agents/connect/connect-agent-flow";
 import {
   agentsLink,
   agentsMutedClass,
   agentsPrimaryBtn,
   agentsSurface,
-  formatPairingCode,
 } from "@/app/(app)/settings/agents/agents-ui";
 
 export const metadata = { title: "Connect your agent" };
 
 /**
- * Connect your agent onboarding page and approve pairings in one place (#628).
- * Ready-to-paste setups for Claude, ChatGPT, and Node/Python pollers.
+ * Connect your agent: one button. It names the agent, hands over one piece of
+ * text to paste into it, and shows when the agent has connected.
  */
 export default async function ConnectAgentPage({
   searchParams,
 }: {
   searchParams: Promise<{ code?: string | string[] }>;
 }) {
+  // Pairing codes are approved on their own page; keep old links with a code working.
+  const { code } = await searchParams;
+  if (typeof code === "string" && code) {
+    redirect(`/settings/agents/pair?code=${encodeURIComponent(code.slice(0, 20))}`);
+  }
+
   const user = await requireUser();
 
   if (!isAgentPlatformEnabled()) {
     return (
-      <div className="mx-auto max-w-3xl space-y-6">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-extrabold text-zk-text">Connect your agent</h1>
-          <p className={agentsMutedClass}>The agent platform feature is not enabled in this environment.</p>
-        </div>
+      <div className="mx-auto max-w-xl space-y-1">
+        <h1 className="text-3xl font-extrabold text-zk-text">Connect your agent</h1>
+        <p className={agentsMutedClass}>The agent platform feature is not enabled in this environment.</p>
       </div>
     );
   }
 
   const tenantId = await currentTenantIdFor(user.id);
   const context = await projectContextFor(prisma, tenantId);
-  const { code } = await searchParams;
-  const rawCode = typeof code === "string" ? code.slice(0, 20) : "";
-  const initialCode = formatPairingCode(rawCode);
-  const pendingPairing = initialCode ? await findPendingPairing(initialCode) : null;
-
   const activeProject =
     context.projects.find((p) => p.id === context.activeProjectId) ?? context.projects[0] ?? null;
 
-  const projectId = activeProject?.id ?? null;
-  const projectName = activeProject?.name ?? null;
-  const siteUrl = getSiteUrl();
-
-  const templates = getAgentTemplates({
-    origin: siteUrl,
-    projectId,
-    projectName,
-  });
-
-  const initialKey = tenantId
-    ? await prisma.agentApiKey.findFirst({
-        where: {
-          agent: { ownerUserId: user.id, tenantId, revokedAt: null },
-          ...(projectId ? { projectId } : {}),
-          lastUsedAt: { not: null },
-        },
-        include: { agent: { select: { name: true } } },
-        orderBy: { lastUsedAt: "desc" },
-      })
-    : null;
-
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <div className="space-y-3">
-        <Link href="/agents" className={`text-sm ${agentsLink}`}>
-          ← Back to agents
-        </Link>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-          <div className="space-y-1">
-            <h1 className="text-3xl font-extrabold tracking-tight text-zk-text">Connect your agent</h1>
-            <p className="text-sm text-zk-text2">
-              Connect a separate agent for each level you use. Pick your assistant, copy the setup block, approve the
-              pairing request and test your connection.
-            </p>
-          </div>
-        </div>
-      </div>
+    <div className="mx-auto max-w-xl space-y-6">
+      <Link href="/agents" className={`text-sm ${agentsLink}`}>
+        ← Back to agents
+      </Link>
 
-      {!tenantId ? (
-        <div className={`${agentsSurface} border-dashed p-6 text-sm text-zk-text2`}>
-          <p>You are not currently in a workspace. Join or create a workspace before you can connect an agent.</p>
-          <div className="mt-3">
+      <section className={`${agentsSurface} flex flex-col items-center gap-4 px-6 py-10 text-center`}>
+        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-zk-tint text-zk-accent">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M4 8h16v12H4zM12 4v4M9 14h.01M15 14h.01" />
+          </svg>
+        </span>
+        <div className="space-y-1">
+          <h1 className="text-2xl font-extrabold tracking-tight text-zk-text">Connect your agent</h1>
+          <p className={agentsMutedClass}>Name it, copy one piece of text into it, and you&apos;re connected.</p>
+        </div>
+
+        {!tenantId ? (
+          <>
+            <p className="text-sm text-zk-text2">Join or create a workspace before you connect an agent.</p>
             <Link href="/tenants" className={agentsPrimaryBtn}>
               Workspaces →
             </Link>
-          </div>
-        </div>
-      ) : (
-        <>
-          <ConnectAgentView
-            templates={templates}
-            siteUrl={siteUrl}
-            projectId={projectId}
-            projectName={projectName}
-            initialConnected={Boolean(initialKey?.lastUsedAt)}
-            initialAgentName={initialKey?.agent?.name ?? null}
-          />
-          <section className="space-y-2 border-t border-zk-border pt-6" aria-labelledby="approve-agent-heading">
-            <div className="space-y-1">
-              <h2 id="approve-agent-heading" className="text-xl font-extrabold text-zk-text">
-                Approve a pairing request
-              </h2>
-              <p className="text-sm text-zk-text2">
-                Enter the code from an agent, then check its name and requested access before approving it.
-              </p>
-            </div>
-            <PairForm
-              initialCode={initialCode}
-              pending={
-                pendingPairing
-                  ? {
-                      name: pendingPairing.proposedName,
-                      model: pendingPairing.proposedModel,
-                      level: pendingPairing.proposedLevel,
-                      instructions: pendingPairing.proposedInstructions,
-                    }
-                  : null
-              }
-              unknownCode={Boolean(initialCode) && !pendingPairing}
-              projects={context.projects}
-              activeProjectId={context.activeProjectId}
-              instructionsMaxLength={AGENT_INSTRUCTIONS_MAX}
-            />
-          </section>
-        </>
-      )}
+          </>
+        ) : !activeProject ? (
+          <>
+            <p className="text-sm text-zk-text2">Create a project first. Your agent works inside a project.</p>
+            <Link href="/projects" className={agentsPrimaryBtn}>
+              Projects →
+            </Link>
+          </>
+        ) : (
+          <>
+            <ConnectAgentFlow projectId={activeProject.id} />
+            <p className="text-xs text-zk-muted">It will work in {activeProject.name}.</p>
+          </>
+        )}
+      </section>
     </div>
   );
 }

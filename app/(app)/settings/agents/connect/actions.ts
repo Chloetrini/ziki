@@ -1,122 +1,57 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth-helpers";
-import { currentTenantIdFor } from "@/lib/tenant-context";
+import { isAgentPlatformEnabled } from "@/lib/feature-flags";
+import { getSiteUrl } from "@/lib/site-url";
+import { createAgent } from "@/lib/agents/registry";
+import { agentBootstrapMessage } from "@/lib/agents/bootstrap-message";
 
-export type ConnectionStatusResult = {
-  connected: boolean;
-  message?: string;
-  agent?: {
-    id: string;
-    name: string;
-    model?: string | null;
-    lastUsedAt?: string | null;
-  };
-};
+export type StartConnectResult =
+  | { ok: true; agentId: string; name: string; setupText: string }
+  | { ok: false; error: string };
 
 /**
- * Checks if any agent owned by the user in this workspace has verified their connection (#610).
- * Specifically looks for an AgentApiKey where `lastUsedAt` is recorded.
+ * Connect agent, step one: register the named agent and hand back the text
+ * the person pastes into it. The text carries the new key, so it is shown once.
  */
-export async function checkAgentConnectionAction(params?: {
-  projectId?: string | null;
-  since?: string | null;
-}): Promise<ConnectionStatusResult> {
+export async function startAgentConnectAction(input: {
+  name: string;
+  projectId: string;
+}): Promise<StartConnectResult> {
+  if (!isAgentPlatformEnabled()) return { ok: false, error: "The agent platform is turned off on this site." };
   const user = await requireUser();
-  const tenantId = await currentTenantIdFor(user.id);
-  if (!tenantId) {
-    return { connected: false, message: "No active workspace found." };
-  }
+  const result = await createAgent(user, { name: input.name, projectId: input.projectId });
+  if (!result.ok) return { ok: false, error: result.error };
 
-  const whereClause: {
-    agent: {
-      ownerUserId: string;
-      tenantId: string;
-      revokedAt: null;
-    };
-    lastUsedAt: { not: null; gte?: Date };
-    projectId?: string;
-  } = {
-    agent: {
-      ownerUserId: user.id,
-      tenantId,
-      revokedAt: null,
-    },
-    lastUsedAt: { not: null },
-  };
-
-  if (params?.projectId) {
-    whereClause.projectId = params.projectId;
-  }
-
-  if (params?.since) {
-    const sinceDate = new Date(params.since);
-    if (!isNaN(sinceDate.getTime())) {
-      // Allow slight 30s clock skew
-      whereClause.lastUsedAt = {
-        not: null,
-        gte: new Date(sinceDate.getTime() - 30000),
-      };
-    }
-  }
-
-  const activeKey = await prisma.agentApiKey.findFirst({
-    where: whereClause,
-    include: {
-      agent: {
-        select: { id: true, name: true, model: true },
-      },
-    },
-    orderBy: { lastUsedAt: "desc" },
+  const project = await prisma.project.findUnique({
+    where: { id: input.projectId },
+    select: { name: true },
   });
-
-  if (!activeKey || !activeKey.lastUsedAt) {
-    // If none matched with strict `since` filter, check fallback for this workspace
-    const fallbackKey = await prisma.agentApiKey.findFirst({
-      where: {
-        agent: {
-          ownerUserId: user.id,
-          tenantId,
-          revokedAt: null,
-        },
-        ...(params?.projectId ? { projectId: params.projectId } : {}),
-        lastUsedAt: { not: null },
-      },
-      include: {
-        agent: {
-          select: { id: true, name: true, model: true },
-        },
-      },
-      orderBy: { lastUsedAt: "desc" },
-    });
-
-    if (fallbackKey && fallbackKey.lastUsedAt) {
-      return {
-        connected: true,
-        agent: {
-          id: fallbackKey.agent.id,
-          name: fallbackKey.agent.name,
-          model: fallbackKey.agent.model,
-          lastUsedAt: fallbackKey.lastUsedAt.toISOString(),
-        },
-      };
-    }
-
-    return {
-      connected: false,
-      message:
-        "No agent call detected yet. Follow the steps above to pair your agent and call /api/v1/agents/me.",
-    };
-  }
-
+  revalidatePath("/agents");
   return {
-    connected: true,
-    agent: {
-      id: activeKey.agent.id,
-      name: activeKey.agent.name,
-      model: activeKey.agent.model,
-      lastUsedAt: activeKey.lastUsedAt.toISOString(),
-    },
+    ok: true,
+    agentId: result.key.agentId,
+    name: result.key.name,
+    setupText: agentBootstrapMessage({
+      origin: getSiteUrl(),
+      apiKey: result.key.rawKey,
+      projectName: project?.name ?? null,
+    }),
   };
+}
+
+/** Connect agent, step two: has this agent used its key yet? Only its owner can ask. */
+export async function checkAgentConnectedAction(agentId: string): Promise<{ connected: boolean }> {
+  const user = await requireUser();
+  const key = await prisma.agentApiKey.findFirst({
+    where: {
+      agent: { id: agentId, ownerUserId: user.id, revokedAt: null },
+      revokedAt: null,
+      lastUsedAt: { not: null },
+    },
+    select: { id: true },
+  });
+  return { connected: Boolean(key) };
 }

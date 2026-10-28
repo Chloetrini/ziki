@@ -114,6 +114,217 @@ body:has([data-app-shell]) {
   }
 }
 
+/* Connect agent: on success a little robot dances. It pops in, bounces and
+   sways on the beat, waves its arms, kicks its feet, blinks, its antenna and
+   chest glow, and music notes float up. Reduced motion shows it standing still. */
+@keyframes zk-dance-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes zk-dance-body {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-7deg);
+  }
+  25%,
+  75% {
+    transform: translateY(-9px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(0) rotate(7deg);
+  }
+}
+
+@keyframes zk-dance-shadow {
+  0%,
+  50%,
+  100% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  25%,
+  75% {
+    transform: scaleX(0.75);
+    opacity: 0.6;
+  }
+}
+
+@keyframes zk-dance-head {
+  from {
+    transform: rotate(-10deg);
+  }
+  to {
+    transform: rotate(10deg);
+  }
+}
+
+@keyframes zk-dance-arm-l {
+  from {
+    transform: rotate(20deg);
+  }
+  to {
+    transform: rotate(155deg);
+  }
+}
+
+@keyframes zk-dance-arm-r {
+  from {
+    transform: rotate(-155deg);
+  }
+  to {
+    transform: rotate(-20deg);
+  }
+}
+
+@keyframes zk-dance-leg-l {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(18deg);
+  }
+}
+
+@keyframes zk-dance-leg-r {
+  from {
+    transform: rotate(-18deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes zk-dance-eye {
+  0%,
+  44%,
+  52%,
+  100% {
+    transform: scaleY(1);
+  }
+  48% {
+    transform: scaleY(0.1);
+  }
+}
+
+@keyframes zk-dance-glow {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes zk-dance-note {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) rotate(-10deg);
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-34px) rotate(12deg);
+  }
+}
+
+.zk-dance-pop {
+  animation: zk-dance-pop 450ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.zk-dance-body,
+.zk-dance-shadow,
+.zk-dance-head,
+.zk-dance-arm-l,
+.zk-dance-arm-r,
+.zk-dance-leg-l,
+.zk-dance-leg-r,
+.zk-dance-eye,
+.zk-dance-note {
+  transform-box: fill-box;
+}
+
+.zk-dance-body {
+  transform-origin: 50% 100%;
+  animation: zk-dance-body 1.6s ease-in-out infinite;
+}
+
+.zk-dance-shadow {
+  transform-origin: 50% 50%;
+  animation: zk-dance-shadow 1.6s ease-in-out infinite;
+}
+
+.zk-dance-head {
+  transform-origin: 50% 100%;
+  animation: zk-dance-head 0.8s ease-in-out infinite alternate;
+}
+
+/* Arms and legs swing from the top: the shoulder and the hip. */
+.zk-dance-arm-l,
+.zk-dance-arm-r,
+.zk-dance-leg-l,
+.zk-dance-leg-r {
+  transform-origin: 50% 0%;
+}
+
+.zk-dance-arm-l {
+  animation: zk-dance-arm-l 0.8s ease-in-out infinite alternate;
+}
+
+.zk-dance-arm-r {
+  animation: zk-dance-arm-r 0.8s ease-in-out infinite alternate;
+}
+
+.zk-dance-leg-l {
+  animation: zk-dance-leg-l 0.4s ease-in-out infinite alternate;
+}
+
+.zk-dance-leg-r {
+  animation: zk-dance-leg-r 0.4s ease-in-out infinite alternate;
+}
+
+.zk-dance-eye {
+  transform-origin: 50% 50%;
+  animation: zk-dance-eye 2.4s infinite;
+}
+
+.zk-dance-glow {
+  animation: zk-dance-glow 0.8s ease-in-out infinite;
+}
+
+.zk-dance-note {
+  transform-origin: 50% 50%;
+  animation: zk-dance-note 2.4s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zk-dance-pop,
+  .zk-dance-body,
+  .zk-dance-shadow,
+  .zk-dance-head,
+  .zk-dance-arm-l,
+  .zk-dance-arm-r,
+  .zk-dance-leg-l,
+  .zk-dance-leg-r,
+  .zk-dance-eye,
+  .zk-dance-glow,
+  .zk-dance-note {
+    animation: none;
+  }
+}
+
 /* Agent decisions strip: the track holds the cards twice, so sliding it by
    half loops seamlessly, right to left. Hover or focus pauses it; with
    reduced motion the strip is a plain horizontal scroller instead. */
