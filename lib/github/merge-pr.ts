@@ -136,6 +136,43 @@ function base64url(input: Buffer | string): string {
   return Buffer.from(input).toString("base64url");
 }
 
+export function normalizePrivateKey(raw: string): string {
+  let k = raw.trim();
+  if (
+    (k.startsWith('"') && k.endsWith('"')) ||
+    (k.startsWith("'") && k.endsWith("'"))
+  ) {
+    k = k.slice(1, -1).trim();
+  }
+  // If base64 encoded PEM, decode it
+  if (!k.includes("-----BEGIN") && /^[A-Za-z0-9+/=\s]+$/.test(k)) {
+    try {
+      const decoded = Buffer.from(k, "base64").toString("utf8");
+      if (decoded.includes("-----BEGIN")) {
+        k = decoded;
+      }
+    } catch {
+      // not valid base64
+    }
+  }
+  if (k.includes("\\n")) {
+    k = k.replace(/\\n/g, "\n");
+  }
+  if (k.includes("\\r")) {
+    k = k.replace(/\\r/g, "\r");
+  }
+  // If newlines inside the PEM body were stripped or collapsed into spaces, reformat it into standard PEM lines
+  const pemMatch = k.match(/-----BEGIN ([A-Z ]+)-----([\s\S]+?)-----END \1-----/);
+  if (pemMatch) {
+    const header = `-----BEGIN ${pemMatch[1]}-----`;
+    const footer = `-----END ${pemMatch[1]}-----`;
+    const body = pemMatch[2].replace(/\s+/g, "");
+    const formattedBody = body.match(/.{1,64}/g)?.join("\n") || body;
+    k = `${header}\n${formattedBody}\n${footer}\n`;
+  }
+  return k;
+}
+
 /**
  * Sign the short-lived app JWT GitHub wants when minting an installation
  * token: RS256, `iss` is the app id, and it may live at most 10 minutes.
@@ -148,15 +185,11 @@ export function createAppJwt(appId: string, privateKey: string, now: number = Da
   const signer = createSign("RSA-SHA256");
   signer.update(signingInput);
   signer.end();
-  let keyToSign = privateKey.trim();
-  if (
-    (keyToSign.startsWith('"') && keyToSign.endsWith('"')) ||
-    (keyToSign.startsWith("'") && keyToSign.endsWith("'"))
-  ) {
-    keyToSign = keyToSign.slice(1, -1).trim();
-  }
-  if (keyToSign.includes("\\n")) {
-    keyToSign = keyToSign.replace(/\\n/g, "\n");
+  const keyToSign = normalizePrivateKey(privateKey);
+  if (!keyToSign.includes("-----BEGIN")) {
+    throw new GitHubError(
+      `GitHub App private key signing failed: The configured key is ${privateKey.trim().length} characters long and is missing the '-----BEGIN ... PRIVATE KEY-----' header. Ensure GITHUB_APP_PRIVATE_KEY contains the contents of the downloaded .pem file, not the GitHub App Client Secret.`
+    );
   }
   let signature: Buffer;
   try {

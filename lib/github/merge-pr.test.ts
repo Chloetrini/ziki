@@ -138,6 +138,29 @@ describe("createAppJwt (#452)", () => {
     verifier.end();
     expect(verifier.verify(publicKey, Buffer.from(signature, "base64url"))).toBe(true);
   });
+
+  it("handles base64, collapsed spaces, and escaped newlines in private key", () => {
+    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const pem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
+
+    // Base64-encoded PEM
+    const b64 = Buffer.from(pem).toString("base64");
+    expect(() => createAppJwt("123", b64)).not.toThrow();
+
+    // Collapsed spaces on a single line
+    const singleLine = pem.replace(/\r?\n/g, " ");
+    expect(() => createAppJwt("123", singleLine)).not.toThrow();
+
+    // Literal escaped newlines
+    const escaped = pem.replace(/\n/g, "\\n");
+    expect(() => createAppJwt("123", escaped)).not.toThrow();
+  });
+
+  it("throws helpful error when key is missing PEM header", () => {
+    expect(() => createAppJwt("123", "some-random-client-secret-value")).toThrow(
+      /missing the '-----BEGIN \.\.\. PRIVATE KEY-----' header/
+    );
+  });
 });
 
 describe("mergeAcceptedFix gates (#452)", () => {
