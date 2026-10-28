@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isValidHostHeader, resolveAuthOrigin } from "./auth-origin";
+import { isValidHostHeader, resolveAuthOrigin, getRequestOrigin } from "./auth-origin";
 
 describe("resolveAuthOrigin with a configured URL (production)", () => {
   const configuredUrl = "https://ziki.dev/api/auth";
@@ -97,5 +97,27 @@ describe("isValidHostHeader", () => {
     expect(isValidHostHeader("evil.com/x")).toBe(false);
     expect(isValidHostHeader("")).toBe(false);
     expect(isValidHostHeader(null)).toBe(false);
+  });
+});
+
+describe("getRequestOrigin", () => {
+  it("resolves from forwarded headers behind a reverse proxy", () => {
+    const headers = new Headers({
+      "x-forwarded-host": "ziki.dev",
+      "x-forwarded-proto": "https",
+      host: "0.0.0.0:3000",
+    });
+    expect(getRequestOrigin({ url: "http://0.0.0.0:3000/projects/github/callback", headers })).toBe(
+      "https://ziki.dev",
+    );
+  });
+
+  it("resolves from request url in local dev when no proxy headers exist", () => {
+    const headers = new Headers({
+      host: "localhost:3001",
+    });
+    expect(getRequestOrigin({ url: "http://localhost:3001/projects/github/callback", headers })).toBe(
+      "http://localhost:3001",
+    );
   });
 });

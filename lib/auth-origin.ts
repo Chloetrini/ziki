@@ -11,6 +11,8 @@
  * `x-forwarded-host` and `host` consulted, and then only after validation.
  */
 
+import { cleanEnv } from "@/lib/env-clean";
+
 const HOST_RE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*(?::\d{1,5})?$/i;
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
 
@@ -70,4 +72,24 @@ export function resolveAuthOrigin({
     url.port = "";
   }
   return url.origin;
+}
+
+/**
+ * Derives the canonical public origin for an incoming server request,
+ * accounting for reverse proxies (X-Forwarded-* headers) and configured URLs (#539).
+ */
+export function getRequestOrigin(request: { url: string; headers: Headers }): string {
+  const configured =
+    cleanEnv(process.env.AUTH_URL) ||
+    cleanEnv(process.env.NEXTAUTH_URL) ||
+    cleanEnv(process.env.NEXT_PUBLIC_SITE_URL) ||
+    (process.env.NODE_ENV === "production" ? "https://ziki.dev" : null);
+
+  return resolveAuthOrigin({
+    configuredUrl: configured,
+    requestUrl: request.url,
+    forwardedProto: request.headers.get("x-forwarded-proto"),
+    forwardedHost: request.headers.get("x-forwarded-host"),
+    host: request.headers.get("host"),
+  });
 }

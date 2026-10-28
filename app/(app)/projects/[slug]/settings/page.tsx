@@ -74,6 +74,8 @@ export default async function ProjectSettingsPage({
       {github === "error" ? <p role="alert" className="rounded-[14px] bg-zk-warn-bg p-3 text-sm text-zk-warn-fg">GitHub setup could not be completed. Start the connection again from this page.</p> : null}
       {github === "connected" ? <p role="status" className="rounded-[14px] bg-zk-ok-bg p-3 text-sm text-zk-ok-fg">GitHub App installation connected.</p> : null}
       {github === "unavailable" ? <p role="alert" className="rounded-[14px] bg-zk-warn-bg p-3 text-sm text-zk-warn-fg">The GitHub App is not configured. Set GITHUB_APP_SLUG before connecting it.</p> : null}
+      {github === "requested" ? <p role="status" className="rounded-[14px] bg-zk-warn-bg p-3 text-sm text-zk-warn-fg">GitHub App installation was requested and is waiting for organization admin approval.</p> : null}
+      {github === "cancelled" ? <p role="status" className="rounded-[14px] bg-zk-surface p-3 text-sm text-zk-text2">GitHub App connection was cancelled.</p> : null}
       <section className="space-y-5 rounded-[20px] border border-zk-border bg-zk-surface p-4 sm:p-6">
         <ProjectSettingsForm project={project} defaults={platformDefaults} />
         <div className="border-t border-zk-border pt-5">

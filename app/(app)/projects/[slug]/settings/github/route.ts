@@ -6,13 +6,15 @@ import { isTenantAdmin } from "@/lib/agents/membership";
 import { currentTenantIdFor } from "@/lib/tenant-context";
 import { prisma } from "@/lib/prisma";
 import { appCookieOptions } from "@/lib/cookie-options";
+import { getRequestOrigin } from "@/lib/auth-origin";
 
 export const runtime = "nodejs";
 const STATE_COOKIE = "ziki_github_install_state";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const settingsUrl = new URL(`/projects/${encodeURIComponent(slug)}/settings`, request.url);
+  const origin = getRequestOrigin(request);
+  const settingsUrl = new URL(`/projects/${encodeURIComponent(slug)}/settings`, origin);
   const appSlug = process.env.GITHUB_APP_SLUG?.trim();
   if (!appSlug || !/^[A-Za-z0-9-]+$/.test(appSlug)) {
     settingsUrl.searchParams.set("github", "unavailable");
@@ -20,13 +22,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
   const user = await requireUser();
   const tenantId = await currentTenantIdFor(user.id);
-  if (!tenantId || !(await isTenantAdmin(user, tenantId))) return NextResponse.redirect(new URL("/issues", request.url));
+  if (!tenantId || !(await isTenantAdmin(user, tenantId))) return NextResponse.redirect(new URL("/issues", origin));
   const project = await prisma.project.findFirst({ where: { tenantId, slug }, select: { id: true } });
-  if (!project) return NextResponse.redirect(new URL("/projects", request.url));
+  if (!project) return NextResponse.redirect(new URL("/projects", origin));
 
   const state = `${slug}.${randomBytes(24).toString("base64url")}`;
-  (await cookies()).set(STATE_COOKIE, state, appCookieOptions(600));
+  const cookieOpts = appCookieOptions(600);
+  (await cookies()).set(STATE_COOKIE, state, cookieOpts);
   const installUrl = new URL(`https://github.com/apps/${encodeURIComponent(appSlug)}/installations/new`);
   installUrl.searchParams.set("state", state);
-  return NextResponse.redirect(installUrl);
+  const response = NextResponse.redirect(installUrl);
+  response.cookies.set(STATE_COOKIE, state, cookieOpts);
+  return response;
 }

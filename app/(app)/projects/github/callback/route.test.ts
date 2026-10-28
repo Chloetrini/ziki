@@ -63,4 +63,33 @@ describe("GitHub App project callback (#608)", () => {
     expect(projectFindFirst).not.toHaveBeenCalled();
     expect(transaction).not.toHaveBeenCalled();
   });
+
+  it("connects when GitHub omits state or setup_action if the cookie is present (#539)", async () => {
+    const response = await GET(callback("installation_id=98765"));
+    expect(response.headers.get("location")).toContain("/projects/web/settings?github=connected");
+    expect(update).toHaveBeenCalledWith({ where: { id: "project-1" }, data: { githubInstallationId: "98765" } });
+  });
+
+  it("handles user cancellation on GitHub gracefully (#539)", async () => {
+    const response = await GET(callback("error=access_denied&error_description=The+user+cancelled"));
+    expect(response.headers.get("location")).toContain("/projects/web/settings?github=cancelled");
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it("handles org admin request setup_action (#539)", async () => {
+    const response = await GET(callback("installation_id=12345&setup_action=request"));
+    expect(response.headers.get("location")).toContain("/projects/web/settings?github=requested");
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it("respects reverse proxy headers for redirect location (#539)", async () => {
+    const request = new NextRequest("http://0.0.0.0:3000/projects/github/callback?installation_id=12345&state=web.random-state&setup_action=install", {
+      headers: {
+        "x-forwarded-host": "ziki.dev",
+        "x-forwarded-proto": "https",
+      },
+    });
+    const response = await GET(request);
+    expect(response.headers.get("location")).toBe("https://ziki.dev/projects/web/settings?github=connected");
+  });
 });

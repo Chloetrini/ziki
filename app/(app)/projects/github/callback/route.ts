@@ -4,32 +4,93 @@ import { requireUser } from "@/lib/auth-helpers";
 import { isTenantAdmin } from "@/lib/agents/membership";
 import { currentTenantIdFor } from "@/lib/tenant-context";
 import { prisma } from "@/lib/prisma";
+import { getRequestOrigin } from "@/lib/auth-origin";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 const STATE_COOKIE = "ziki_github_install_state";
 
 export async function GET(request: NextRequest) {
+  const origin = getRequestOrigin(request);
   const query = request.nextUrl.searchParams;
-  const installationId = query.get("installation_id") ?? "";
-  const state = query.get("state") ?? "";
-  const setupAction = query.get("setup_action");
-  const jar = await cookies();
-  const expected = jar.get(STATE_COOKIE)?.value;
-  jar.delete(STATE_COOKIE);
-  const slug = expected?.split(".", 1)[0] ?? "";
-  const settingsUrl = new URL(`/projects/${encodeURIComponent(slug)}/settings`, request.url);
+  const installationId = (query.get("installation_id") ?? "").trim();
+  const state = (query.get("state") ?? "").trim();
+  const setupAction = (query.get("setup_action") ?? "").trim();
+  const error = (query.get("error") ?? "").trim();
 
-  if (!expected || state !== expected || !/^[a-z0-9-]{1,48}$/.test(slug) || !/^\d{1,20}$/.test(installationId) || !["install", "update"].includes(setupAction ?? "")) {
-    settingsUrl.searchParams.set("github", "error");
-    return NextResponse.redirect(settingsUrl);
+  const jar = await cookies();
+  const expected = jar.get(STATE_COOKIE)?.value?.trim();
+  jar.delete(STATE_COOKIE);
+
+  const slugFromExpected = expected?.split(".", 1)[0] ?? "";
+  const slugFromState = state.split(".", 1)[0] ?? "";
+  const slug = slugFromExpected || slugFromState;
+
+  const settingsUrl = slug && /^[a-z0-9-]{1,48}$/.test(slug)
+    ? new URL(`/projects/${encodeURIComponent(slug)}/settings`, origin)
+    : new URL("/projects", origin);
+
+  if (error) {
+    logger.warn("[github] installation callback error from GitHub", { error, errorDescription: query.get("error_description") });
+    settingsUrl.searchParams.set("github", error === "access_denied" ? "cancelled" : "error");
+    const response = NextResponse.redirect(settingsUrl);
+    response.cookies.delete(STATE_COOKIE);
+    return response;
   }
+
+  if (setupAction === "request") {
+    logger.info("[github] installation requested on GitHub, awaiting approval", { slug, installationId });
+    settingsUrl.searchParams.set("github", "requested");
+    const response = NextResponse.redirect(settingsUrl);
+    response.cookies.delete(STATE_COOKIE);
+    return response;
+  }
+
+  const isStateMismatch = Boolean(state && expected && state !== expected);
+  const hasValidState = Boolean(expected || (state && /^[a-z0-9-]{1,48}\.[A-Za-z0-9_-]+$/.test(state)));
+  const isValidSlug = /^[a-z0-9-]{1,48}$/.test(slug);
+  const isValidInstallationId = /^\d{1,20}$/.test(installationId);
+  const isValidAction = ["install", "update", ""].includes(setupAction);
+
+  if (!hasValidState || isStateMismatch || !isValidSlug || !isValidInstallationId || !isValidAction) {
+    logger.warn("[github] rejected invalid installation callback", {
+      hasExpected: Boolean(expected),
+      hasState: Boolean(state),
+      isStateMismatch,
+      isValidSlug,
+      isValidInstallationId,
+      isValidAction,
+      setupAction,
+    });
+    settingsUrl.searchParams.set("github", "error");
+    const response = NextResponse.redirect(settingsUrl);
+    response.cookies.delete(STATE_COOKIE);
+    return response;
+  }
+
   const user = await requireUser();
   const tenantId = await currentTenantIdFor(user.id);
-  if (!tenantId || !(await isTenantAdmin(user, tenantId))) return NextResponse.redirect(new URL("/issues", request.url));
-  const project = await prisma.project.findFirst({ where: { tenantId, slug }, select: { id: true, githubInstallationId: true } });
-  if (!project) return NextResponse.redirect(new URL("/projects", request.url));
+  if (!tenantId || !(await isTenantAdmin(user, tenantId))) {
+    const response = NextResponse.redirect(new URL("/issues", origin));
+    response.cookies.delete(STATE_COOKIE);
+    return response;
+  }
+
+  const project = await prisma.project.findFirst({
+    where: { tenantId, slug },
+    select: { id: true, githubInstallationId: true },
+  });
+  if (!project) {
+    const response = NextResponse.redirect(new URL("/projects", origin));
+    response.cookies.delete(STATE_COOKIE);
+    return response;
+  }
+
   await prisma.$transaction(async (tx) => {
-    await tx.project.update({ where: { id: project.id }, data: { githubInstallationId: installationId } });
+    await tx.project.update({
+      where: { id: project.id },
+      data: { githubInstallationId: installationId },
+    });
     await tx.projectAuditEvent.create({
       data: {
         tenantId,
@@ -40,6 +101,9 @@ export async function GET(request: NextRequest) {
       },
     });
   });
+
   settingsUrl.searchParams.set("github", "connected");
-  return NextResponse.redirect(settingsUrl);
+  const response = NextResponse.redirect(settingsUrl);
+  response.cookies.delete(STATE_COOKIE);
+  return response;
 }
