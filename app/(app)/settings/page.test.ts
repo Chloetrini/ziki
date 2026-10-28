@@ -107,7 +107,7 @@ describe("SettingsPage resilience", () => {
 
     const hrefs = collectHrefs(element);
     expect(hrefs).toContain("/settings/audit");
-    expect(hrefs).toContain("/settings/agents");
+    expect(hrefs).toContain("/agents");
     expect(hrefs).toContain("/settings/agents/pair");
     expect(hrefs).toContain("/settings/webhooks");
     delete process.env.AGENT_PLATFORM;
@@ -128,7 +128,7 @@ describe("SettingsPage resilience", () => {
     expect(element).toBeDefined();
 
     const hrefs = collectHrefs(element);
-    expect(hrefs).toContain("/settings/agents");
+    expect(hrefs).toContain("/agents");
     expect(hrefs).toContain("/settings/agents/pair");
     expect(hrefs).toContain("/settings/audit");
   });
@@ -146,7 +146,7 @@ describe("SettingsPage resilience", () => {
     expect(element).toBeDefined();
 
     const hrefs = collectHrefs(element);
-    expect(hrefs).not.toContain("/settings/agents");
+    expect(hrefs).not.toContain("/agents");
     expect(hrefs).not.toContain("/settings/agents/pair");
     expect(hrefs).not.toContain("/settings/audit");
     expect(hrefs).toContain("/workers");

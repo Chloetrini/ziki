@@ -199,6 +199,14 @@ describe("account menu role switch", () => {
     expect(screen.getByRole("link", { name: "Ziki" }).getAttribute("href")).toBe("/dashboard");
   });
 
+  it("sends Manage agents and Create agent to separate pages", async () => {
+    const user = userEvent.setup();
+    renderHeader();
+    await user.click(screen.getByRole("button", { name: "Agents" }));
+    expect(screen.getByRole("link", { name: "Manage agents" }).getAttribute("href")).toBe("/agents");
+    expect(screen.getByRole("link", { name: "Create agent" }).getAttribute("href")).toBe("/settings/connect");
+  });
+
   it("closes the Agents menu when a destination is chosen", async () => {
     const user = userEvent.setup();
     renderHeader();

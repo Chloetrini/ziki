@@ -8,6 +8,8 @@ import { SignOutButton } from "@/components/sign-out-button";
 import { WorkspaceSwitcher, type WorkspaceChoice } from "@/components/workspace-switcher";
 import {
   AGENT_MENU_LINKS,
+  CREATE_AGENT_HREF,
+  MANAGE_AGENTS_HREF,
   headerNavItems,
   initialsOf,
   isNavItemActive,
@@ -319,7 +321,7 @@ function AgentsMenu({ pathname, agents }: { pathname: string | null; agents: She
           {agents.map((agent) => (
             <Link
               key={agent.id}
-              href="/settings/agents"
+              href={MANAGE_AGENTS_HREF}
               onClick={() => setOpen(false)}
               className="flex min-h-11 items-center gap-2.5 rounded-[10px] px-2.5 text-left text-zk-text"
             >
@@ -334,7 +336,7 @@ function AgentsMenu({ pathname, agents }: { pathname: string | null; agents: She
           ))}
           {agents.length > 0 ? <div className="my-1 h-px bg-zk-divider" /> : null}
           <Link
-            href="/settings/agents"
+            href={CREATE_AGENT_HREF}
             onClick={() => setOpen(false)}
             className="flex min-h-11 items-center gap-2 rounded-[10px] px-2.5 font-bold text-zk-accent"
           >

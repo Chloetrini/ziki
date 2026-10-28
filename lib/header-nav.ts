@@ -18,13 +18,19 @@ export type HeaderNavItem = {
 /** #444: pick another tenant, create one, or accept an invite. */
 export const SWITCH_TENANT_LINK: HeaderNavItem = { href: "/tenants", label: "Switch workspace" };
 
+/** Manage agents: the person's own agents, on a page of its own outside Settings. */
+export const MANAGE_AGENTS_HREF = "/agents";
+
+/** Create agent: the connect flow that registers a new agent. */
+export const CREATE_AGENT_HREF = "/settings/connect";
+
 /**
  * The Agents dropdown in the top bar. Both destinations are real pages: the
  * pairing flow to get an agent connected, and the management page.
  */
 export const AGENT_MENU_LINKS: HeaderNavItem[] = [
   { href: "/settings/agents/pair", label: "Get started" },
-  { href: "/settings/agents", label: "Manage agents" },
+  { href: MANAGE_AGENTS_HREF, label: "Manage agents" },
 ];
 
 /** Links shown in the header for the role the user is currently viewing as (#761). */

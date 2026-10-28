@@ -31,7 +31,7 @@ describe("page container token (#415)", () => {
     const routes = [
       "app/(app)/issues/(list)/page.tsx",
       "app/(app)/leaderboard/page.tsx",
-      "app/(app)/settings/agents/page.tsx",
+      "app/(app)/agents/page.tsx",
       "app/(app)/points/disputes/page.tsx",
     ];
 

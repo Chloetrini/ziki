@@ -54,7 +54,7 @@ describe("setAgentBurstAction (#596)", () => {
     const until = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
     expect(await setAgentBurstAction("agent1", true, until)).toEqual({ ok: true });
     expect(setAgentBurst).toHaveBeenCalledWith({ id: "admin" }, "agent1", true, new Date(until));
-    expect(revalidatePath).toHaveBeenCalledWith("/settings/agents");
+    expect(revalidatePath).toHaveBeenCalledWith("/agents");
   });
 
   it("passes no expiry when the grant is disabled", async () => {

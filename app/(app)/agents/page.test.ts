@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * /settings/agents is the "My agents" page and nothing else. Creating an agent
+ * /agents is the "My agents" page and nothing else. Creating an agent
  * and the team's agents are separate pages owned by other tickets, so they must
  * not come back into this one. Same source-level guard as the issue page test.
  */

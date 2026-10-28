@@ -22,7 +22,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import ConnectAgentPage from "./page";
-import { PairForm } from "../pair/pair-form";
+import { PairForm } from "@/app/(app)/settings/agents/pair/pair-form";
 import { prisma } from "@/lib/prisma";
 
 function findElement(node: ReactNode, type: ReactElement["type"]): ReactElement | null {
