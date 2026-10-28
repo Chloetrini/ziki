@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => {
   const mock = {
-    agent: { create: vi.fn(), findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn(), delete: vi.fn(), count: vi.fn(async () => 0) },
+    agent: { create: vi.fn(), findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), findFirst: vi.fn(async (): Promise<{ id: string } | null> => null), update: vi.fn(), delete: vi.fn(), count: vi.fn(async () => 0) },
     agentApiKey: { create: vi.fn(), updateMany: vi.fn() },
     agentAreaPreference: { findMany: vi.fn(), deleteMany: vi.fn(), createMany: vi.fn() },
     projectArea: { findMany: vi.fn() },
@@ -20,7 +20,7 @@ vi.mock("@/lib/prisma", () => ({ prisma: db }));
 
 import { hashSecret } from "./keys";
 import { openSecret } from "@/lib/secret-box";
-import { createAgent, deleteAgent, regenerateKey, revokeAgent, rotateKey, setAgentAreaPreferences, setAgentBurst, setAgentLevel } from "./registry";
+import { createAgent, deleteAgent, regenerateKey, renameAgent, revokeAgent, rotateKey, setAgentAreaPreferences, setAgentBurst, setAgentLevel } from "./registry";
 import { MAX_ACTIVE_AGENTS_PER_OWNER } from "./registry-limits";
 
 const ada = { id: "ada", role: "user" as const };
@@ -365,5 +365,33 @@ describe("active-agent cap (#511)", () => {
     expect(result).toMatchObject({ ok: false });
     if (!result.ok) expect(result.error).toContain("Revoke one");
     expect(db.agent.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("renameAgent", () => {
+  it("lets the owner rename, trimmed, and logs it", async () => {
+    db.agent.findUnique.mockResolvedValue(agentRow);
+    expect(await renameAgent(ada, "agent1", "  Pixel  Two ")).toEqual({ ok: true, name: "Pixel Two" });
+    expect(db.agent.update).toHaveBeenCalledWith({ where: { id: "agent1" }, data: { name: "Pixel Two" } });
+    expect(db.agentAuditEvent.create.mock.calls[0][0].data).toMatchObject({
+      action: "agent.renamed",
+      payload: { from: agentRow.name, to: "Pixel Two", by: "owner" },
+    });
+  });
+
+  it("refuses a name the owner already uses for another agent", async () => {
+    db.agent.findUnique.mockResolvedValue(agentRow);
+    db.agent.findFirst.mockResolvedValueOnce({ id: "agent2" });
+    expect(await renameAgent(ada, "agent1", "Scout")).toMatchObject({ ok: false });
+    expect(db.agent.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses a too-short name, a revoked agent and anyone else", async () => {
+    db.agent.findUnique.mockResolvedValue(agentRow);
+    expect(await renameAgent(ada, "agent1", "x")).toMatchObject({ ok: false });
+    expect(await renameAgent({ id: "bob", role: "user" }, "agent1", "Scout")).toMatchObject({ ok: false });
+    db.agent.findUnique.mockResolvedValue({ ...agentRow, revokedAt: new Date() });
+    expect(await renameAgent(ada, "agent1", "Scout")).toMatchObject({ ok: false });
+    expect(db.agent.update).not.toHaveBeenCalled();
   });
 });

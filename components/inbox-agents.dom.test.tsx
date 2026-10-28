@@ -27,6 +27,11 @@ describe("InboxAgents", () => {
     expect(screen.getByRole("link", { name: "Manage Pixel" })).toHaveAttribute("href", "/settings/agents");
   });
 
+  it("shows the agent's robot avatar", () => {
+    render(<InboxAgents agents={agents} />);
+    expect(screen.getByTestId("agent-avatar")).toBeInTheDocument();
+  });
+
   it("has no dots for a single agent, and invites adding one when there are none", () => {
     const { rerender } = render(<InboxAgents agents={agents.slice(0, 1)} />);
     expect(screen.queryByRole("group", { name: "Choose an agent" })).toBeNull();

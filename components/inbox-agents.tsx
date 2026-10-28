@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { AgentGraphic } from "@/components/agent-graphic";
+import { AgentAvatar } from "@/components/agent-avatar";
 import type { AgentStatus } from "@/lib/dashboard-overview";
 
 export type InboxAgent = {
@@ -12,6 +12,14 @@ export type InboxAgent = {
   activity: string;
   /** "Last 30 days: …", already worded. */
   done: string;
+};
+
+/** The status light on the avatar: green working, amber waiting on you, blue standing by, grey offline. */
+const STATUS_LIGHT: Record<AgentStatus, string> = {
+  working: "bg-[#22C55E]",
+  waiting: "bg-[#F59E0B]",
+  idle: "bg-[#60A5FA]",
+  offline: "bg-[#94A3B8]",
 };
 
 const STATUS_LABEL: Record<AgentStatus, { label: string; tone: string }> = {
@@ -42,7 +50,15 @@ export function InboxAgents({ agents }: { agents: InboxAgent[] }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-start gap-2.5" aria-live="polite">
-        <AgentGraphic name={agent.name} status={agent.status} size={36} />
+        <span className="relative shrink-0">
+          <AgentAvatar agentId={agent.id} size={36} />
+          <span
+            className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-zk-surface ${STATUS_LIGHT[agent.status]} ${
+              agent.status === "working" ? "motion-safe:animate-pulse" : ""
+            }`}
+            aria-hidden="true"
+          />
+        </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="truncate text-[13px] font-semibold text-zk-text">{agent.name}</span>

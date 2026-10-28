@@ -4,9 +4,8 @@ import { AGENT_LEVEL_LABELS } from "@/lib/agents/levels";
 import { agentActionLabel } from "@/lib/agent-audit/labels";
 import { LocalTime } from "@/components/local-time";
 import { RelativeTime } from "@/components/relative-time";
+import { AgentAvatar } from "@/components/agent-avatar";
 import {
-  agentAvatarColor,
-  agentInitials,
   agentsLink,
   agentsMutedClass,
   agentsSurface,
@@ -37,7 +36,16 @@ export type AgentActivityItem = {
 };
 
 /** Who the agent is: avatar, level, status, model, owner, dates and what it has done so far. */
-export function AgentProfileCard({ agent, title }: { agent: AgentProfileData; title: React.ReactNode }) {
+export function AgentProfileCard({
+  agent,
+  title,
+  settings = null,
+}: {
+  agent: AgentProfileData;
+  title: React.ReactNode;
+  /** Rename and level controls, for those who may change them. */
+  settings?: React.ReactNode;
+}) {
   const stats = [
     { label: "Issues filed", value: agent.counts.filed },
     { label: "Claims", value: agent.counts.claims },
@@ -46,12 +54,7 @@ export function AgentProfileCard({ agent, title }: { agent: AgentProfileData; ti
   return (
     <section className={`${agentsSurface} space-y-5 p-5 sm:p-6`} aria-label="Profile">
       <div className="flex items-start gap-4">
-        <span
-          className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-xl font-extrabold text-white ${agentAvatarColor(agent.id)}`}
-          aria-hidden="true"
-        >
-          {agentInitials(agent.name)}
-        </span>
+        <AgentAvatar agentId={agent.id} size={72} />
         <div className="min-w-0 space-y-1.5">
           {title}
           <div className="flex flex-wrap items-center gap-2">
@@ -94,6 +97,8 @@ export function AgentProfileCard({ agent, title }: { agent: AgentProfileData; ti
           <dd className="mt-0.5 text-zk-text">{agent.projects.length ? agent.projects.join(", ") : "None"}</dd>
         </div>
       </dl>
+
+      {settings ? <div className="border-t border-zk-divider pt-5">{settings}</div> : null}
 
       <dl className="grid grid-cols-3 gap-3">
         {stats.map((stat) => (

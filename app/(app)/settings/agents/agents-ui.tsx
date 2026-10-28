@@ -41,21 +41,6 @@ export function levelBadgeClass(level: AgentLevel): string {
   return `inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold ${LEVEL_BADGE[level]}`;
 }
 
-const AVATAR_COLORS = ["bg-electric-blue-strong", "bg-blue-slate", "bg-[#0F8A6A]", "bg-[#7C3AED]"];
-
-export function agentAvatarColor(seed: string): string {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = (hash + seed.charCodeAt(i) * (i + 1)) % AVATAR_COLORS.length;
-  return AVATAR_COLORS[hash] ?? AVATAR_COLORS[0];
-}
-
-export function agentInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return `${parts[0]![0] ?? ""}${parts[1]![0] ?? ""}`.toUpperCase();
-}
-
 /** Formats a pairing code as ABCD-2345 while typing. */
 export function formatPairingCode(value: string): string {
   const raw = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);

@@ -5,10 +5,13 @@ import { prisma } from "@/lib/prisma";
 import { isAgentPlatformEnabled } from "@/lib/feature-flags";
 import { AGENT_INSTRUCTIONS_MAX, AGENT_MESSAGE_MAX, listAgentThread } from "@/lib/agent-messages";
 import { auditWhere } from "@/lib/agent-audit/visibility";
+import { isTenantAdmin } from "@/lib/agents/membership";
+import { settableLevels } from "@/lib/agents/levels";
 import { currentTenantIdFor } from "@/lib/tenant-context";
 import { LocalTime } from "@/components/local-time";
 import { InstructionsForm, SendMessageForm } from "./message-forms";
 import { AgentActivity, AgentProfileCard, type AgentActivityItem, type AgentProfileData } from "./agent-profile";
+import { AgentSettingsForm } from "./agent-settings-form";
 import { agentsLink, agentsMutedClass, agentsSurface } from "@/app/(app)/settings/agents/agents-ui";
 
 export const metadata = { title: "Agent" };
@@ -59,7 +62,7 @@ async function findAgentIdByName(viewerId: string, rawName: string): Promise<str
 async function loadAgentProfile(
   agentId: string,
   viewerId: string,
-): Promise<{ agent: AgentProfileData; activity: AgentActivityItem[] } | null> {
+): Promise<{ agent: AgentProfileData; activity: AgentActivityItem[]; tenantId: string } | null> {
   const agent = await prisma.agent.findUnique({
     where: { id: agentId },
     select: {
@@ -104,6 +107,7 @@ async function loadAgentProfile(
   ];
 
   return {
+    tenantId: agent.tenantId,
     agent: {
       id: agent.id,
       name: agent.name,
@@ -127,7 +131,7 @@ async function loadAgentProfile(
   };
 }
 
-/** One agent's page, at /settings/agent/{name}: profile, activity, instructions and conversation. */
+/** One agent's page, at /settings/agent/{name}: profile, settings, activity, instructions and conversation. */
 export default async function AgentPage({ params }: { params: Promise<{ name: string }> }) {
   if (!isAgentPlatformEnabled()) notFound();
   const user = await requireUser();
@@ -138,6 +142,10 @@ export default async function AgentPage({ params }: { params: Promise<{ name: st
   if (!thread) notFound();
   const profile = await loadAgentProfile(agentId, user.id);
   if (!profile) notFound();
+  const levels = settableLevels({
+    isOwner: thread.isOwner,
+    isTenantAdmin: await isTenantAdmin(user, profile.tenantId),
+  });
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -149,6 +157,16 @@ export default async function AgentPage({ params }: { params: Promise<{ name: st
         agent={profile.agent}
         title={
           <h1 className="break-words text-3xl font-extrabold tracking-tight text-zk-text">{thread.agent.name}</h1>
+        }
+        settings={
+          thread.agent.revoked ? null : (
+            <AgentSettingsForm
+              agentId={agentId}
+              name={profile.agent.name}
+              level={profile.agent.level}
+              levels={levels}
+            />
+          )
         }
       />
 

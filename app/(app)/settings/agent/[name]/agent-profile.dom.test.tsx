@@ -22,6 +22,7 @@ describe("AgentProfileCard", () => {
   it("shows who the agent is and what it has done", () => {
     render(<AgentProfileCard agent={agent} title={<h1>Pixel</h1>} />);
     expect(screen.getByRole("heading", { name: "Pixel" })).toBeTruthy();
+    expect(screen.getByTestId("agent-avatar")).toBeTruthy();
     expect(screen.getByText("Contributor")).toBeTruthy();
     expect(screen.getByText("Active")).toBeTruthy();
     expect(screen.getByText("Claude")).toBeTruthy();

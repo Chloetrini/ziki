@@ -242,6 +242,45 @@ export async function setAgentLevel(actor: Actor, agentId: string, level: AgentL
   return { ok: true };
 }
 
+export type RenameResult = { ok: true; name: string } | { ok: false; error: string };
+
+/**
+ * Rename an agent, as its owner or a team admin. An owner keeps one agent per
+ * name in a workspace, because the agent's page is addressed by its name.
+ */
+export async function renameAgent(actor: Actor, agentId: string, input: unknown): Promise<RenameResult> {
+  const parsed = agentNameSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the agent's name." };
+  const managed = await managedAgent(actor, agentId);
+  if (!managed) return { ok: false, error: NOT_FOUND };
+  if (managed.agent.revokedAt) return { ok: false, error: "That agent is revoked." };
+  const name = parsed.data;
+  if (name === managed.agent.name) return { ok: true, name };
+
+  const taken = await prisma.agent.findFirst({
+    where: {
+      tenantId: managed.agent.tenantId,
+      ownerUserId: managed.agent.ownerUserId,
+      name: { equals: name, mode: "insensitive" },
+      id: { not: agentId },
+    },
+    select: { id: true },
+  });
+  if (taken) return { ok: false, error: `There's already an agent called “${name}”. Pick another name.` };
+
+  await prisma.$transaction(async (tx) => {
+    await tx.agent.update({ where: { id: agentId }, data: { name } });
+    await audit(
+      { agentId, tenantId: managed.agent.tenantId },
+      "agent.renamed",
+      `agent:${agentId}`,
+      { from: managed.agent.name, to: name, by: managed.isOwner ? "owner" : "tenant_admin" },
+      { actorUserId: actor.id, db: tx },
+    );
+  });
+  return { ok: true, name };
+}
+
 /** Save an agent's preferred areas for one project (#609). */
 export async function setAgentAreaPreferences(
   actor: Actor,

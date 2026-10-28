@@ -26,19 +26,9 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { copyText } from "@/lib/clipboard";
 import { RelativeTime } from "@/components/relative-time";
 import { FieldError, useFieldErrors } from "@/components/ui/field-errors";
-import { initialsOf } from "@/lib/header-nav";
-
-const AVATAR_PALETTE = ["#2E6FEF", "#263B63", "#0F8A6A", "#7C3AED", "#C2410C", "#0B1733"];
+import { AgentAvatar } from "@/components/agent-avatar";
 
 type UrlState = "empty" | "nothttps" | "invalid" | "ok";
-
-function avatarColor(seed: string): string {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i += 1) {
-    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
-  }
-  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
-}
 
 function classifyUrl(raw: string): UrlState {
   const u = raw.trim();
@@ -298,19 +288,12 @@ export function WebhookManagement() {
           ) : (
             <ul className="flex flex-col gap-3">
               {subscriptions.map((sub) => {
-                const color = avatarColor(sub.agent.id || sub.agent.name);
                 return (
                   <li
                     key={sub.id}
                     className="flex flex-wrap items-center gap-3.5 rounded-2xl border border-zk-border px-4 py-3.5"
                   >
-                    <span
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[13px] font-extrabold text-white"
-                      style={{ background: color }}
-                      aria-hidden="true"
-                    >
-                      {initialsOf(sub.agent.name)}
-                    </span>
+                    <AgentAvatar agentId={sub.agent.id} size={40} />
                     <div className="flex min-w-0 flex-[1_1_260px] flex-col gap-1">
                       <span className="text-sm font-bold text-zk-text">
                         {sub.agent.name}
@@ -489,7 +472,6 @@ export function WebhookManagement() {
                 >
                   {agents.map((agent) => {
                     const on = agentId === agent.id;
-                    const color = avatarColor(agent.id || agent.name);
                     return (
                       <button
                         key={agent.id}
@@ -503,13 +485,7 @@ export function WebhookManagement() {
                             : "m-px border border-zk-border bg-zk-surface"
                         }`}
                       >
-                        <span
-                          className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[10px] text-xs font-extrabold text-white"
-                          style={{ background: color }}
-                          aria-hidden="true"
-                        >
-                          {initialsOf(agent.name)}
-                        </span>
+                        <AgentAvatar agentId={agent.id} size={34} />
                         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                           <span className="truncate text-[13px] font-bold text-zk-text">
                             {agent.name}

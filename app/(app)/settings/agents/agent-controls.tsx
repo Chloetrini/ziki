@@ -224,8 +224,8 @@ export function AgentControls({
   }
 
   return (
-    <div className="flex flex-col gap-3 sm:items-end">
-      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
         <label htmlFor={`level-${agentId}`} className="sr-only">
           Level for {agentName}
         </label>
