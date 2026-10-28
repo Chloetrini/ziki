@@ -96,8 +96,36 @@ export interface GitHubClient {
   checksGreen(ref: PullRequestRef, headSha: string): Promise<boolean>;
   /** Merge `ref` pinned to `headSha`, the commit whose checks were verified. */
   mergePullRequest(ref: PullRequestRef, headSha: string): Promise<MergePullResult>;
+  /** Review threads CodeRabbit started that are not resolved yet. Throws when they can't be read. */
+  unresolvedCodeRabbitThreads(ref: PullRequestRef): Promise<number>;
   getPullRequestFiles?(ref: PullRequestRef): Promise<string[]>;
 }
+
+/** The login GitHub's GraphQL API reports for CodeRabbit's review comments. */
+export const CODERABBIT_LOGIN = "coderabbitai";
+
+/** Why a merge has to wait for CodeRabbit, with the number of open threads. */
+export function codeRabbitThreadsMessage(count: number): string {
+  const threads = count === 1 ? "1 unresolved review thread" : `${count} unresolved review threads`;
+  return `CodeRabbit has ${threads} on this pull request. Resolve them before merging.`;
+}
+
+// Whether a review thread is resolved is only available through GraphQL.
+const REVIEW_THREADS_QUERY = `query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { isResolved comments(first: 1) { nodes { author { login } } } }
+      }
+    }
+  }
+}`;
+
+type ReviewThreadsPage = {
+  pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+  nodes?: { isResolved?: boolean; comments?: { nodes?: { author?: { login?: string } | null }[] } }[];
+};
 
 export class GitHubError extends Error {}
 
@@ -260,6 +288,35 @@ export function createInstallationClient(
       const body = (await response.json()) as { merged?: boolean; sha?: string };
       return { merged: !!body.merged, sha: body.sha };
     },
+    async unresolvedCodeRabbitThreads(ref) {
+      // A thread is CodeRabbit's when CodeRabbit wrote its first comment.
+      // Fail closed: a page that can't be read throws, and the merge waits.
+      let open = 0;
+      let after: string | null = null;
+      for (;;) {
+        const response = await request("/graphql", {
+          method: "POST",
+          body: JSON.stringify({
+            query: REVIEW_THREADS_QUERY,
+            variables: { owner: ref.owner, repo: ref.repo, number: ref.number, after },
+          }),
+        });
+        if (!response.ok) throw new GitHubError("Could not read the pull request's review threads.");
+        const body = (await response.json()) as {
+          errors?: unknown[];
+          data?: { repository?: { pullRequest?: { reviewThreads?: ReviewThreadsPage } | null } | null };
+        };
+        const page = body.data?.repository?.pullRequest?.reviewThreads;
+        if (body.errors?.length || !page) throw new GitHubError("Could not read the pull request's review threads.");
+        for (const thread of page.nodes ?? []) {
+          const author = thread.comments?.nodes?.[0]?.author?.login?.toLowerCase() ?? "";
+          if (!thread.isResolved && author.startsWith(CODERABBIT_LOGIN)) open += 1;
+        }
+        if (!page.pageInfo?.hasNextPage) return open;
+        after = page.pageInfo.endCursor ?? null;
+        if (!after) throw new GitHubError("Could not read the pull request's review threads.");
+      }
+    },
   };
 }
 
@@ -302,6 +359,7 @@ export type MergeFailureReason =
   | "repo_mismatch"
   | "pull_request_changed"
   | "checks_failed"
+  | "review_threads"
   | "head_moved"
   | "no_permission"
   | "merge_failed"
@@ -546,6 +604,19 @@ export async function mergeAcceptedFix(
   if (!green) {
     await recordMergeFailure(agent, bug, "The pull request's checks are not green.", db);
     return fail(409, "checks_failed", "The pull request's required checks are not green.");
+  }
+
+  // Gate 3b: every review thread CodeRabbit opened is resolved.
+  let openThreads: number;
+  try {
+    openThreads = await client.unresolvedCodeRabbitThreads(ref);
+  } catch {
+    await recordMergeFailure(agent, bug, "GitHub could not be reached to read CodeRabbit's review threads.", db);
+    return fail(409, "merge_failed", "GitHub could not be reached to read CodeRabbit's review threads.");
+  }
+  if (openThreads > 0) {
+    await recordMergeFailure(agent, bug, codeRabbitThreadsMessage(openThreads), db);
+    return fail(409, "review_threads", codeRabbitThreadsMessage(openThreads));
   }
 
   // Gate 4: the app has permission to merge that repo. The merge is pinned to

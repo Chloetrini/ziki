@@ -4,7 +4,7 @@ import {
   issueChipBaseClass,
 } from "@/app/(app)/issues/[id]/issue-ui";
 
-export type ReviewStatus = "submitted" | "ready_to_merge" | "rejected" | "merged" | string;
+export type ReviewStatus = "submitted" | "ready_to_merge" | "rejected" | "merge_blocked" | "merge_failed" | "merged" | string;
 
 export function ReviewStatusBadge({
   status,
@@ -41,7 +41,7 @@ export function ReviewStatusBadge({
           <path strokeLinecap="round" strokeLinejoin="round" d="M16 17l5-5-5-5M19.8 12H9M10 3H6a2 2 0 00-2 2v14a2 2 0 002 2h4" />
         </svg>
       )}
-      {status === "rejected" && (
+      {(status === "rejected" || status === "merge_blocked" || status === "merge_failed") && (
         <svg
           className="h-3 w-3 shrink-0"
           fill="none"

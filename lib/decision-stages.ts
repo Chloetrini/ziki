@@ -152,7 +152,10 @@ export function currentDecisionStage(issue: {
   ideaAccepted: boolean;
 }): DecisionStage {
   if (issue.reviewStatus === "merged") return "live";
-  if (issue.reviewStatus === "ready_to_merge") return "ready";
+  // A blocked or failed merge is still waiting at Ready to merge.
+  if (issue.reviewStatus === "ready_to_merge" || issue.reviewStatus === "merge_blocked" || issue.reviewStatus === "merge_failed") {
+    return "ready";
+  }
   if (issue.pullRequestUrl || issue.reviewStatus === "submitted" || issue.reviewStatus === "rejected") return "done";
   if (issue.status === "resolved") return "live";
   if (issue.status === "in_progress" || issue.hasClaim || issue.ideaAccepted) return "open";

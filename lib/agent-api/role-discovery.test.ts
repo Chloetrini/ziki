@@ -92,12 +92,37 @@ describe("Role-based discovery functions", () => {
       expect(db.bug.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            reviewStatus: "ready_to_merge",
+            // A blocked or failed merge is still waiting on the admin merger.
+            reviewStatus: { in: ["ready_to_merge", "merge_blocked", "merge_failed"] },
           }),
         }),
       );
       expect(issues).toHaveLength(1);
       expect(issues[0].reviewStatus).toBe("ready_to_merge");
+    });
+
+    it("keeps a blocked merge on the list so it can be tried again", async () => {
+      db.bug.findMany.mockResolvedValue([
+        {
+          id: "bug-blocked",
+          number: 103,
+          title: "Blocked merge",
+          projectId: "p1",
+          pullRequestUrl: "https://github.com/org/repo/pull/3",
+          pullRequestHeadSha: "sha-3",
+          reviewStatus: "merge_blocked",
+          reporterId: "user-1",
+          beneficiaryUserId: "user-1",
+          createdByAgentId: null,
+          createdAt: new Date(),
+          claims: [],
+          testVerdicts: [],
+        },
+      ]);
+
+      const issues = await findReadyToMergeIssues(merger, "p1", 50, "ready_to_merge");
+      expect(issues).toHaveLength(1);
+      expect(issues[0].reviewStatus).toBe("merge_blocked");
     });
   });
 

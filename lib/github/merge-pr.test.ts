@@ -54,6 +54,7 @@ function fakeClient(overrides: Partial<GitHubClient> = {}): GitHubClient {
   return {
     getPullRequest: vi.fn(async () => ({ merged: false, mergeable: true, headSha: "head-sha" })),
     checksGreen: vi.fn(async () => true),
+    unresolvedCodeRabbitThreads: vi.fn(async () => 0),
     mergePullRequest: vi.fn(async () => ({ merged: true, sha: "merge-sha" })),
     ...overrides,
   };
@@ -244,6 +245,27 @@ describe("mergeAcceptedFix gates (#452)", () => {
     expect(db.agentEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ type: "github.merge_failed" }) }),
     );
+  });
+
+  it("does not merge while CodeRabbit has unresolved review threads", async () => {
+    const client = fakeClient({ unresolvedCodeRabbitThreads: vi.fn(async () => 1) });
+
+    const result = await mergeAcceptedFix(agent, "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, reason: "review_threads", message: expect.stringContaining("1 unresolved review thread") });
+    expect(client.mergePullRequest).not.toHaveBeenCalled();
+    expect(db.agentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ type: "github.merge_failed" }) }),
+    );
+  });
+
+  it("does not merge when CodeRabbit's review threads can't be read", async () => {
+    const client = fakeClient({ unresolvedCodeRabbitThreads: vi.fn(async () => { throw new Error("down"); }) });
+
+    const result = await mergeAcceptedFix(agent, "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, reason: "merge_failed" });
+    expect(client.mergePullRequest).not.toHaveBeenCalled();
   });
 
   it("does not merge when the checks are red, and tells the claim's person", async () => {
@@ -648,5 +670,68 @@ describe("mergePullRequest pins the head SHA and picks an allowed method (#492)"
     const result = await createInstallationClient("123", env).mergePullRequest(ref, "verified-sha");
 
     expect(result).toEqual({ merged: false, forbidden: true });
+  });
+});
+
+describe("unresolvedCodeRabbitThreads against the GitHub API", () => {
+  const ref = { owner: "zedu", repo: "web", number: 7 };
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const env: NodeJS.ProcessEnv = {
+    NODE_ENV: "test",
+    GITHUB_APP_ID: "123456",
+    GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: "pkcs1", format: "pem" }).toString(),
+  };
+  const graphqlUrl = "https://api.github.com/graphql";
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function thread(login: string | null, isResolved: boolean) {
+    return { isResolved, comments: { nodes: [{ author: login === null ? null : { login } }] } };
+  }
+
+  function page(nodes: unknown[], endCursor: string | null = null) {
+    return {
+      data: { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: endCursor !== null, endCursor }, nodes } } } },
+    };
+  }
+
+  it("counts only unresolved threads CodeRabbit started", async () => {
+    stubFetch((url) =>
+      tokenRoute(url) ??
+      (url === graphqlUrl
+        ? jsonResponse(page([thread("coderabbitai", false), thread("coderabbitai", true), thread("ada", false), thread(null, false)]))
+        : jsonResponse({}, false)),
+    );
+
+    await expect(createInstallationClient("123", env).unresolvedCodeRabbitThreads(ref)).resolves.toBe(1);
+  });
+
+  it("reads every page of threads", async () => {
+    const fetchMock = stubFetch((url, init) => {
+      const token = tokenRoute(url);
+      if (token) return token;
+      if (url !== graphqlUrl) return jsonResponse({}, false);
+      const { variables } = JSON.parse(String(init?.body)) as { variables: { after: string | null } };
+      return variables.after === null
+        ? jsonResponse(page([thread("coderabbitai", false)], "next"))
+        : jsonResponse(page([thread("coderabbitai", false)]));
+    });
+
+    await expect(createInstallationClient("123", env).unresolvedCodeRabbitThreads(ref)).resolves.toBe(2);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === graphqlUrl)).toHaveLength(2);
+  });
+
+  it("throws when GraphQL answers with errors, so the merge waits", async () => {
+    stubFetch((url) => tokenRoute(url) ?? (url === graphqlUrl ? jsonResponse({ errors: [{ message: "nope" }] }) : jsonResponse({}, false)));
+
+    await expect(createInstallationClient("123", env).unresolvedCodeRabbitThreads(ref)).rejects.toThrow();
+  });
+
+  it("throws when the request fails", async () => {
+    stubFetch((url) => tokenRoute(url) ?? jsonResponse({}, false));
+
+    await expect(createInstallationClient("123", env).unresolvedCodeRabbitThreads(ref)).rejects.toThrow();
   });
 });
