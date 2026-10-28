@@ -794,7 +794,11 @@ describe("acceptFix: a successful accept (#434)", () => {
     };
 
     const result = await executeAdminMerge(merger("m1", "mo", "admin_merger"), "bug1", { client });
-    expect(result).toMatchObject({ status: 409, missing: "deployment_verification" });
+    expect(result).toMatchObject({
+      status: 409,
+      missing: "deployment_verification",
+      message: "GitHub could not be reached to verify the pull request: network",
+    });
     expect(db.agentAuditEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ action: "github.merge_failed" }) }),
     );

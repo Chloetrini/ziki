@@ -148,7 +148,22 @@ export function createAppJwt(appId: string, privateKey: string, now: number = Da
   const signer = createSign("RSA-SHA256");
   signer.update(signingInput);
   signer.end();
-  const signature = signer.sign(privateKey);
+  let keyToSign = privateKey.trim();
+  if (
+    (keyToSign.startsWith('"') && keyToSign.endsWith('"')) ||
+    (keyToSign.startsWith("'") && keyToSign.endsWith("'"))
+  ) {
+    keyToSign = keyToSign.slice(1, -1).trim();
+  }
+  if (keyToSign.includes("\\n")) {
+    keyToSign = keyToSign.replace(/\\n/g, "\n");
+  }
+  let signature: Buffer;
+  try {
+    signature = signer.sign(keyToSign);
+  } catch (err) {
+    throw new GitHubError(`GitHub App private key signing failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
   return `${signingInput}.${signature.toString("base64url")}`;
 }
 
@@ -175,7 +190,11 @@ export function createInstallationClient(
         "user-agent": "ziki-issues",
       },
     });
-    if (!response.ok) throw new GitHubError("Could not mint an installation token.");
+    if (!response.ok) {
+      const errBody = (await response.json().catch(() => null)) as { message?: string } | null;
+      const detail = errBody?.message ? `: ${errBody.message}` : ` (HTTP ${response.status})`;
+      throw new GitHubError(`Could not mint an installation token${detail}.`);
+    }
     const body = (await response.json()) as { token?: string };
     if (!body.token) throw new GitHubError("GitHub returned no installation token.");
     token = body.token;
@@ -198,7 +217,11 @@ export function createInstallationClient(
   return {
     async getPullRequest(ref) {
       const response = await request(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`);
-      if (!response.ok) throw new GitHubError("Could not read the pull request.");
+      if (!response.ok) {
+        const errBody = (await response.json().catch(() => null)) as { message?: string } | null;
+        const detail = errBody?.message ? `: ${errBody.message}` : ` (HTTP ${response.status})`;
+        throw new GitHubError(`Could not read the pull request${detail}.`);
+      }
       const body = (await response.json()) as {
         state?: string;
         merged?: boolean;
@@ -570,9 +593,11 @@ export async function mergeAcceptedFix(
   let pullRequest: PullRequest;
   try {
     pullRequest = await client.getPullRequest(ref);
-  } catch {
-    await recordMergeFailure(agent, bug, "GitHub could not be reached.", db);
-    return fail(409, "merge_failed", "GitHub could not be reached.");
+  } catch (error) {
+    const detail = error instanceof Error && error.message ? error.message : "GitHub could not be reached.";
+    const message = detail.startsWith("GitHub could not be reached") ? detail : `GitHub could not be reached: ${detail}`;
+    await recordMergeFailure(agent, bug, message, db);
+    return fail(409, "merge_failed", message);
   }
 
   // Gate 2a (#642): a pull request closed without merging cannot be merged.

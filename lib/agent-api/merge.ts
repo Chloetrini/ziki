@@ -452,8 +452,12 @@ export async function acceptFix(
   let pullRequest: PullRequest;
   try {
     pullRequest = await ghClient.getPullRequest(ref);
-  } catch {
-    return stop(MERGE_BLOCKED, "deployment_verification", "GitHub could not be reached to verify the pull request.");
+  } catch (error) {
+    const detail = error instanceof Error && error.message ? error.message : "GitHub could not be reached to verify the pull request.";
+    const message = detail.startsWith("GitHub could not be reached")
+      ? detail
+      : `GitHub could not be reached to verify the pull request: ${detail}`;
+    return stop(MERGE_BLOCKED, "deployment_verification", message);
   }
 
   if (pullRequest.state === "closed" && !pullRequest.merged) {
@@ -490,8 +494,12 @@ export async function acceptFix(
     let openThreads: number;
     try {
       openThreads = await ghClient.unresolvedCodeRabbitThreads(ref);
-    } catch {
-      return stop(MERGE_BLOCKED, "review_threads", "GitHub could not be reached to read CodeRabbit's review threads.");
+    } catch (error) {
+      const detail = error instanceof Error && error.message ? error.message : "GitHub could not be reached to read CodeRabbit's review threads.";
+      const message = detail.startsWith("GitHub could not be reached")
+        ? detail
+        : `GitHub could not be reached to read CodeRabbit's review threads: ${detail}`;
+      return stop(MERGE_BLOCKED, "review_threads", message);
     }
     if (openThreads > 0) {
       return stop(MERGE_BLOCKED, "review_threads", codeRabbitThreadsMessage(openThreads));
