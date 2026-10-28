@@ -21,6 +21,11 @@ export const SWITCH_TENANT_LINK: HeaderNavItem = { href: "/tenants", label: "Swi
 /** Manage agents: the person's own agents, on a page of its own outside Settings. */
 export const MANAGE_AGENTS_HREF = "/agents";
 
+/** One agent's own page, addressed by its name. Agents in the Agents menu open here. */
+export function agentPageHref(agentName: string): string {
+  return `/settings/agent/${encodeURIComponent(agentName)}`;
+}
+
 /** Create agent: the connect flow that registers a new agent. */
 export const CREATE_AGENT_HREF = "/settings/connect";
 

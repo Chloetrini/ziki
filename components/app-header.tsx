@@ -9,7 +9,7 @@ import { WorkspaceSwitcher, type WorkspaceChoice } from "@/components/workspace-
 import {
   AGENT_MENU_LINKS,
   CREATE_AGENT_HREF,
-  MANAGE_AGENTS_HREF,
+  agentPageHref,
   headerNavItems,
   initialsOf,
   isNavItemActive,
@@ -321,7 +321,7 @@ function AgentsMenu({ pathname, agents }: { pathname: string | null; agents: She
           {agents.map((agent) => (
             <Link
               key={agent.id}
-              href={MANAGE_AGENTS_HREF}
+              href={agentPageHref(agent.name)}
               onClick={() => setOpen(false)}
               className="flex min-h-11 items-center gap-2.5 rounded-[10px] px-2.5 text-left text-zk-text"
             >

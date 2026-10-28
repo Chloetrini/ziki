@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import type { AgentLevel } from "@prisma/client";
-import { AGENT_LEVEL_LABELS, AGENT_LEVELS } from "@/lib/agents/levels";
+import { AGENT_LEVEL_LABELS } from "@/lib/agents/levels";
 import { LocalTime } from "@/components/local-time";
 import { RelativeTime } from "@/components/relative-time";
 import { AgentControls } from "./agent-controls";
@@ -17,8 +17,6 @@ import {
   agentsSurface,
   levelBadgeClass,
 } from "./agents-ui";
-
-type FilterId = "all" | AgentLevel;
 
 export type ManageAgentItem = {
   id: string;
@@ -40,7 +38,6 @@ export type ManageAgentItem = {
     projectName: string | null;
     lastUsedAt: string | null;
   }[];
-  areaPreferences: { projectId: string; projectAreaId: string }[];
 };
 
 export function ManageAgentsList({
@@ -49,7 +46,6 @@ export function ManageAgentsList({
   maxActive,
   levels,
   projects,
-  areas,
   now,
   canSetBurst,
 }: {
@@ -58,27 +54,12 @@ export function ManageAgentsList({
   maxActive: number;
   levels: AgentLevel[];
   projects: AgentProjectChoice[];
-  areas: { id: string; name: string; projectId: string }[];
   now: string;
   canSetBurst: boolean;
 }) {
-  const [filter, setFilter] = useState<FilterId>("all");
   const [query, setQuery] = useState("");
 
-  const covered = useMemo(() => {
-    const set = new Set(agents.filter((a) => !a.revokedAt).map((a) => a.level));
-    return AGENT_LEVELS.map((level) => ({ level, on: set.has(level) }));
-  }, [agents]);
-
-  const tabs: { id: FilterId; label: string }[] = [
-    { id: "all", label: "All" },
-    { id: "contributor", label: "Contributor" },
-    { id: "triager", label: "Triager" },
-    { id: "reviewer", label: "Reviewer" },
-  ];
-
   const visible = agents.filter((agent) => {
-    if (filter !== "all" && agent.level !== filter) return false;
     if (!query.trim()) return true;
     const q = query.trim().toLowerCase();
     return (
@@ -110,23 +91,6 @@ export function ManageAgentsList({
             />
           </div>
         </div>
-        <div className={`${agentsSurface} p-4`}>
-          <p className="text-xs font-bold uppercase tracking-[0.06em] text-zk-muted">Roles covered</p>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {covered.map(({ level, on }) => (
-              <span
-                key={level}
-                className={
-                  on
-                    ? levelBadgeClass(level)
-                    : "inline-flex items-center rounded-full border border-dashed border-zk-border px-2.5 py-0.5 text-xs font-bold text-zk-muted"
-                }
-              >
-                {AGENT_LEVEL_LABELS[level]}
-              </span>
-            ))}
-          </div>
-        </div>
       </div>
 
       {legacyCount > 0 ? (
@@ -152,32 +116,11 @@ export function ManageAgentsList({
             className="h-11 w-full rounded-full border border-zk-border bg-zk-surface px-4 text-sm text-zk-text placeholder:text-zk-muted focus:border-electric-blue focus:outline-none focus:ring-2 focus:ring-electric-blue/20"
           />
         </label>
-        <div role="tablist" aria-label="Filter by role" className="inline-flex flex-wrap gap-1 rounded-full bg-zk-seg p-1">
-          {tabs.map((tab) => {
-            const on = filter === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                aria-selected={on}
-                onClick={() => setFilter(tab.id)}
-                className={`min-h-[34px] rounded-full px-3.5 text-[13px] transition ${
-                  on
-                    ? "bg-zk-surface font-bold text-zk-text shadow-sm"
-                    : "font-medium text-zk-text2 hover:text-zk-text"
-                }`}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
       </div>
 
       {visible.length === 0 ? (
         <p className={`${agentsMutedClass} ${agentsSurface} p-6`}>
-          {agents.length === 0 ? "No agents yet." : "No agents with this role yet."}
+          {agents.length === 0 ? "No agents yet." : "No agents match your search."}
         </p>
       ) : (
         <ul className="space-y-3">
@@ -282,8 +225,6 @@ export function ManageAgentsList({
                         burstUntil={agent.burstUntil}
                         now={now}
                         canSetBurst={canSetBurst}
-                        areas={areas}
-                        areaPreferences={agent.areaPreferences}
                       />
                     )}
                   </div>

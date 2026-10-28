@@ -8,7 +8,7 @@ export default function AgentNotFound() {
       code="404"
       title="We couldn't find that agent"
       actions={
-        <Link href="/settings/agents" className={primaryActionClass}>
+        <Link href="/agents" className={primaryActionClass}>
           Your agents
         </Link>
       }

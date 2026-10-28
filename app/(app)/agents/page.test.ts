@@ -25,6 +25,29 @@ describe("My agents page", () => {
     expect(source).toMatch(/ownerUserId: user\.id/);
   });
 
+  it("keeps the page to the agent list: no role write-up, audit log button or Levels card", () => {
+    expect(source).not.toContain("SEPARATE_LEVEL_AGENTS");
+    expect(source).not.toContain("/settings/audit");
+    expect(source).not.toContain("levels-heading");
+  });
+
+  it("has no role filter tabs or preferred areas on the list", () => {
+    const list = readFileSync(join(__dirname, "../settings/agents/manage-agents-list.tsx"), "utf8");
+    const controls = readFileSync(join(__dirname, "../settings/agents/agent-controls.tsx"), "utf8");
+    expect(list).not.toContain("Filter by role");
+    expect(list).not.toContain("areas");
+    expect(controls).not.toContain("Preferred areas");
+    expect(source).not.toContain("projectArea");
+  });
+
+  it("has no Roles covered card or per-agent project dropdown", () => {
+    const list = readFileSync(join(__dirname, "../settings/agents/manage-agents-list.tsx"), "utf8");
+    const controls = readFileSync(join(__dirname, "../settings/agents/agent-controls.tsx"), "utf8");
+    expect(list).not.toContain("Roles covered");
+    expect(controls).not.toContain("Project for the new key");
+    expect(controls).not.toContain("setProjectId");
+  });
+
   it("links to Create agent through a single constant", () => {
     expect(source).toMatch(/const CREATE_AGENT_HREF = "/);
     expect(source).toMatch(/href=\{CREATE_AGENT_HREF\}/);

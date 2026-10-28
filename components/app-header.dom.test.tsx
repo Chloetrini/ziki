@@ -199,6 +199,19 @@ describe("account menu role switch", () => {
     expect(screen.getByRole("link", { name: "Ziki" }).getAttribute("href")).toBe("/dashboard");
   });
 
+  it("opens each agent in the Agents menu on that agent's own page", async () => {
+    const user = userEvent.setup();
+    renderHeader({
+      agents: [
+        { id: "agent_1", name: "Pixel", level: "contributor" },
+        { id: "agent_2", name: "Scout Two", level: "reviewer" },
+      ],
+    });
+    await user.click(screen.getByRole("button", { name: "Agents" }));
+    expect(screen.getByRole("link", { name: /Pixel/ }).getAttribute("href")).toBe("/settings/agent/Pixel");
+    expect(screen.getByRole("link", { name: /Scout Two/ }).getAttribute("href")).toBe("/settings/agent/Scout%20Two");
+  });
+
   it("sends Manage agents and Create agent to separate pages", async () => {
     const user = userEvent.setup();
     renderHeader();

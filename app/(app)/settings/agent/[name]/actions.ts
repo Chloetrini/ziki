@@ -10,6 +10,9 @@ export type AgentMessageActionResult = { ok: true } | { ok: false; error: string
 
 const PLATFORM_OFF = "The agent platform is turned off on this site.";
 
+/** The agent's page, addressed by its name. */
+const AGENT_PAGE = "/settings/agent/[name]";
+
 function agentIdFrom(formData: FormData): string | null {
   const agentId = formData.get("agentId");
   return typeof agentId === "string" && agentId ? agentId : null;
@@ -25,7 +28,7 @@ export async function sendAgentMessageAction(
   const user = await requireUser();
   const result = await sendAgentMessage(user, agentId, { body: formData.get("body") ?? "" });
   if (!result.ok) return result;
-  revalidatePath(`/settings/agents/${agentId}/messages`);
+  revalidatePath(AGENT_PAGE, "page");
   return { ok: true };
 }
 
@@ -39,6 +42,6 @@ export async function setAgentInstructionsAction(
   const user = await requireUser();
   const result = await setAgentInstructions(user, agentId, { instructions: formData.get("instructions") ?? "" });
   if (!result.ok) return result;
-  revalidatePath(`/settings/agents/${agentId}/messages`);
+  revalidatePath(AGENT_PAGE, "page");
   return { ok: true };
 }

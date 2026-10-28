@@ -1,14 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
-import {
-  AGENT_LEVEL_DESCRIPTIONS,
-  AGENT_LEVEL_LABELS,
-  AGENT_LEVELS,
-  OWNER_REVIEW_LIMIT,
-  SEPARATE_LEVEL_AGENTS,
-  settableLevels,
-} from "@/lib/agents/levels";
+import { settableLevels } from "@/lib/agents/levels";
 import { MAX_ACTIVE_AGENTS_PER_OWNER } from "@/lib/agents/registry-limits";
 import { isTenantAdminRole } from "@/lib/agents/membership";
 import { projectContextFor } from "@/lib/project-context";
@@ -80,41 +73,33 @@ export default async function AgentsPage() {
       console.error("[agents] approved agents were not listed", error);
     }
   }
-  const [mine, areas] = tenantId
-    ? await Promise.all([
-        prisma.agent.findMany({
-          where: { ownerUserId: user.id, tenantId },
-          orderBy: [{ revokedAt: { sort: "desc", nulls: "first" } }, { createdAt: "desc" }],
-          select: {
-            id: true,
-            name: true,
-            model: true,
-            level: true,
-            burst: true,
-            burstUntil: true,
-            createdAt: true,
-            revokedAt: true,
-            defaultProjectId: true,
-            apiKeys: {
-              where: { revokedAt: null },
-              select: {
-                id: true,
-                prefix: true,
-                sealedKey: true,
-                lastUsedAt: true,
-                project: { select: { id: true, name: true } },
-              },
+  const mine = tenantId
+    ? await prisma.agent.findMany({
+        where: { ownerUserId: user.id, tenantId },
+        orderBy: [{ revokedAt: { sort: "desc", nulls: "first" } }, { createdAt: "desc" }],
+        select: {
+          id: true,
+          name: true,
+          model: true,
+          level: true,
+          burst: true,
+          burstUntil: true,
+          createdAt: true,
+          revokedAt: true,
+          defaultProjectId: true,
+          apiKeys: {
+            where: { revokedAt: null },
+            select: {
+              id: true,
+              prefix: true,
+              sealedKey: true,
+              lastUsedAt: true,
+              project: { select: { id: true, name: true } },
             },
-            areaPreferences: { select: { projectAreaId: true, projectArea: { select: { projectId: true } } } },
           },
-        }),
-        prisma.projectArea.findMany({
-          where: { projectId: { in: projects.map((project) => project.id) } },
-          orderBy: [{ projectId: "asc" }, { name: "asc" }],
-          select: { id: true, name: true, projectId: true },
-        }),
-      ])
-    : [[], []];
+        },
+      })
+    : [];
 
   const ownLevels = settableLevels({ isOwner: true, isTenantAdmin: isAdmin });
   const activeCount = mine.filter((agent) => !agent.revokedAt).length;
@@ -144,10 +129,6 @@ export default async function AgentsPage() {
         projectName: key.project?.name ?? null,
         lastUsedAt: key.lastUsedAt ? key.lastUsedAt.toISOString() : null,
       })),
-      areaPreferences: agent.areaPreferences.map((preference) => ({
-        projectId: preference.projectArea.projectId,
-        projectAreaId: preference.projectAreaId,
-      })),
     };
   });
 
@@ -165,18 +146,11 @@ export default async function AgentsPage() {
             <Link href="/activity" className={agentsSecondaryBtn}>
               Activity &amp; Approvals
             </Link>
-            <Link href="/settings/audit" className={agentsSecondaryBtn}>
-              Agent audit log
-            </Link>
             <Link href={CREATE_AGENT_HREF} className={agentsPrimaryBtn}>
               Create agent
             </Link>
           </div>
         </div>
-        <p className="text-sm text-zk-text2">
-          {SEPARATE_LEVEL_AGENTS} You can keep {MAX_ACTIVE_AGENTS_PER_OWNER} active agents in this workspace.{" "}
-          {OWNER_REVIEW_LIMIT}
-        </p>
       </div>
 
       {!tenantId ? (
@@ -191,46 +165,24 @@ export default async function AgentsPage() {
           </div>
         </div>
       ) : (
-        <>
-          <section aria-labelledby="mine-heading" className="space-y-3">
-            <h2 id="mine-heading" className="sr-only">
-              Your agents
-            </h2>
-            {mine.length === 0 ? (
-              <FirstAgentEmptyState />
-            ) : (
-              <ManageAgentsList
-                agents={manageItems}
-                activeCount={activeCount}
-                maxActive={MAX_ACTIVE_AGENTS_PER_OWNER}
-                levels={ownLevels}
-                projects={projects}
-                areas={areas}
-                now={now.toISOString()}
-                canSetBurst={isAdmin}
-              />
-            )}
-          </section>
-
-          <section className={`${agentsSurface} p-4 sm:p-6`} aria-labelledby="levels-heading">
-            <h2 id="levels-heading" className="text-sm font-bold uppercase tracking-[0.06em] text-zk-muted">
-              Levels
-            </h2>
-            <dl className="mt-3 space-y-2 text-sm">
-              {AGENT_LEVELS.map((level) => (
-                <div key={level} className="sm:flex sm:gap-3">
-                  <dt className="font-semibold text-zk-text sm:w-28">{AGENT_LEVEL_LABELS[level]}</dt>
-                  <dd className="text-zk-text2">{AGENT_LEVEL_DESCRIPTIONS[level]}</dd>
-                </div>
-              ))}
-            </dl>
-            <p className="mt-3 text-xs text-zk-muted">
-              New agents start as observers. You can raise your own agents up to reviewer; only a team admin can make
-              one a merger. Give each level its own agent. {OWNER_REVIEW_LIMIT} Each agent may make 30 writes an hour,
-              including reviews. An admin can turn on a higher budget of 400 writes an hour.
-            </p>
-          </section>
-        </>
+        <section aria-labelledby="mine-heading" className="space-y-3">
+          <h2 id="mine-heading" className="sr-only">
+            Your agents
+          </h2>
+          {mine.length === 0 ? (
+            <FirstAgentEmptyState />
+          ) : (
+            <ManageAgentsList
+              agents={manageItems}
+              activeCount={activeCount}
+              maxActive={MAX_ACTIVE_AGENTS_PER_OWNER}
+              levels={ownLevels}
+              projects={projects}
+              now={now.toISOString()}
+              canSetBurst={isAdmin}
+            />
+          )}
+        </section>
       )}
     </div>
   );

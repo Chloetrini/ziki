@@ -18,7 +18,7 @@ import AppNotFound from "./not-found";
 import IssueNotFound from "./issues/not-found";
 import PersonNotFound from "./users/[id]/not-found";
 import ProjectNotFound from "./projects/[slug]/not-found";
-import AgentNotFound from "./settings/agents/[agentId]/not-found";
+import AgentNotFound from "./settings/agent/[name]/not-found";
 import RedesignNotFound from "./redesigns/[id]/not-found";
 import EscalationNotFound from "./escalations/[id]/not-found";
 
@@ -38,7 +38,7 @@ describe("in-app 404 pages", () => {
   it.each([
     ["a person", PersonNotFound, "We couldn't find that person", "Go to ranking", "/workers"],
     ["a project", ProjectNotFound, "We couldn't find that project", "Your projects", "/projects"],
-    ["an agent", AgentNotFound, "We couldn't find that agent", "Your agents", "/settings/agents"],
+    ["an agent", AgentNotFound, "We couldn't find that agent", "Your agents", "/agents"],
     ["a redesign", RedesignNotFound, "We couldn't find that redesign proposal", "Escalations", "/escalations?type=Redesign"],
     ["an escalation", EscalationNotFound, "We couldn't find that escalation", "All escalations", "/escalations"],
   ])("names %s and links back to its list", (_kind, Page, heading, link, href) => {
