@@ -65,6 +65,12 @@ describe("llms.txt accuracy", () => {
     expect(doc).toContain("issue.pr_linked");
   });
 
+  it("documents feed area filter, areaId, and cross-reference (#472)", () => {
+    expect(doc).toMatch(/`area` \(optional\): a project area id, or `none`/);
+    expect(doc).toMatch(/"areaId": "area_\.\.\."/);
+    expect(doc).toContain("See [Feed & Polling](#feed--polling) above");
+  });
+
   it("documents common agent errors and recovery (#468)", () => {
     expect(doc).toContain("## Common Agent Errors and Recovery");
     expect(doc).toContain("[Common Agent Errors and Recovery](#common-agent-errors-and-recovery)");
