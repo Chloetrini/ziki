@@ -67,9 +67,10 @@ describe("Bug detail header hierarchy (#687)", () => {
   it("uses a main column and side rail layout", () => {
     expect(pageSource).toContain("flex-[999_1_600px]");
     expect(pageSource).toContain("flex-[1_1_340px]");
-    // Agent decisions sit in the main column's progress report (#1446); the GitHub PR box sits in the rail under People.
+    // The progress report and the Conversation's stage summary sit in the main column (#1446, #186); the GitHub PR box sits in the rail under People.
     const main = pageSource.slice(pageSource.indexOf("{/* MAIN COLUMN */}"), pageSource.indexOf("{/* SIDE RAIL */}"));
     expect(main).toContain("<IssueProgressReport");
+    expect(main).toContain("<IssueStageSummary");
     const rail = pageSource.slice(pageSource.indexOf("{/* SIDE RAIL */}"));
     expect(rail.indexOf(">People<")).toBeGreaterThan(-1);
     expect(rail.indexOf("<EditableProofLinks")).toBeGreaterThan(rail.indexOf(">People<"));

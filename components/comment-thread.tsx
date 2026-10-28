@@ -530,23 +530,8 @@ export function CommentThread({
 
   return (
     <div className={`issue-detail-scope mt-0 space-y-4${stage ? " issue-progress" : ""}`}>
-      {stage ? (
-        // #1446: the design's stage chip and tabs, shown even while the stage is empty.
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="chip cn stage-pill">{decisionStageInfo[stage].label} stage</span>
-          {filters.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              aria-pressed={typeFilter === tab.id}
-              onClick={() => setTypeFilter(tab.id)}
-              className={`ctab${typeFilter === tab.id ? " cur" : ""}`}
-            >
-              {tab.label} <span className="n">{countFor(tab.id)}</span>
-            </button>
-          ))}
-        </div>
-      ) : comments.length > 0 ? (
+      {/* #186: with a stage picked, the stage summary above the thread replaces the type tabs. */}
+      {!stage && comments.length > 0 ? (
         <div className="flex flex-wrap items-center gap-1.5">
           {filters.map((tab) => {
             const on = typeFilter === tab.id;
@@ -583,13 +568,7 @@ export function CommentThread({
             <StageIcon name={stageIconName[stage]} />
           </span>
           <span className="text-[13px] leading-normal text-zk-muted">
-            {stageComments.length === 0 ? (
-              <>
-                No comments at the <b className="text-zk-text">{decisionStageInfo[stage].label}</b> stage yet.
-              </>
-            ) : (
-              "No timeline entries match this filter."
-            )}
+            No comments at the <b className="text-zk-text">{decisionStageInfo[stage].label}</b> stage yet.
           </span>
         </div>
       ) : comments.length === 0 && !readOnly ? (

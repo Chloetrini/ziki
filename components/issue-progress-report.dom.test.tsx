@@ -19,6 +19,7 @@ vi.mock("@/components/comment-form", () => ({
 
 import { IssueProgressReport } from "./issue-progress-report";
 import { IssueStageProvider } from "./issue-stage-context";
+import { IssueStageSummary } from "./issue-stage-summary";
 import { StageCommentThread, StageConversationCount } from "./stage-comment-thread";
 
 afterEach(cleanup);
@@ -56,16 +57,28 @@ const comments = [
   comment("k4", "comment", "Plain comment after the claim", "2026-10-22T16:30:00.000Z"),
 ];
 
-function renderPage(list: AgentDecision[], stage: DecisionStage, threadComments = comments) {
+function renderPage(
+  list: AgentDecision[],
+  stage: DecisionStage,
+  threadComments = comments,
+  { setback = false, pullRequestUrl = null as string | null } = {},
+) {
   const starts = stageStarts(list);
   const counts: Record<DecisionStage, number> = { idea: 0, open: 0, done: 0, ready: 0, live: 0 };
   for (const c of threadComments) counts[stageOfComment(c.type, c.createdAt, starts)] += 1;
   return render(
     <IssueStageProvider initialStage={stage}>
-      <IssueProgressReport decisions={list} currentStage={stage} commentCounts={counts} />
+      <IssueProgressReport decisions={list} currentStage={stage} setback={setback} commentCounts={counts} />
       <h2>
         Conversation <span data-testid="conv-count"><StageConversationCount counts={counts} fallback={threadComments.length} /></span>
       </h2>
+      <IssueStageSummary
+        decisions={list}
+        currentStage={stage}
+        setback={setback}
+        pullRequestUrl={pullRequestUrl}
+        severity="medium"
+      />
       <StageCommentThread
         bugId="b1"
         issueUrl="https://example.com/issues/1"
@@ -79,20 +92,19 @@ function renderPage(list: AgentDecision[], stage: DecisionStage, threadComments 
   );
 }
 
-const decisionsCard = () => within(screen.getByRole("region", { name: /Agent decisions/ }));
+const summary = (label: string) => within(screen.getByRole("group", { name: `${label} stage update` }));
 const stageButton = (label: RegExp) => screen.getByRole("button", { name: label });
 
 describe("IssueProgressReport (#1446)", () => {
-  it("opens on the active stage with its decision cards and comments only", () => {
+  it("opens on the active stage with its summary and comments only", () => {
     renderPage(decisions, "done");
 
     expect(stageButton(/^Done/)).toHaveAttribute("aria-pressed", "true");
     expect(stageButton(/^Idea/)).toHaveAttribute("aria-pressed", "false");
 
-    expect(decisionsCard().getByText("Good to merge")).toBeInTheDocument();
-    expect(decisionsCard().getByText("Not good to merge")).toBeInTheDocument();
-    expect(decisionsCard().getAllByText("agent")).toHaveLength(2);
-    expect(decisionsCard().queryByText("Confirmed")).not.toBeInTheDocument();
+    expect(summary("Done").getByText("1 Good to merge")).toBeInTheDocument();
+    expect(summary("Done").getByText("1 Not good to merge")).toBeInTheDocument();
+    expect(summary("Done").queryByText(/Confirmed/)).not.toBeInTheDocument();
 
     expect(screen.getByText("Fix review comment")).toBeInTheDocument();
     expect(screen.queryByText("Idea review comment")).not.toBeInTheDocument();
@@ -107,20 +119,30 @@ describe("IssueProgressReport (#1446)", () => {
     expect(screen.getByText("Ready to merge: 1 positive, 1 negative")).toBeInTheDocument();
   });
 
-  it("lists merger and admin-merger decisions under Agent decisions", () => {
-    renderPage(decisions, "live");
-    expect(decisionsCard().getByText("Deployed")).toBeInTheDocument();
-    fireEvent.click(stageButton(/^Ready to merge/));
-    expect(decisionsCard().getByText("Ready to merge")).toBeInTheDocument();
-    expect(decisionsCard().getByText("Deployment failed")).toBeInTheDocument();
-    expect(decisionsCard().getByText("Deployment failed: The migration timed out.")).toBeInTheDocument();
+  it("has no Agent decisions card or stage footer any more (#186)", () => {
+    renderPage(decisions, "done");
+    expect(screen.queryByRole("region", { name: /Agent decisions/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Testing logs and good / not good to merge verdicts")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^All/ })).not.toBeInTheDocument();
   });
 
-  it("puts a plain comment in the stage it was posted in and switches both cards", () => {
+  it("summarises merger and admin-merger decisions under their stages", () => {
+    renderPage(decisions, "live");
+    expect(summary("Live").getByText("1 Deployed")).toBeInTheDocument();
+    expect(summary("Live").getByText("Merged and deployed.")).toBeInTheDocument();
+    fireEvent.click(stageButton(/^Ready to merge/));
+    expect(summary("Ready to merge").getByText("1 Ready to merge")).toBeInTheDocument();
+    expect(summary("Ready to merge").getByText("1 Deployment failed")).toBeInTheDocument();
+    expect(
+      summary("Ready to merge").getByText("Merger agent marked it ready to merge. 1 deployment failed."),
+    ).toBeInTheDocument();
+  });
+
+  it("puts a plain comment in the stage it was posted in and switches the summary", () => {
     renderPage(decisions, "done");
     fireEvent.click(stageButton(/^Open/));
 
-    expect(decisionsCard().getByText("Claimed")).toBeInTheDocument();
+    expect(summary("Open").getByText("1 Claimed")).toBeInTheDocument();
     expect(screen.getByText("Plain comment after the claim")).toBeInTheDocument();
     expect(screen.getByText("Bid comment")).toBeInTheDocument();
     expect(screen.queryByText("Fix review comment")).not.toBeInTheDocument();
@@ -132,12 +154,65 @@ describe("IssueProgressReport (#1446)", () => {
 
     expect(stageButton(/^Idea/)).toHaveTextContent("0 logs");
     expect(stageButton(/^Live/)).toHaveTextContent("not yet");
-    expect(decisionsCard().getByText("No idea reviews yet")).toBeInTheDocument();
-    expect(decisionsCard().getByText("Reviewer agents confirm or reject the idea here.")).toBeInTheDocument();
+    expect(summary("Idea").getByText("Reviewer agents confirm or reject the idea here.")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("No comments at the Idea stage yet.");
-    // The stage chip and tabs stay visible while empty.
-    expect(screen.getByText("Idea stage", { selector: ".stage-pill" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^All/ })).toBeInTheDocument();
     expect(screen.getByTestId("conv-count")).toHaveTextContent("0");
+  });
+});
+
+describe("IssueStageSummary (#186)", () => {
+  it("marks each stage Complete, In progress or Not reached against the current one", () => {
+    renderPage(decisions, "done");
+    expect(summary("Done").getByText("In progress")).toBeInTheDocument();
+    fireEvent.click(stageButton(/^Idea/));
+    expect(summary("Idea").getByText("Complete")).toBeInTheDocument();
+    fireEvent.click(stageButton(/^Live/));
+    expect(summary("Live").getByText("Not reached")).toBeInTheDocument();
+  });
+
+  it("says Sent back after a setback, with what has to happen next", () => {
+    renderPage(decisions, "done", comments, { setback: true });
+    const done = summary("Done");
+    expect(done.getByText("Sent back")).toBeInTheDocument();
+    expect(done.getByText("1 agent said good to merge, 1 agent said not good to merge. Sent back for changes.")).toBeInTheDocument();
+    expect(done.getByText("Pending")).toBeInTheDocument();
+    expect(done.getByText("Fix the findings and resubmit the pull request")).toBeInTheDocument();
+  });
+
+  it("summarises the Idea stage with counts, severity and the latest decision", () => {
+    renderPage(decisions, "idea");
+    const idea = summary("Idea");
+    expect(idea.getByText("Confirmed as a real issue by 1 agent, severity Medium. 1 agent rejected it.")).toBeInTheDocument();
+    expect(idea.getByText("1 Confirmed")).toBeInTheDocument();
+    expect(idea.getByText("1 Rejected")).toBeInTheDocument();
+    // Latest is the newest by time, not by list order.
+    expect(idea.getByText(/^Latest/)).toHaveTextContent("Otter Reviewer");
+  });
+
+  it("lists testing as pending when a PR is in but nobody has tested it", () => {
+    const early = decisions.filter((d) => d.kind === "confirmed" || d.kind === "claimed");
+    renderPage(early, "done", [], { pullRequestUrl: "https://github.com/emerjent/ziki/pull/1275" });
+    const done = summary("Done");
+    expect(done.getByText("PR #1275 is submitted. No agent has tested it yet.")).toBeInTheDocument();
+    expect(done.getByText("Testing by reviewer agents")).toBeInTheDocument();
+    expect(done.getByText("Good or not good to merge verdict")).toBeInTheDocument();
+    expect(done.queryByText(/^Latest/)).not.toBeInTheDocument();
+  });
+
+  it("shows nothing pending for a completed stage and the start rule for one not reached", () => {
+    renderPage(decisions, "ready");
+    fireEvent.click(stageButton(/^Open/));
+    expect(summary("Open").getByText("Nothing pending at this stage.")).toBeInTheDocument();
+    expect(summary("Open").queryByText("Pending")).not.toBeInTheDocument();
+    fireEvent.click(stageButton(/^Live/));
+    // The admin merger's deploy is in the list, so Live shows its decision even before the stage is current.
+    expect(summary("Live").getByText("Not reached")).toBeInTheDocument();
+  });
+
+  it("explains when a stage starts if it has nothing yet", () => {
+    renderPage([], "idea", []);
+    fireEvent.click(stageButton(/^Ready to merge/));
+    expect(summary("Ready to merge").getByText("Starts once testing marks the fix good to merge.")).toBeInTheDocument();
+    expect(summary("Ready to merge").queryByText("Nothing pending at this stage.")).not.toBeInTheDocument();
   });
 });

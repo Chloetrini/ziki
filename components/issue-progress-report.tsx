@@ -2,14 +2,12 @@
 
 import type { CSSProperties, ReactNode } from "react";
 import { severityLabel } from "@/lib/labels";
-import { LocalTime } from "@/components/local-time";
 import { ClaimDeadline } from "@/components/claim-deadline";
-import { timeOf, type AgentDecision } from "@/components/issue-agent-activity";
+import type { AgentDecision } from "@/components/issue-agent-activity";
 import { useIssueStage } from "@/components/issue-stage-context";
 import {
   DECISION_STAGES,
   decisionStageInfo,
-  stageOfDecision,
   tallyStages,
   type DecisionStage,
 } from "@/lib/decision-stages";
@@ -67,7 +65,7 @@ const ICONS = {
   ),
 } as const;
 
-type IconName = keyof typeof ICONS;
+export type IconName = keyof typeof ICONS;
 
 export function StageIcon({ name, style }: { name: IconName; style?: CSSProperties }) {
   return (
@@ -86,7 +84,7 @@ export const stageIconName: Record<DecisionStage, IconName> = {
 };
 
 /** A chip class from the design: cg ok, cr bad, ca warn, cb info, cn neutral, cv violet. */
-type Tone = "cg" | "cr" | "ca" | "cb" | "cn" | "cv";
+export type Tone = "cg" | "cr" | "ca" | "cb" | "cn" | "cv";
 
 type DecisionCard = { label: string; tone: Tone; icon: IconName; text: ReactNode; notes: string | null };
 
@@ -175,9 +173,16 @@ export function decisionCard(decision: AgentDecision): DecisionCard {
   }
 }
 
-type StepState = "done" | "now" | "warn" | "todo";
+export type StepState = "done" | "now" | "warn" | "todo";
 
-function plural(n: number, word: string) {
+/** Where a stage sits against the current one: behind it, at it, or ahead. */
+export function stageState(stage: DecisionStage, currentStage: DecisionStage, setback: boolean): StepState {
+  const index = DECISION_STAGES.indexOf(stage);
+  const currentIndex = DECISION_STAGES.indexOf(currentStage);
+  return index < currentIndex ? "done" : index > currentIndex ? "todo" : setback ? "warn" : "now";
+}
+
+export function plural(n: number, word: string) {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
@@ -199,22 +204,16 @@ function statusChip(stage: DecisionStage, setback: boolean): { label: string; to
   }
 }
 
-function pullRequestNumber(url: string | null | undefined): string | null {
-  const match = url?.match(/\/pull\/(\d+)/);
-  return match ? `#${match[1]}` : null;
-}
-
 /**
- * The design's progress report and Agent decisions cards (#1446). The stepper
- * opens on the issue's current stage; picking a stage shows its decisions here
- * and filters the Conversation card.
+ * The design's progress report (#1446). The stepper opens on the issue's
+ * current stage; picking a stage switches the Conversation card's stage
+ * summary and comments (#186).
  */
 export function IssueProgressReport({
   decisions,
   currentStage,
   setback = false,
   commentCounts,
-  pullRequestUrl = null,
 }: {
   decisions: ReadonlyArray<AgentDecision>;
   /** Where the issue is now; marked "now" in the stepper. */
@@ -223,175 +222,62 @@ export function IssueProgressReport({
   setback?: boolean;
   /** Top-level comments in each stage. */
   commentCounts: Record<DecisionStage, number>;
-  /** The linked pull request, for the Done stage's "before a merge decision" steps. */
-  pullRequestUrl?: string | null;
 }) {
   const picked = useIssueStage();
   const selected = picked?.stage ?? currentStage;
   const currentIndex = DECISION_STAGES.indexOf(currentStage);
-  const selectedIndex = DECISION_STAGES.indexOf(selected);
   const tallies = tallyStages(decisions);
-  const inStage = decisions
-    .filter((decision) => stageOfDecision(decision) === selected)
-    .sort((a, b) => timeOf(a) - timeOf(b) || a.id.localeCompare(b.id));
-  const info = decisionStageInfo[selected];
   const chip = statusChip(currentStage, setback);
 
-  const stateOf = (index: number): StepState =>
-    index < currentIndex ? "done" : index > currentIndex ? "todo" : setback ? "warn" : "now";
-
-  // Done with a pull request in but no verdict yet: show what comes before a merge decision.
-  const awaitingTests = selected === "done" && !!pullRequestUrl && inStage.length === 0 && selectedIndex <= currentIndex;
-  const prNumber = pullRequestNumber(pullRequestUrl);
-
   return (
-    <>
-      <section
-        aria-labelledby="progress-report-title"
-        className="issue-progress rounded-[20px] border border-zk-border bg-zk-surface px-5 py-[18px]"
-      >
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 id="progress-report-title" className="cap">
-            Progress report
-          </h2>
-          <span className={`chip ${chip.tone}`}>{chip.label}</span>
+    <section
+      aria-labelledby="progress-report-title"
+      className="issue-progress rounded-[20px] border border-zk-border bg-zk-surface px-5 py-[18px]"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 id="progress-report-title" className="cap">
+          Progress report
+        </h2>
+        <span className={`chip ${chip.tone}`}>{chip.label}</span>
+      </div>
+      <div className="pgw">
+        <div className="pg-track" aria-hidden="true">
+          <span className="pg-fill" style={{ width: `${currentIndex * 25}%` }} />
         </div>
-        <div className="pgw">
-          <div className="pg-track" aria-hidden="true">
-            <span className="pg-fill" style={{ width: `${currentIndex * 25}%` }} />
-          </div>
-          <ol className="pg" aria-label="Progress report: pick a stage to see its logs">
-            {DECISION_STAGES.map((stage, index) => {
-              const state = stateOf(index);
-              const tally = tallies[stage];
-              const logs = tally.positive + tally.negative;
-              const comments = commentCounts[stage];
-              const on = stage === selected;
-              const icon: IconName = state === "done" ? "check" : state === "warn" ? "undo" : stageIconName[stage];
-              return (
-                <li key={stage} style={{ animationDelay: `${index * 70}ms` }}>
-                  <button
-                    type="button"
-                    aria-pressed={on}
-                    title={decisionStageInfo[stage].description}
-                    onClick={() => picked?.setStage(stage)}
-                    className={`pgs${index === currentIndex ? " now" : ""}${state === "warn" ? " warn" : ""}${
-                      state === "todo" ? " todo" : ""
-                    }${on ? " sel" : ""}`}
-                  >
-                    <span className={`pgd ${state}`}>
-                      <StageIcon name={icon} />
-                    </span>
-                    <span className="pgl">{decisionStageInfo[stage].label}</span>
-                    <span className="pgn">{logs ? plural(logs, "log") : index > currentIndex ? "not yet" : "0 logs"}</span>
-                    {comments ? <span className="pgc">{plural(comments, "comment")}</span> : null}
-                    <span className="sr-only">
-                      {decisionStageInfo[stage].label}: {tally.positive} positive, {tally.negative} negative
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-        </div>
-        <div className="pgsum">
-          <span>
-            <b>{info.label}</b> · {info.description}
-          </span>
-          <span className="mono text-xs text-zk-muted">
-            {plural(inStage.length, "log")} · {plural(commentCounts[selected], "comment")}
-          </span>
-        </div>
-      </section>
-
-      <section
-        id="agent-decisions"
-        aria-labelledby="agent-decisions-title"
-        className="issue-progress scroll-mt-24 rounded-[20px] border border-zk-border bg-zk-surface px-5 py-[18px]"
-      >
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 id="agent-decisions-title" className="cap">
-            Agent decisions <span className="mono">{inStage.length}</span>
-          </h2>
-          <span className="chip cn">{info.label} stage</span>
-        </div>
-        {inStage.length > 0 ? (
-          <>
-            <div className="h-0.5" />
-            {inStage.map((decision, index) => {
-              const card = decisionCard(decision);
-              return (
-                <article
-                  key={decision.id}
-                  id={`agent-decision-${decision.id}`}
-                  className="cm lg"
-                  style={{ animationDelay: `${Math.min(index * 45, 400)}ms` }}
+        <ol className="pg" aria-label="Progress report: pick a stage to see its logs">
+          {DECISION_STAGES.map((stage, index) => {
+            const state = stageState(stage, currentStage, setback);
+            const tally = tallies[stage];
+            const logs = tally.positive + tally.negative;
+            const comments = commentCounts[stage];
+            const on = stage === selected;
+            const icon: IconName = state === "done" ? "check" : state === "warn" ? "undo" : stageIconName[stage];
+            return (
+              <li key={stage} style={{ animationDelay: `${index * 70}ms` }}>
+                <button
+                  type="button"
+                  aria-pressed={on}
+                  title={decisionStageInfo[stage].description}
+                  onClick={() => picked?.setStage(stage)}
+                  className={`pgs${index === currentIndex ? " now" : ""}${state === "warn" ? " warn" : ""}${
+                    state === "todo" ? " todo" : ""
+                  }${on ? " sel" : ""}`}
                 >
-                  <div className="cmh">
-                    <span className={`av ${card.tone}`}>
-                      <StageIcon name={card.icon} />
-                    </span>
-                    <b>{decision.agentName}</b>
-                    <span className="chip cn">agent</span>
-                    <span className={`chip ${card.tone}`}>{card.label}</span>
-                    <LocalTime compact className="dt" date={decision.at} />
-                  </div>
-                  <p className="cmb">{card.text}</p>
-                  {card.notes ? <p className="cmb whitespace-pre-wrap break-words">{card.notes}</p> : null}
-                </article>
-              );
-            })}
-          </>
-        ) : (
-          <div className="emp lg">
-            <div className="flex items-start gap-2.5">
-              <span className="emp-icon">
-                <StageIcon name={stageIconName[selected]} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="m-0 text-[13.5px] font-semibold text-zk-text">
-                  {awaitingTests ? "No merge decisions yet" : info.emptyTitle}
-                </p>
-                <p className="mt-0.5 text-[12.5px] leading-normal text-zk-muted">
-                  {awaitingTests
-                    ? "Reviewer agents must test the implementation against the acceptance criteria before it can be marked good or not good to merge."
-                    : info.emptyText}
-                </p>
-              </div>
-            </div>
-            {awaitingTests ? (
-              <ol aria-label="Before a merge decision" className="m-0 flex list-none flex-wrap gap-1.5 p-0">
-                <EmptyStep state="done" label={prNumber ? `PR ${prNumber}` : "Pull request"} note="Pull request submitted" />
-                <EmptyStep state="now" label="Testing" note="Being tested by reviewer agents" />
-                <EmptyStep state="todo" label="Merge decision" note="Not reached yet" />
-              </ol>
-            ) : null}
-          </div>
-        )}
-      </section>
-    </>
-  );
-}
-
-function EmptyStep({ state, label, note }: { state: "done" | "now" | "todo"; label: string; note: string }) {
-  const row =
-    state === "now"
-      ? "bg-[var(--color-violet-50)] font-semibold text-[var(--color-violet-700)]"
-      : state === "done"
-        ? "bg-zk-chip text-zk-text2"
-        : "bg-zk-chip text-zk-muted";
-  const dot =
-    state === "done"
-      ? "bg-zk-ok-bg text-zk-ok-fg"
-      : state === "now"
-        ? "bg-[var(--color-violet-50)] text-[var(--color-violet-700)]"
-        : "border-[1.5px] border-dashed border-zk-border text-zk-muted";
-  return (
-    <li title={note} className={`inline-flex items-center gap-1.5 rounded-full py-[3px] pl-1 pr-2.5 text-xs ${row}`}>
-      <span className={`grid h-[18px] w-[18px] flex-none place-items-center rounded-full ${dot}`} aria-hidden="true">
-        <StageIcon name={state === "done" ? "check" : state === "now" ? "eye" : "timer"} style={{ width: 9, height: 9 }} />
-      </span>
-      {label}
-    </li>
+                  <span className={`pgd ${state}`}>
+                    <StageIcon name={icon} />
+                  </span>
+                  <span className="pgl">{decisionStageInfo[stage].label}</span>
+                  <span className="pgn">{logs ? plural(logs, "log") : index > currentIndex ? "not yet" : "0 logs"}</span>
+                  {comments ? <span className="pgc">{plural(comments, "comment")}</span> : null}
+                  <span className="sr-only">
+                    {decisionStageInfo[stage].label}: {tally.positive} positive, {tally.negative} negative
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      </div>
+    </section>
   );
 }
