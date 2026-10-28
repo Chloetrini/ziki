@@ -11,6 +11,10 @@ import { canDeleteComment, canEditComment } from "@/lib/comment-permissions";
 import type { AppRole } from "@/lib/roles";
 import type { OrganizationRole } from "@/lib/organization-role";
 import type { CommentType } from "@/lib/validations/issue";
+import { decisionStageInfo, stageOfComment, type DecisionStage, type StageStarts } from "@/lib/decision-stages";
+import { StageIcon, stageIconName } from "@/components/issue-progress-report";
+
+const NO_STAGE_STARTS: StageStarts = { open: null, done: null, ready: null, live: null };
 import { deleteCommentAction, updateCommentAction } from "@/app/actions/comments";
 import { Button } from "@/components/ui/button";
 import { CommentBody, MentionText } from "@/components/comment-body";
@@ -481,6 +485,8 @@ export function CommentThread({
   organizationRoles = {},
   readOnly = false,
   inlineComposer = true,
+  stage = null,
+  stageStarts = NO_STAGE_STARTS,
 }: {
   bugId: string;
   issueUrl: string;
@@ -492,10 +498,18 @@ export function CommentThread({
   /** Files attached to each comment, by comment id (#215). */
   attachmentsByComment?: AttachmentsByComment;
   organizationRoles?: OrganizationRoles;
+  /** #1446: show only the comments of this progress stage, drawn as the design. */
+  stage?: DecisionStage | null;
+  /** When each stage began, to place reviews and plain comments. */
+  stageStarts?: StageStarts;
 } & ViewerProps) {
   const [typeFilter, setTypeFilter] = useState<string>("all");
 
-  const filteredComments = comments.filter((comment) => {
+  const stageComments = stage
+    ? comments.filter((comment) => stageOfComment(comment.type, comment.createdAt, stageStarts) === stage)
+    : comments;
+
+  const filteredComments = stageComments.filter((comment) => {
     if (typeFilter === "all") return true;
     const cType = comment.type || "comment";
     return cType === typeFilter;
@@ -503,7 +517,7 @@ export function CommentThread({
 
   // Counted the same way the filter works: by top-level comment type.
   const countFor = (id: string) =>
-    id === "all" ? comments.length : comments.filter((comment) => (comment.type || "comment") === id).length;
+    id === "all" ? stageComments.length : stageComments.filter((comment) => (comment.type || "comment") === id).length;
 
   const filters: { id: string; label: string; type?: CommentType }[] = [
     { id: "all", label: "All" },
@@ -515,8 +529,24 @@ export function CommentThread({
   ];
 
   return (
-    <div className="issue-detail-scope mt-0 space-y-4">
-      {comments.length > 0 ? (
+    <div className={`issue-detail-scope mt-0 space-y-4${stage ? " issue-progress" : ""}`}>
+      {stage ? (
+        // #1446: the design's stage chip and tabs, shown even while the stage is empty.
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="chip cn stage-pill">{decisionStageInfo[stage].label} stage</span>
+          {filters.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              aria-pressed={typeFilter === tab.id}
+              onClick={() => setTypeFilter(tab.id)}
+              className={`ctab${typeFilter === tab.id ? " cur" : ""}`}
+            >
+              {tab.label} <span className="n">{countFor(tab.id)}</span>
+            </button>
+          ))}
+        </div>
+      ) : comments.length > 0 ? (
         <div className="flex flex-wrap items-center gap-1.5">
           {filters.map((tab) => {
             const on = typeFilter === tab.id;
@@ -547,7 +577,22 @@ export function CommentThread({
         </div>
       ) : null}
 
-      {comments.length === 0 && !readOnly ? (
+      {stage && filteredComments.length === 0 ? (
+        <div role="status" className="emp lg !flex-row !items-center">
+          <span className="emp-icon">
+            <StageIcon name={stageIconName[stage]} />
+          </span>
+          <span className="text-[13px] leading-normal text-zk-muted">
+            {stageComments.length === 0 ? (
+              <>
+                No comments at the <b className="text-zk-text">{decisionStageInfo[stage].label}</b> stage yet.
+              </>
+            ) : (
+              "No timeline entries match this filter."
+            )}
+          </span>
+        </div>
+      ) : comments.length === 0 && !readOnly ? (
         <div role="status" className="rounded-2xl border border-dashed border-zk-border bg-zk-chip/40 px-4 py-8 text-center">
           <p className="text-sm font-medium text-zk-text">No comments yet.</p>
           <p className="mt-1 text-sm text-zk-muted">

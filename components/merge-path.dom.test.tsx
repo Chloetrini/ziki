@@ -25,6 +25,18 @@ describe("MergePathChips", () => {
     expect(container.querySelector('[data-stage="dev"]')).toHaveAttribute("title", "Not linked");
   });
 
+  it("shrinks the chips and keeps them on one line when compact", () => {
+    const path = mergePathOf({ pullRequestUrl: "https://github.com/o/r/pull/1", reviewStatus: "merged", updatedAt: at });
+    const full = render(<MergePathChips path={path} />).container;
+    expect(full.querySelector('[data-stage="dev"]')).toHaveClass("h-6");
+    expect(full.querySelector(".merge-path")).toHaveClass("flex-wrap");
+    cleanup();
+    const compact = render(<MergePathChips path={path} compact />).container;
+    expect(compact.textContent).toBe("dev→staging→main");
+    expect(compact.querySelector('[data-stage="dev"]')).toHaveClass("h-5");
+    expect(compact.querySelector(".merge-path")).not.toHaveClass("flex-wrap");
+  });
+
   it("pulses a chip whose PR is still open", () => {
     const path = mergePathOf({ pullRequestUrl: "https://github.com/o/r/pull/1", reviewStatus: "submitted", updatedAt: at });
     const { container } = render(<MergePathChips path={path} />);

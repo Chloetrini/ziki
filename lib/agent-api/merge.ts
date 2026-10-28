@@ -423,11 +423,14 @@ export async function acceptFix(
     try {
       pullRequest = await ghClient.getPullRequest(ref);
     } catch {
+      const message = "GitHub could not be reached to verify the pull request.";
+      // #1446: a failed deployment check is logged so the issue page lists it under Ready to merge.
+      await audit(agent, "github.merge_failed", `bug:${bug.id}`, { reason: message, missing: "deployment_verification" }, { bugId: bug.id, db: prisma });
       return {
         status: 409 as const,
         error: "not_ready" as const,
         missing: "deployment_verification" as const,
-        message: "GitHub could not be reached to verify the pull request.",
+        message,
       };
     }
 
@@ -458,11 +461,13 @@ export async function acceptFix(
       green = false;
     }
     if (!green) {
+      const message = "GitHub Actions CI/CD checks or deployment runs have not passed for this pull request head commit.";
+      await audit(agent, "github.merge_failed", `bug:${bug.id}`, { reason: message, missing: "deployment_verification" }, { bugId: bug.id, db: prisma });
       return {
         status: 409 as const,
         error: "not_ready" as const,
         missing: "deployment_verification" as const,
-        message: "GitHub Actions CI/CD checks or deployment runs have not passed for this pull request head commit.",
+        message,
       };
     }
 

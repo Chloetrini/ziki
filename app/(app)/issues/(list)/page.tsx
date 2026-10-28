@@ -79,6 +79,9 @@ import {
 } from "@/lib/platform-filter";
 import { PlatformMenu, type PlatformTab } from "@/components/platform-tabs";
 import { IssueRowStatus } from "@/components/issue-row-status";
+import { mergePathOf } from "@/lib/merge-history";
+import { IssueRowStageTallies } from "@/components/issue-row-stage-tallies";
+import { claimDecisionKind, payloadMerged, tallyStages, type DecisionLike, type StageTallies } from "@/lib/decision-stages";
 import { IssuesToolsToggle } from "@/components/issues-tools-toggle";
 import { LoadError } from "@/components/load-error";
 import { logLoadFailure } from "@/lib/load-error";
@@ -120,7 +123,7 @@ const REJECTED_WHERE = { some: { kind: "real", verdict: "reject" } } satisfies P
 const DUPLICATE_STATUS = "duplicate";
 /** `?status=ready_to_merge`: resolved issues whose fix is ready for admin merge (#SDLC). */
 const READY_TO_MERGE_STATUS = "ready_to_merge";
-/** `?status=auto_merge`: resolved issues whose fix was auto-merged (#SDLC). */
+/** `?status=auto_merge`: resolved issues whose fix is live — merged to dev, staging, main/production (#SDLC). */
 const AUTO_MERGE_STATUS = "auto_merge";
 
 /** The filters under the All tab. Open, In progress and Done have tabs of their own. */
@@ -530,6 +533,9 @@ export default async function BugsPage({
         duplicateOf: showDuplicates ? { select: { number: true } } : false,
         createdAt: true,
         updatedAt: true,
+        // A merged fix shows its dev → staging → main chips in the status column.
+        reviewStatus: true,
+        pullRequestUrl: true,
         type: { select: { name: true } },
         reporter: { select: { name: true, role: true, image: true } },
         assignee: { select: { name: true, role: true, image: true } },
@@ -600,6 +606,50 @@ export default async function BugsPage({
       _count: { _all: true },
     }), [])).map((row) => [row.bugId, row._count._all] as const),
   );
+
+  // #1446: positive and negative agent decisions per stage, for the card's
+  // stage strip. Same rules as the issue page (lib/decision-stages.ts).
+  const stageTallies = new Map<string, StageTallies>();
+  if (bugIds.length > 0) {
+    const [validationRows, verdictRows, claimRows, auditRows] = await Promise.all([
+      loadOrEmpty("stage validations", () => prisma.issueValidation.groupBy({
+        by: ["bugId", "verdict"],
+        where: { bugId: { in: bugIds }, kind: "real" },
+        _count: { _all: true },
+      }), []),
+      loadOrEmpty("stage verdicts", () => prisma.testVerdict.groupBy({
+        by: ["bugId", "goodToMerge"],
+        where: { bugId: { in: bugIds } },
+        _count: { _all: true },
+      }), []),
+      loadOrEmpty("stage claims", () => prisma.issueClaim.groupBy({
+        by: ["bugId", "status", "releaseReason"],
+        where: { bugId: { in: bugIds }, claimedAt: { not: null } },
+        _count: { _all: true },
+      }), []),
+      loadOrEmpty("stage merges", () => prisma.agentAuditEvent.findMany({
+        where: { bugId: { in: bugIds }, action: { in: ["issue.accepted", "issue.merge_rejected", "github.merge_failed"] } },
+        select: { bugId: true, action: true, payload: true, agent: { select: { level: true } } },
+      }), []),
+    ]);
+    const rows = new Map<string, (DecisionLike & { count?: number })[]>();
+    const add = (bugId: string | null, row: DecisionLike & { count?: number }) => {
+      if (bugId) rows.set(bugId, [...(rows.get(bugId) ?? []), row]);
+    };
+    for (const r of validationRows) add(r.bugId, { kind: r.verdict === "reject" ? "rejected" : "confirmed", count: r._count._all });
+    for (const r of verdictRows) add(r.bugId, { kind: "verdict", goodToMerge: r.goodToMerge, count: r._count._all });
+    for (const r of claimRows) {
+      // The query already kept only claims that were taken up (claimedAt set).
+      const kind = claimDecisionKind({ status: r.status, claimedAt: "set", releaseReason: r.releaseReason });
+      if (kind) add(r.bugId, { kind, count: r._count._all });
+    }
+    for (const e of auditRows) {
+      const merger = e.agent.level === "merger" || e.agent.level === "admin_merger";
+      if (e.action === "issue.accepted") add(e.bugId, { kind: "accepted", merged: payloadMerged(e.payload) });
+      else if (merger) add(e.bugId, { kind: e.action === "issue.merge_rejected" ? "merge_rejected" : "deploy_failed" });
+    }
+    for (const [bugId, bugRows] of rows) stageTallies.set(bugId, tallyStages(bugRows));
+  }
 
   // #289: filtering on one milestone shows its progress above the list.
   let milestoneSummary: Awaited<ReturnType<typeof loadMilestoneSummaries>>[number] | null = null;
@@ -696,7 +746,7 @@ export default async function BugsPage({
   void _escalated;
   void _rejected;
   void _duplicate;
-  const [statusCounts, escalatedCount, rejectedCount, duplicateCount, readyToMergeCount, autoMergeCount] = isDeletedView || !tenantId ? [[], 0, 0, 0, 0, 0] : await Promise.all([
+  const [statusCounts, escalatedCount, rejectedCount, duplicateCount, readyToMergeCount, liveCount] = isDeletedView || !tenantId ? [[], 0, 0, 0, 0, 0] : await Promise.all([
     loadOrEmpty("status tabs", () => prisma.bug.groupBy({
       by: ["status"], where: statusTabWhere, _count: { _all: true },
     }), []),
@@ -712,7 +762,7 @@ export default async function BugsPage({
     loadOrEmpty("ready to merge tab", () => prisma.bug.count({
       where: { ...statusTabWhere, status: "resolved", reviewStatus: "ready_to_merge" },
     }), 0),
-    loadOrEmpty("auto merge tab", () => prisma.bug.count({
+    loadOrEmpty("live tab", () => prisma.bug.count({
       where: { ...statusTabWhere, status: "resolved", reviewStatus: "merged" },
     }), 0),
   ]);
@@ -865,11 +915,11 @@ export default async function BugsPage({
           {!isDeletedView ? (
             <nav aria-label="Issue status" className="issues-status-nav ml-auto min-w-0">
               <ul>
-                {[{ value: "open", label: "Open" }, { value: "in_progress", label: "In progress" }, { value: "resolved", label: "Done" }, { value: READY_TO_MERGE_STATUS, label: "Ready to Merge" }, { value: AUTO_MERGE_STATUS, label: "Auto Merge" }, { value: ALL_STATUS, label: "All" }].map(({ value, label }) => (
+                {[{ value: "open", label: "Open" }, { value: "in_progress", label: "In progress" }, { value: "resolved", label: "Done" }, { value: READY_TO_MERGE_STATUS, label: "Ready to Merge" }, { value: AUTO_MERGE_STATUS, label: "Live" }, { value: ALL_STATUS, label: "All" }].map(({ value, label }) => (
                   <li key={value}>
                     <Link href={statusHref(value)} aria-current={(value === ALL_STATUS ? allSelected : value === statusParam) ? "page" : undefined}>
                       <span className={`issues-status-dot issues-status-${value}`} aria-hidden="true" />
-                      {label}<span className="issues-status-count">{value === ALL_STATUS ? allCount : value === READY_TO_MERGE_STATUS ? readyToMergeCount : value === AUTO_MERGE_STATUS ? autoMergeCount : countForStatus(value)}</span>
+                      {label}<span className="issues-status-count">{value === ALL_STATUS ? allCount : value === READY_TO_MERGE_STATUS ? readyToMergeCount : value === AUTO_MERGE_STATUS ? liveCount : countForStatus(value)}</span>
                     </Link>
                   </li>
                 ))}
@@ -1060,7 +1110,8 @@ export default async function BugsPage({
                       ? { person: claim?.beneficiary?.name ?? bug.assignee?.name ?? null, since: claim ? (claim.claimedAt ?? claim.createdAt) : null }
                       : null;
                     const rowStatus = (
-                      <IssueRowStatus status={bug.status} stage={stage} botConfirmations={botConfirmations.get(bug.id) ?? 0} votes={bug.voteCount} work={work} />
+                      <IssueRowStatus status={bug.status} stage={stage} botConfirmations={botConfirmations.get(bug.id) ?? 0} votes={bug.voteCount} work={work}
+                        mergePath={bug.reviewStatus === "merged" ? mergePathOf(bug) : null} />
                     );
 
                     return (
@@ -1140,6 +1191,7 @@ export default async function BugsPage({
                               {/* Below md (768px) the status column is hidden, so the status rides at the end of this line. */}
                               <span className="inline-flex min-w-0 md:sr-only">{rowStatus}</span>
                             </span>
+                            <IssueRowStageTallies tallies={stageTallies.get(bug.id)} />
                             {snippets.has(bug.id) ? <SearchSnippet snippet={snippets.get(bug.id)!} /> : null}
                           </span>
                         </Link>

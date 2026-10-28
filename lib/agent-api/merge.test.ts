@@ -686,6 +686,35 @@ describe("acceptFix: a successful accept (#434)", () => {
     });
     expect(db.bug.update).not.toHaveBeenCalled();
     expect(db.pointEntry.createMany).not.toHaveBeenCalled();
+    // #1446: the failed deployment check is logged for the issue page.
+    expect(db.agentAuditEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "github.merge_failed",
+          payload: expect.objectContaining({ missing: "deployment_verification" }),
+        }),
+      }),
+    );
+  });
+
+  it("admin merger logs a failed deployment when GitHub can't be reached (#1446)", async () => {
+    confirmWith("rob", "sam");
+    verdict("r1", "rob");
+    verdict("r2", "sam");
+    db.bug.findFirst.mockResolvedValue(bugRow());
+    const client = {
+      getPullRequest: vi.fn(async () => {
+        throw new Error("network");
+      }),
+      checksGreen: vi.fn(),
+      mergePullRequest: vi.fn(),
+    };
+
+    const result = await executeAdminMerge(merger("m1", "mo", "admin_merger"), "bug1", { client });
+    expect(result).toMatchObject({ status: 409, missing: "deployment_verification" });
+    expect(db.agentAuditEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ action: "github.merge_failed" }) }),
+    );
   });
 
   it("admin merger refuses to merge and writes 0 points when the pull request is closed without being merged", async () => {

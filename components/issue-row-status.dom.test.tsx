@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { IssueRowStatus } from "./issue-row-status";
 import { ElapsedTime, formatElapsed } from "./elapsed-time";
 import { renderToString } from "react-dom/server";
+import { mergePathOf } from "@/lib/merge-history";
 
 afterEach(() => cleanup());
 
@@ -58,6 +59,39 @@ describe("IssueRowStatus", () => {
     expect(text(<IssueRowStatus {...base} status="in_progress" reviewStatus="ready_to_merge" />)).toContain("Ready to Merge");
     cleanup();
     expect(text(<IssueRowStatus {...base} status="in_progress" reviewStatus="rejected" />)).toContain("Needs Revision");
+  });
+});
+
+describe("IssueRowStatus merge path", () => {
+  const merged = mergePathOf({
+    pullRequestUrl: "https://github.com/Zedu-Endor/issue-tracker/pull/1262",
+    reviewStatus: "merged",
+    updatedAt: new Date("2026-10-22T16:10:00Z"),
+  });
+
+  it("shows the merge history chips instead of Resolved once the fix is merged", () => {
+    const { container } = render(<IssueRowStatus {...base} status="resolved" mergePath={merged} />);
+    const chips = Array.from(container.querySelectorAll("[data-stage]")).map((el) => `${el.textContent}:${el.getAttribute("data-state")}`);
+    expect(chips).toEqual(["dev:merged", "staging:pending", "main:pending"]);
+    expect(container.textContent).not.toContain("Resolved");
+    expect(container.querySelector(".merge-path")).toHaveAttribute("aria-label", "Reached dev");
+  });
+
+  it("uses the compact chips to fit the status column", () => {
+    const { container } = render(<IssueRowStatus {...base} status="resolved" mergePath={merged} />);
+    expect(container.querySelector('[data-stage="dev"]')).toHaveClass("h-5");
+  });
+
+  it("shows the live status, not the chips, for a reopened issue whose fix had merged", () => {
+    const { container } = render(<IssueRowStatus {...base} status="in_progress" mergePath={merged} work={{ person: "Ada", since: null }} />);
+    expect(container.querySelector("[data-stage]")).toBeNull();
+    expect(container.textContent).toContain("Ada");
+  });
+
+  it("keeps the usual label when there is no merge path", () => {
+    expect(text(<IssueRowStatus {...base} status="resolved" mergePath={null} />)).toBe("Resolved");
+    cleanup();
+    expect(text(<IssueRowStatus {...base} stage="ready" />)).toBe("Ready for bids");
   });
 });
 

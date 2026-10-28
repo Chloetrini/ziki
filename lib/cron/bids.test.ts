@@ -194,6 +194,67 @@ describe("sweepPendingBids - Fair Bid Auto-Assignment Handshake", () => {
         }),
       });
     });
+
+    it("prioritizes fewest historical tasks awarded when active claims are equal", async () => {
+      mockBugFindMany.mockResolvedValue([sampleIssue]);
+      mockCommentFindMany.mockResolvedValue([]);
+      mockIssueBidFindMany.mockResolvedValue([sampleBidA, sampleBidB]);
+
+      // Both Alice and Bob have 0 active claims
+      // Alice has 5 historical claims; Bob has 1 historical claim
+      mockIssueClaimCount.mockImplementation(async ({ where }) => {
+        if (where.status === "active") return 0;
+        if (where.claimedAt && where.beneficiaryUserId === "user-a") return 5;
+        if (where.claimedAt && where.beneficiaryUserId === "user-b") return 1;
+        return 0;
+      });
+
+      const res = await sweepPendingBids({ now: mockNow });
+
+      expect(res.invited).toBe(1);
+      expect(mockCommentCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          body: expect.stringContaining("BetaAgent"),
+        }),
+      });
+    });
+
+    it("falls back to FIFO (earliest createdAt) when active and historical claims are equal", async () => {
+      mockBugFindMany.mockResolvedValue([sampleIssue]);
+      mockCommentFindMany.mockResolvedValue([]);
+      // sampleBidA was created at 10:00:00, sampleBidB was created at 10:05:00
+      mockIssueBidFindMany.mockResolvedValue([sampleBidA, sampleBidB]);
+      mockIssueClaimCount.mockResolvedValue(0);
+
+      const res = await sweepPendingBids({ now: mockNow });
+
+      expect(res.invited).toBe(1);
+      expect(mockCommentCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          body: expect.stringContaining("AlphaAgent"),
+        }),
+      });
+    });
+
+    it("ignores bids from revoked agents", async () => {
+      const revokedBidA = {
+        ...sampleBidA,
+        agent: { ...sampleBidA.agent, revokedAt: new Date("2026-10-26T00:00:00.000Z") },
+      };
+      mockBugFindMany.mockResolvedValue([sampleIssue]);
+      mockCommentFindMany.mockResolvedValue([]);
+      mockIssueBidFindMany.mockResolvedValue([revokedBidA, sampleBidB]);
+      mockIssueClaimCount.mockResolvedValue(0);
+
+      const res = await sweepPendingBids({ now: mockNow });
+
+      expect(res.invited).toBe(1);
+      expect(mockCommentCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          body: expect.stringContaining("BetaAgent"),
+        }),
+      });
+    });
   });
 
   describe("Turn 2: Response Detection and Assignment", () => {
@@ -317,6 +378,181 @@ describe("sweepPendingBids - Fair Bid Auto-Assignment Handshake", () => {
           body: expect.stringContaining("AlphaAgent"),
         }),
       });
+    });
+
+    it("assigns when the human beneficiary (agent owner) comments back instead of agent API", async () => {
+      mockBugFindMany.mockResolvedValue([sampleIssue]);
+      mockCommentFindMany.mockResolvedValue([existingGoAhead]);
+      mockIssueBidFindUnique.mockResolvedValue({
+        id: "bid-b",
+        awardedAt: null,
+        withdrawnAt: null,
+      });
+
+      // Human owner commented back directly
+      mockCommentFindFirst.mockResolvedValue({
+        id: "reply-human",
+        bugId: "bug-1",
+        agentId: null,
+        authorId: "user-b", // beneficiaryUserId
+        body: "Ready to take this!",
+        createdAt: new Date("2026-10-27T11:52:00.000Z"),
+      });
+
+      mockAwardBid.mockResolvedValue({
+        bidId: "bid-b",
+        claimId: "claim-new",
+        bugId: "bug-1",
+      });
+
+      const res = await sweepPendingBids({ now: mockNow });
+
+      expect(res.assigned).toBe(1);
+      expect(mockAwardBid).toHaveBeenCalledWith(
+        { id: "user-reporter", role: "super_admin" },
+        "bid-b",
+      );
+    });
+
+    it("records errors in result.errors when awardBid throws, without crashing the sweep", async () => {
+      mockBugFindMany.mockResolvedValue([sampleIssue]);
+      mockCommentFindMany.mockResolvedValue([existingGoAhead]);
+      mockIssueBidFindUnique.mockResolvedValue({
+        id: "bid-b",
+        awardedAt: null,
+        withdrawnAt: null,
+      });
+
+      mockCommentFindFirst.mockResolvedValue({
+        id: "reply-1",
+        bugId: "bug-1",
+        agentId: "agent-b",
+        authorId: "user-b",
+        body: "I am ready to work",
+        createdAt: new Date("2026-10-27T11:50:00.000Z"),
+      });
+
+      mockAwardBid.mockRejectedValueOnce(new Error("Database deadlock during award"));
+
+      const res = await sweepPendingBids({ now: mockNow });
+
+      expect(res.assigned).toBe(0);
+      expect(res.errors).toHaveLength(1);
+      expect(res.errors[0]).toEqual({
+        issueId: "bug-1",
+        error: "Database deadlock during award",
+      });
+    });
+  });
+
+  describe("Full Two-Turn Handshake Lifecycle Simulation", () => {
+    it("completes Turn 1 invitation followed by Turn 2 confirmation and assignment", async () => {
+      // --- Turn 1: Issue has 2 bids, unassigned. Cron runs ---
+      mockBugFindMany.mockResolvedValue([sampleIssue]);
+      mockCommentFindMany.mockResolvedValue([]); // No existing comments
+      mockIssueBidFindMany.mockResolvedValue([sampleBidA, sampleBidB]);
+      mockIssueClaimCount.mockResolvedValue(0);
+
+      // In-memory comment store to simulate database persistence across turns
+      type StoredComment = {
+        id: string;
+        bugId: string;
+        authorId: string;
+        agentId?: string | null;
+        body: string;
+        type?: string;
+        createdAt: Date;
+        metadata?: Record<string, unknown> | null;
+      };
+      const commentStore: StoredComment[] = [];
+
+      mockCommentCreate.mockImplementation(async ({ data }) => {
+        const item: StoredComment = {
+          id: `comment-${commentStore.length + 1}`,
+          ...data,
+          createdAt: new Date("2026-10-27T12:00:00.000Z"),
+        };
+        commentStore.push(item);
+        return item;
+      });
+
+      mockCommentUpdate.mockImplementation(async ({ where, data }) => {
+        const item = commentStore.find((c) => c.id === where.id);
+        if (item) {
+          Object.assign(item, data);
+        }
+        return item;
+      });
+
+      mockCommentFindMany.mockImplementation(async () => [...commentStore].reverse());
+      mockCommentFindFirst.mockImplementation(async ({ where }) => {
+        return (
+          commentStore.find((c) => {
+            if (c.bugId !== where.bugId) return false;
+            if (where.createdAt?.gt && c.createdAt <= where.createdAt.gt) return false;
+            if (where.OR) {
+              return (where.OR as Array<{ agentId?: string; authorId?: string }>).some(
+                (clause) =>
+                  (clause.agentId && c.agentId === clause.agentId) ||
+                  (clause.authorId && c.authorId === clause.authorId),
+              );
+            }
+            return true;
+          }) ?? null
+        );
+      });
+
+      mockIssueBidFindUnique.mockImplementation(async ({ where }) => {
+        const b = [sampleBidA, sampleBidB].find((bid) => bid.id === where.id);
+        return b ? { id: b.id, awardedAt: null, withdrawnAt: null } : null;
+      });
+
+      mockAwardBid.mockResolvedValue({
+        bidId: "bid-a",
+        claimId: "claim-1",
+        bugId: "bug-1",
+      });
+
+      // 1. Run Turn 1 of sweep
+      const turn1Result = await sweepPendingBids({
+        now: new Date("2026-10-27T12:00:00.000Z"),
+      });
+
+      expect(turn1Result.invited).toBe(1);
+      expect(turn1Result.assigned).toBe(0);
+      expect(commentStore).toHaveLength(1);
+      expect(commentStore[0].body).toContain('@[AlphaAgent](AlphaAgent): Go ahead! Please reply "I am ready to work"');
+      expect(commentStore[0]?.metadata?.resolved).toBe(false);
+
+      // 2. Simulate AlphaAgent commenting "I am ready to work"
+      commentStore.push({
+        id: "comment-agent-reply",
+        bugId: "bug-1",
+        authorId: "user-a",
+        agentId: "agent-a",
+        body: "I am ready to work",
+        type: "comment",
+        createdAt: new Date("2026-10-27T12:05:00.000Z"),
+      });
+
+      // 3. Run Turn 2 of sweep
+      const turn2Result = await sweepPendingBids({
+        now: new Date("2026-10-27T12:06:00.000Z"),
+      });
+
+      expect(turn2Result.assigned).toBe(1);
+      expect(mockAwardBid).toHaveBeenCalledWith(
+        { id: "user-reporter", role: "super_admin" },
+        "bid-a",
+      );
+
+      // Verify the invitation comment was marked resolved
+      expect(commentStore[0]?.metadata?.resolved).toBe(true);
+
+      // Verify the confirmation comment was added
+      const confirmation = commentStore.find((c) => c.metadata?.action === "bid_assigned");
+      expect(confirmation).toBeDefined();
+      expect(confirmation?.body).toContain("Confirmed! Issue assigned to @[AlphaAgent](AlphaAgent).");
     });
   });
 });

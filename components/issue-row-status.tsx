@@ -1,4 +1,6 @@
 import type { IssueStage } from "@/lib/issue-stage";
+import type { MergePath } from "@/lib/merge-history";
+import { MergePathChips } from "@/components/merge-path";
 import { ElapsedTime } from "@/components/elapsed-time";
 import { WORK_READINESS_VOTE_THRESHOLD } from "@/lib/ticket-assignment";
 
@@ -44,6 +46,7 @@ export type IssueRowWork = {
 /**
  * One line saying where an issue stands: Idea, Confirmed (bots), Ready for
  * bids, who is working on it and for how long, or Resolved / Closed.
+ * Once its fix is merged, the dev → staging → main chips from merge history instead.
  */
 export function IssueRowStatus({
   status,
@@ -52,6 +55,7 @@ export function IssueRowStatus({
   votes,
   work,
   reviewStatus,
+  mergePath,
 }: {
   status: string;
   stage: IssueStage | undefined;
@@ -60,8 +64,15 @@ export function IssueRowStatus({
   votes: number;
   work: IssueRowWork | null;
   reviewStatus?: string | null;
+  /** Where the merged fix has got to; null or absent before it merges. */
+  mergePath?: MergePath | null;
 }) {
-  if (status === "resolved" || status === "closed") {
+  const finished = status === "resolved" || status === "closed";
+  // Reopening keeps reviewStatus "merged", so only finished issues show the path.
+  if (mergePath && finished) {
+    return <MergePathChips path={mergePath} compact />;
+  }
+  if (finished) {
     return (
       <span className={`issue-row-status inline-flex items-center gap-1 ${status === "resolved" ? "text-zk-ok-fg" : "text-zk-muted"}`}>
         <CheckIcon /> {status === "resolved" ? "Resolved" : "Closed"}

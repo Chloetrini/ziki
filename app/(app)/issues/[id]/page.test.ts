@@ -192,7 +192,10 @@ describe("BugDetailPage conditional user query (#349)", () => {
     );
     expect(pageSourceFresh).toContain('id="conversation"');
     expect(pageSourceFresh).toContain('id="comments"');
-    expect(pageSourceFresh).toMatch(/Conversation\s*<span[^>]*>\{comments\.visibleCount\}<\/span>/);
+    // #1446: the count follows the progress report's stage, falling back to the total.
+    expect(pageSourceFresh).toMatch(
+      /Conversation\s*<span[^>]*>\s*<StageConversationCount counts=\{stageCommentCounts\} fallback=\{comments\.visibleCount\} \/>/,
+    );
     // New comments go through the Add comment modal, not a form under the thread.
     expect(pageSourceFresh).toContain("<AddCommentDialog");
     expect(pageSourceFresh).toContain("inlineComposer={false}");
