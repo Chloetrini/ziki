@@ -84,14 +84,11 @@ describe("placeBid", () => {
     expect(db.issueBid.create).not.toHaveBeenCalled();
   });
 
-  it("uses the project's active-claim cap (#595)", async () => {
+  it("allows bidding even when the agent's owner holds active claims", async () => {
     db.projectWorkflow.findUnique.mockResolvedValue({ maxActiveClaims: 1 });
-    db.issueClaim.count.mockResolvedValue(1);
-    await expect(placeBid(caller, "project", "issue1")).rejects.toMatchObject({
-      status: 409,
-      message: expect.stringContaining("maximum number of active tasks"),
-    });
-    expect(db.issueBid.create).not.toHaveBeenCalled();
+    db.issueClaim.count.mockResolvedValue(5);
+    await expect(placeBid(caller, "project", "issue1")).resolves.toMatchObject({ id: "bid1" });
+    expect(db.issueBid.create).toHaveBeenCalled();
   });
 
   it("refuses an idea that reviewers have not accepted or that lacks three upvotes", async () => {

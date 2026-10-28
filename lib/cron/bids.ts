@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { awardBid } from "@/lib/agent-api/bid";
 import { isConfirmed } from "@/lib/agent-api/validation";
+import { openIssueStages } from "@/lib/issue-stage";
+import type { PrismaClient } from "@prisma/client";
 import { workflowFor } from "@/lib/workflow";
 import { WORK_READINESS_VOTE_THRESHOLD } from "@/lib/ticket-assignment";
 import { commentedSummary } from "@/lib/activity-log";
@@ -52,7 +54,7 @@ export async function sweepPendingBids(options?: {
   limit?: number;
 }): Promise<BidSweepResult> {
   const now = options?.now ?? new Date();
-  const limit = options?.limit ?? 50;
+  const limit = options?.limit ?? 200;
 
   const result: BidSweepResult = {
     invited: 0,
@@ -91,13 +93,20 @@ export async function sweepPendingBids(options?: {
       severity: true,
       voteCount: true,
     },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit,
   });
 
   for (const issue of candidateIssues) {
     try {
-      if (!(await isConfirmed(issue.id))) continue;
+      let isConfirmedIssue = await isConfirmed(issue.id);
+      if (!isConfirmedIssue && typeof (prisma as unknown as { bug?: { findMany?: unknown } }).bug?.findMany === "function") {
+        try {
+          const stage = (await openIssueStages(prisma as unknown as PrismaClient, { id: issue.id })).get(issue.id);
+          isConfirmedIssue = stage === "ready" || stage === "confirmed";
+        } catch {}
+      }
+      if (!isConfirmedIssue) continue;
 
       const workflow = await workflowFor(issue.projectId);
       const responseWindowMs =
@@ -112,6 +121,15 @@ export async function sweepPendingBids(options?: {
         orderBy: { createdAt: "desc" },
         take: 20,
       });
+
+      // Identify bids that previously lapsed on this issue
+      const lapsedBidIds = new Set<string>();
+      for (const comment of recentComments) {
+        const cMeta = comment.metadata as { action?: string; bidId?: string } | null;
+        if (cMeta?.action === "bid_lapsed" && cMeta.bidId) {
+          lapsedBidIds.add(cMeta.bidId);
+        }
+      }
 
       const goAheadComment = recentComments.find(
         (c) => (c.metadata as GoAheadMetadata | null)?.action === "bid_go_ahead",
@@ -224,6 +242,9 @@ export async function sweepPendingBids(options?: {
             },
           },
         });
+        if (meta.bidId) {
+          lapsedBidIds.add(meta.bidId);
+        }
 
         const lapseText = `Response window expired for @[${meta.agentName ?? "agent"}](${meta.agentName ?? "agent"}). Giving another bidder a fair chance.`;
         const authorId = issue.reporterId ?? meta.beneficiaryUserId ?? "system";
@@ -292,21 +313,14 @@ export async function sweepPendingBids(options?: {
 
       if (openBids.length === 0) continue;
 
-      // Identify bids that previously lapsed on this issue
-      const lapsedBidIds = new Set<string>();
-      for (const comment of recentComments) {
-        const cMeta = comment.metadata as { action?: string; bidId?: string } | null;
-        if (cMeta?.action === "bid_lapsed" && cMeta.bidId) {
-          lapsedBidIds.add(cMeta.bidId);
-        }
-      }
-
       // Build fairness candidate list
       const candidateBidders = [];
       for (const bid of openBids) {
         if (bid.agent.revokedAt) continue;
 
         // Active claims check for this bidder's beneficiary in this project
+        // Used for fair workload-balancing sorting (fewest active claims first),
+        // without capping or skipping bidders who have reached maxActiveClaims.
         const activeClaimsCount = await prisma.issueClaim.count({
           where: {
             beneficiaryUserId: bid.beneficiaryUserId,
@@ -316,13 +330,11 @@ export async function sweepPendingBids(options?: {
           },
         });
 
-        if (activeClaimsCount >= workflow.maxActiveClaims) continue;
-
         // Total historical tasks awarded in this project
         const totalAwardedClaimsCount = await prisma.issueClaim.count({
           where: {
             beneficiaryUserId: bid.beneficiaryUserId,
-            status: "active",
+            claimedAt: { not: null },
             bug: { tenantId: issue.tenantId, projectId: issue.projectId },
           },
         });

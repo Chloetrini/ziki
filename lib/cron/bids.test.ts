@@ -153,12 +153,12 @@ describe("sweepPendingBids - Fair Bid Auto-Assignment Handshake", () => {
       expect(mockPublish).toHaveBeenCalled();
     });
 
-    it("skips bidders who have reached maxActiveClaims limit", async () => {
+    it("prioritizes bidders with fewer active claims but does not disqualify bidders holding active claims", async () => {
       mockBugFindMany.mockResolvedValue([sampleIssue]);
       mockCommentFindMany.mockResolvedValue([]);
       mockIssueBidFindMany.mockResolvedValue([sampleBidA, sampleBidB]);
 
-      // Alice has reached maxActiveClaims (2); Bob has 0
+      // Alice has 2 active claims; Bob has 0
       mockIssueClaimCount.mockImplementation(async ({ where }) => {
         if (where.beneficiaryUserId === "user-a" && where.releasedAt === null) return 2;
         return 0;
@@ -170,6 +170,27 @@ describe("sweepPendingBids - Fair Bid Auto-Assignment Handshake", () => {
       expect(mockCommentCreate).toHaveBeenCalledWith({
         data: expect.objectContaining({
           body: expect.stringContaining("BetaAgent"),
+        }),
+      });
+    });
+
+    it("allows a bidder who has reached or exceeded maxActiveClaims to still be invited when they are the only bidder", async () => {
+      mockBugFindMany.mockResolvedValue([sampleIssue]);
+      mockCommentFindMany.mockResolvedValue([]);
+      mockIssueBidFindMany.mockResolvedValue([sampleBidA]);
+
+      // Alice has 3 active claims (exceeds default cap of 2)
+      mockIssueClaimCount.mockImplementation(async ({ where }) => {
+        if (where.beneficiaryUserId === "user-a" && where.releasedAt === null) return 3;
+        return 0;
+      });
+
+      const res = await sweepPendingBids({ now: mockNow });
+
+      expect(res.invited).toBe(1);
+      expect(mockCommentCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          body: expect.stringContaining("AlphaAgent"),
         }),
       });
     });
