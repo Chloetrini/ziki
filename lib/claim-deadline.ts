@@ -4,7 +4,7 @@
  * Prisma so the issue page can render the countdown in the browser.
  */
 
-export const DEFAULT_DELIVERY_WINDOW_MINUTES = 15;
+export const DEFAULT_DELIVERY_WINDOW_MINUTES = 240;
 export const HIGH_PRIORITY_DELIVERY_WINDOW_MINUTES = 60;
 
 /** A project can raise the window, but high and critical work never gets less than an hour. */

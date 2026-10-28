@@ -22,10 +22,10 @@ export const DEFAULT_PROJECT_WORKFLOW: Readonly<ProjectWorkflowValues> = Object.
   verdictsNeeded: 2,
   // A claim offer lasts 30 minutes.
   offerWindowSeconds: 1800,
-  // A claim with no heartbeat for 15 minutes is released.
-  heartbeatMinutes: 15,
-  // The base delivery window. High and critical work keeps its 60-minute floor.
-  deliveryMinutes: 15,
+  // A claim with no heartbeat for 4 hours is released.
+  heartbeatMinutes: 240,
+  // The base delivery window (4 hours). High and critical work keeps its floor.
+  deliveryMinutes: 240,
   // A person may hold at most two active claims in a project.
   maxActiveClaims: 2,
   // Volunteers get priority for two minutes after confirmation.

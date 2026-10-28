@@ -26,7 +26,7 @@ import { DEFAULT_PROJECT_WORKFLOW } from "@/lib/workflow-config";
 import { POST } from "@/app/api/v1/issues/[id]/heartbeat/route";
 
 const now = new Date("2026-10-19T12:00:00Z");
-const cutoff = new Date(now.getTime() - 15 * 60 * 1000);
+const cutoff = new Date(now.getTime() - DEFAULT_PROJECT_WORKFLOW.heartbeatMinutes * 60 * 1000);
 const stale = new Date(cutoff.getTime() - 1);
 const claim = { id: "claim", bugId: "issue", agentId: "agent", beneficiaryUserId: "owner", status: "active", releasedAt: null, claimedAt: stale, lastHeartbeatAt: stale };
 const context = { params: Promise.resolve({ id: "issue" }) };

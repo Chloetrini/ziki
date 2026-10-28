@@ -52,14 +52,14 @@ describe("claim extension (#593)", () => {
     await expect(extendClaim(agent, "project", "issue", "waiting on review")).resolves.toEqual({
       claimId: "claim",
       issueId: "issue",
-      deliverBy: new Date("2026-10-19T12:30:00.000Z"),
+      deliverBy: new Date("2026-10-19T16:15:00.000Z"),
       extendedAt: now,
       reason: "waiting on review",
     });
     expect(db.issueClaim.update).toHaveBeenCalledWith({
       where: { id: "claim" },
       data: {
-        deliverBy: new Date("2026-10-19T12:30:00.000Z"),
+        deliverBy: new Date("2026-10-19T16:15:00.000Z"),
         extendedAt: now,
         extensionReason: "waiting on review",
       },
@@ -72,7 +72,7 @@ describe("claim extension (#593)", () => {
         claimId: "claim",
         issueId: "issue",
         projectId: "project",
-        deliverBy: "2026-10-19T12:30:00.000Z",
+        deliverBy: "2026-10-19T16:15:00.000Z",
         reason: "waiting on review",
       }),
     }));
@@ -86,7 +86,7 @@ describe("claim extension (#593)", () => {
 
   it("uses the high-priority window even when the project asks for less", async () => {
     db.issueClaim.findFirst.mockResolvedValue({ ...claim, bug: { ...claim.bug, severity: "high" } });
-    db.project.findUnique.mockResolvedValue({ deliveryWindowMinutes: 15 });
+    db.projectWorkflow.findUnique.mockResolvedValue({ deliveryMinutes: 15 });
     const result = await extendClaim(agent, "project", "issue", "still testing");
     expect(result.deliverBy).toEqual(new Date("2026-10-19T13:15:00.000Z"));
   });

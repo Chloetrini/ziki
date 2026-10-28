@@ -10,7 +10,6 @@ import {
   resumeAfterWait,
   DEFAULT_DELIVERY_WINDOW_MINUTES,
   DEFAULT_OWNER_WAIT_CAP_MINUTES,
-  HIGH_PRIORITY_DELIVERY_WINDOW_MINUTES,
 } from "./claim-deadline";
 
 const now = new Date("2026-10-19T12:00:00.000Z");
@@ -22,19 +21,19 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("claim delivery deadline (#593)", () => {
-  it("defaults to 15 minutes but gives high and critical work an hour", () => {
+  it("defaults to 240 minutes (4 hours) for work", () => {
     expect(deliveryWindowMinutes("low")).toBe(DEFAULT_DELIVERY_WINDOW_MINUTES);
-    expect(deliveryWindowMinutes("medium")).toBe(15);
-    expect(deliveryWindowMinutes("high")).toBe(HIGH_PRIORITY_DELIVERY_WINDOW_MINUTES);
-    expect(deliveryWindowMinutes("critical")).toBe(60);
+    expect(deliveryWindowMinutes("medium")).toBe(240);
+    expect(deliveryWindowMinutes("high")).toBe(240);
+    expect(deliveryWindowMinutes("critical")).toBe(240);
   });
 
   it("lets a project widen the window, never narrowing high-priority work below 60", () => {
     expect(deliveryWindowMinutes("low", 30)).toBe(30);
     expect(deliveryWindowMinutes("high", 30)).toBe(60);
     expect(deliveryWindowMinutes("high", 90)).toBe(90);
-    expect(deliveryWindowMinutes("low", 0)).toBe(15);
-    expect(deliveryWindowMinutes("low", Number.NaN)).toBe(15);
+    expect(deliveryWindowMinutes("low", 0)).toBe(240);
+    expect(deliveryWindowMinutes("low", Number.NaN)).toBe(240);
   });
 
   it("counts the deadline from acceptance", () => {
