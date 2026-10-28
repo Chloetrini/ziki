@@ -38,8 +38,17 @@ import {
 } from "@/lib/labels";
 import { ActivityTimeline, type ActivityEntry } from "@/components/activity-timeline";
 import { type AgentDecision } from "@/components/issue-agent-activity";
-import { AgentDecisionsSummary } from "@/components/agent-decisions-summary";
-import { MergeDecisions } from "@/components/merge-decisions";
+import { IssueProgressReport } from "@/components/issue-progress-report";
+import { IssueStageProvider } from "@/components/issue-stage-context";
+import { StageCommentThread, StageConversationCount } from "@/components/stage-comment-thread";
+import {
+  claimDecisionKind,
+  currentDecisionStage,
+  payloadMerged,
+  stageOfComment,
+  stageStarts,
+  type DecisionStage,
+} from "@/lib/decision-stages";
 import { IssueEscalations, type TicketEscalation } from "@/components/issue-escalations";
 import { listBugEscalations } from "@/lib/agent-questions";
 import { IssueBids } from "@/components/issue-bids";
@@ -47,7 +56,6 @@ import { GoalBudgetSection } from "@/components/goal-budgets";
 import { Badge } from "@/components/ui/badge";
 import { VoteButton } from "@/components/vote-button";
 import { UpdateIssueForm } from "@/components/update-issue-form";
-import { CommentThread } from "@/components/comment-thread";
 import { AddCommentDialog } from "@/components/add-comment-dialog";
 import type { DisputeRole } from "@/components/comment-form";
 import { AttachmentList, type AttachmentView } from "@/components/attachment-list";
@@ -123,6 +131,13 @@ function payloadNotes(payload: unknown): string | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const notes = (payload as { notes?: unknown }).notes;
   return typeof notes === "string" && notes.trim() ? notes : null;
+}
+
+/** Why an admin merger's deployment failed (#1446), from its audit payload. */
+function payloadReason(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const reason = (payload as { reason?: unknown }).reason;
+  return typeof reason === "string" && reason.trim() ? reason : null;
 }
 
 /** The database error stays in the server log under `reference`. */
@@ -472,9 +487,9 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
       // #448: what agents decided on this issue — confirmations and rejections
       // (#1122), the claim, test verdicts, and whether an agent accepted the
       // fix. Sentences only; the raw audit payloads live on the audit page (#447).
-      loadOptional<{ otherDecisions: AgentDecision[]; mergerDecisions: AgentDecision[] }>(
+      loadOptional<AgentDecision[]>(
         "agent decisions",
-        { otherDecisions: [], mergerDecisions: [] },
+        [],
         async () => {
           const [validations, claims, verdicts, accepted] = await Promise.all([
             prisma.issueValidation.findMany({
@@ -490,12 +505,18 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
                 onBehalfOf: { select: { name: true } },
               },
             }),
+            // #1446: released claims too; a claim released for any reason but
+            // the fix landing counts as a rejected claim at the Open stage.
             prisma.issueClaim.findMany({
-              where: { bugId: id, status: "active", releasedAt: null },
+              where: { bugId: id, claimedAt: { not: null } },
               orderBy: { createdAt: "asc" },
               select: {
                 id: true,
                 createdAt: true,
+                status: true,
+                claimedAt: true,
+                releasedAt: true,
+                releaseReason: true,
                 deliverBy: true,
                 extendedAt: true,
                 waitingOnOwnerSince: true,
@@ -514,9 +535,10 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
                 onBehalfOf: { select: { name: true } },
               },
             }),
-            // #1429: a merger's rejection is a merge decision too.
+            // #1429: a merger's rejection is a merge decision too, and #1446 an
+            // admin merger's failed deployment.
             prisma.agentAuditEvent.findMany({
-              where: { bugId: id, action: { in: ["issue.accepted", "issue.merge_rejected"] } },
+              where: { bugId: id, action: { in: ["issue.accepted", "issue.merge_rejected", "github.merge_failed"] } },
               orderBy: { createdAt: "asc" },
               select: {
                 id: true,
@@ -539,12 +561,21 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
                     agentName: e.agent.name,
                     notes: payloadNotes(e.payload),
                   }
-                : {
-                    id: `accepted-${e.id}`,
-                    at: e.createdAt,
-                    kind: "accepted",
-                    agentName: e.agent.name,
-                  },
+                : e.action === "github.merge_failed"
+                  ? {
+                      id: `deploy-failed-${e.id}`,
+                      at: e.createdAt,
+                      kind: "deploy_failed",
+                      agentName: e.agent.name,
+                      reason: payloadReason(e.payload),
+                    }
+                  : {
+                      id: `accepted-${e.id}`,
+                      at: e.createdAt,
+                      kind: "accepted",
+                      agentName: e.agent.name,
+                      merged: payloadMerged(e.payload),
+                    },
             );
 
           const otherDecisions: AgentDecision[] = [
@@ -567,16 +598,34 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
                     severity: v.severity,
                   },
             ),
-            ...claims.map<AgentDecision>((c) => ({
-              id: `claim-${c.id}`,
-              at: c.createdAt,
-              kind: "claimed",
-              agentName: c.agent.name,
-              personName: c.beneficiary.name,
-              deliverBy: bug.pullRequestUrl ? null : c.deliverBy,
-              extendedAt: c.extendedAt,
-              waitingOnName: c.waitingOnOwnerSince ? c.agent.owner.name : null,
-            })),
+            ...claims.flatMap<AgentDecision>((c) => {
+              const kind = claimDecisionKind(c);
+              if (kind === "claim_released") {
+                return [
+                  {
+                    id: `claim-${c.id}`,
+                    at: c.releasedAt ?? c.createdAt,
+                    kind,
+                    agentName: c.agent.name,
+                    personName: c.beneficiary.name,
+                  },
+                ];
+              }
+              if (kind !== "claimed") return [];
+              const active = c.status === "active";
+              return [
+                {
+                  id: `claim-${c.id}`,
+                  at: c.createdAt,
+                  kind,
+                  agentName: c.agent.name,
+                  personName: c.beneficiary.name,
+                  deliverBy: bug.pullRequestUrl || !active ? null : c.deliverBy,
+                  extendedAt: c.extendedAt,
+                  waitingOnName: active && c.waitingOnOwnerSince ? c.agent.owner.name : null,
+                },
+              ];
+            }),
             ...verdicts.map<AgentDecision>((v) => ({
               id: `verdict-${v.id}`,
               at: v.createdAt,
@@ -602,7 +651,8 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
             return a.id.localeCompare(b.id);
           });
 
-          return { otherDecisions, mergerDecisions };
+          // #1446: merger decisions sit with the rest under Agent decisions.
+          return [...otherDecisions, ...mergerDecisions];
         },
       ),
       loadOptional<TicketEscalation[]>("escalations", [], () =>
@@ -681,6 +731,20 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
       ? (bug.votes[0].value ?? 1)
       : 0;
   const commentTree = buildCommentTree(comments.comments);
+  // #1446: the stage the page opens on, and what each stage holds.
+  const currentStage = currentDecisionStage({
+    status: bug.status,
+    reviewStatus: bug.reviewStatus,
+    pullRequestUrl: bug.pullRequestUrl,
+    hasClaim: agentDecisions.some((d) => d.kind === "claimed"),
+    ideaAccepted: intakeStage === "ready",
+  });
+  // When each stage began, so every comment lands in the stage it was posted in.
+  const starts = stageStarts(agentDecisions);
+  const stageCommentCounts: Record<DecisionStage, number> = { idea: 0, open: 0, done: 0, ready: 0, live: 0 };
+  for (const comment of commentTree) {
+    stageCommentCounts[stageOfComment(comment.type, comment.createdAt, starts)] += 1;
+  }
   // #489: the Admin label follows each person's role in this issue's
   // organization, not their account-wide role, the same rule as admin powers.
   const namedUserIds = [
@@ -947,6 +1011,8 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
       <div className="flex flex-wrap items-start gap-5">
         {/* MAIN COLUMN */}
         <div className="flex min-w-0 flex-[999_1_600px] flex-col gap-5">
+          {/* #1446: the progress report's stage filters Agent decisions and the Conversation. */}
+          <IssueStageProvider initialStage={currentStage}>
           <EditableIssueDescription
             bugId={bug.id}
             initialTitle={bug.title}
@@ -988,47 +1054,14 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
             </section>
           ) : null}
 
-          {/* Agent decisions, summarized, in the spot the GitHub PR box had (that moved under People). */}
-          <AgentDecisionsSummary
-            otherDecisions={agentDecisions.otherDecisions}
-            mergerDecisions={agentDecisions.mergerDecisions}
-            passed={
-              agentDecisions.mergerDecisions.some((d) => d.kind === "accepted") ||
-              intakeStage === "confirmed" ||
-              intakeStage === "ready"
-            }
+          {/* Progress report and the selected stage's agent decisions (#1446), where the summary strip was. */}
+          <IssueProgressReport
+            decisions={agentDecisions}
+            currentStage={currentStage}
+            setback={bug.reviewStatus === "rejected"}
+            commentCounts={stageCommentCounts}
+            pullRequestUrl={bug.pullRequestUrl}
           />
-
-          {canUpdateStatus && !bug.isDeleted ? (
-            <UpdateIssueForm
-              bugId={bug.id}
-              status={bug.status}
-              severity={bug.severity}
-              typeId={bug.typeId}
-              assigneeId={bug.assigneeId}
-              categoryId={bug.categoryId}
-              areaId={bug.areaId}
-              users={users}
-              categories={withCurrentOption(categories, bug.category)}
-              areas={areas}
-              types={withCurrentOption(types, bug.type)}
-              milestoneId={bug.milestoneId}
-              milestones={
-                bug.milestone && !milestoneOptions.some((m) => m.id === bug.milestone?.id)
-                  ? [...milestoneOptions, { id: bug.milestone.id, title: bug.milestone.title, isClosed: bug.milestone.isClosed }]
-                  : milestoneOptions
-              }
-              canEditTriage={canTriage}
-            />
-          ) : null}
-
-          <IssueEscalations escalations={escalations} />
-
-          <Suspense fallback={null}>
-            <GoalBudgetSection tenantId={bug.tenantId} projectId={bug.projectId} bugId={bug.id} />
-          </Suspense>
-
-          <MergeDecisions decisions={agentDecisions.mergerDecisions} />
 
               <section
                 id="conversation"
@@ -1038,7 +1071,9 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <h2 className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.08em] text-zk-muted">
                     Conversation
-                    <span className="font-mono font-normal normal-case tracking-normal">{comments.visibleCount}</span>
+                    <span className="font-mono font-normal normal-case tracking-normal">
+                      <StageConversationCount counts={stageCommentCounts} fallback={comments.visibleCount} />
+                    </span>
                   </h2>
                   {bug.isDeleted ? null : (
                     <AddCommentDialog
@@ -1077,7 +1112,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
                 <Suspense fallback={null}>
                   <CommentPermalinkResolver />
                 </Suspense>
-                <CommentThread
+                <StageCommentThread
                   bugId={bug.id}
                   issueUrl={absoluteUrl(issuePath(bug.number))}
                   reporterId={bug.reporterId}
@@ -1090,8 +1125,39 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
                   tenantAdmin={access.admin}
                   readOnly={bug.isDeleted}
                   inlineComposer={false}
+                  stage={currentStage}
+                  stageStarts={starts}
                 />
               </section>
+
+          {canUpdateStatus && !bug.isDeleted ? (
+            <UpdateIssueForm
+              bugId={bug.id}
+              status={bug.status}
+              severity={bug.severity}
+              typeId={bug.typeId}
+              assigneeId={bug.assigneeId}
+              categoryId={bug.categoryId}
+              areaId={bug.areaId}
+              users={users}
+              categories={withCurrentOption(categories, bug.category)}
+              areas={areas}
+              types={withCurrentOption(types, bug.type)}
+              milestoneId={bug.milestoneId}
+              milestones={
+                bug.milestone && !milestoneOptions.some((m) => m.id === bug.milestone?.id)
+                  ? [...milestoneOptions, { id: bug.milestone.id, title: bug.milestone.title, isClosed: bug.milestone.isClosed }]
+                  : milestoneOptions
+              }
+              canEditTriage={canTriage}
+            />
+          ) : null}
+
+          <IssueEscalations escalations={escalations} />
+
+          <Suspense fallback={null}>
+            <GoalBudgetSection tenantId={bug.tenantId} projectId={bug.projectId} bugId={bug.id} />
+          </Suspense>
 
           {canDelete && !bug.isDeleted ? (
             <section className="rounded-[20px] border border-zk-bad-bd bg-zk-bad-soft/60 p-4 sm:p-6 print:hidden">
@@ -1113,6 +1179,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
               </div>
             </section>
           ) : null}
+          </IssueStageProvider>
         </div>
 
         {/* SIDE RAIL */}

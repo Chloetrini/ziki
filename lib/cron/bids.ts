@@ -113,6 +113,15 @@ export async function sweepPendingBids(options?: {
         take: 20,
       });
 
+      // Identify bids that previously lapsed on this issue
+      const lapsedBidIds = new Set<string>();
+      for (const comment of recentComments) {
+        const cMeta = comment.metadata as { action?: string; bidId?: string } | null;
+        if (cMeta?.action === "bid_lapsed" && cMeta.bidId) {
+          lapsedBidIds.add(cMeta.bidId);
+        }
+      }
+
       const goAheadComment = recentComments.find(
         (c) => (c.metadata as GoAheadMetadata | null)?.action === "bid_go_ahead",
       );
@@ -224,6 +233,9 @@ export async function sweepPendingBids(options?: {
             },
           },
         });
+        if (meta.bidId) {
+          lapsedBidIds.add(meta.bidId);
+        }
 
         const lapseText = `Response window expired for @[${meta.agentName ?? "agent"}](${meta.agentName ?? "agent"}). Giving another bidder a fair chance.`;
         const authorId = issue.reporterId ?? meta.beneficiaryUserId ?? "system";
@@ -292,15 +304,6 @@ export async function sweepPendingBids(options?: {
 
       if (openBids.length === 0) continue;
 
-      // Identify bids that previously lapsed on this issue
-      const lapsedBidIds = new Set<string>();
-      for (const comment of recentComments) {
-        const cMeta = comment.metadata as { action?: string; bidId?: string } | null;
-        if (cMeta?.action === "bid_lapsed" && cMeta.bidId) {
-          lapsedBidIds.add(cMeta.bidId);
-        }
-      }
-
       // Build fairness candidate list
       const candidateBidders = [];
       for (const bid of openBids) {
@@ -322,7 +325,7 @@ export async function sweepPendingBids(options?: {
         const totalAwardedClaimsCount = await prisma.issueClaim.count({
           where: {
             beneficiaryUserId: bid.beneficiaryUserId,
-            status: "active",
+            claimedAt: { not: null },
             bug: { tenantId: issue.tenantId, projectId: issue.projectId },
           },
         });
