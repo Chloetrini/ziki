@@ -89,6 +89,8 @@ export type MergePullResult = {
   conflict?: boolean;
   /** The repository allows no merge method the app can use. */
   noAllowedMethod?: boolean;
+  /** Detailed error message from GitHub API response if available. */
+  message?: string;
 };
 
 export interface GitHubClient {
@@ -322,13 +324,19 @@ export function createInstallationClient(
           allow_merge_commit?: boolean;
           allow_rebase_merge?: boolean;
         };
-        method = body.allow_squash_merge
-          ? "squash"
-          : body.allow_merge_commit
-            ? "merge"
-            : body.allow_rebase_merge
-              ? "rebase"
-              : null;
+        const hasKnownSettings =
+          typeof body.allow_squash_merge === "boolean" ||
+          typeof body.allow_merge_commit === "boolean" ||
+          typeof body.allow_rebase_merge === "boolean";
+        if (hasKnownSettings) {
+          method = body.allow_squash_merge
+            ? "squash"
+            : body.allow_merge_commit
+              ? "merge"
+              : body.allow_rebase_merge
+                ? "rebase"
+                : null;
+        }
       }
       if (!method) return { merged: false, noAllowedMethod: true };
       // Pinning `sha` (#492): GitHub then refuses with 409 when the head has
@@ -337,10 +345,11 @@ export function createInstallationClient(
         method: "PUT",
         body: JSON.stringify({ merge_method: method, sha: headSha }),
       });
-      if (response.status === 403) return { merged: false, forbidden: true };
-      if (response.status === 405) return { merged: false, noAllowedMethod: true };
-      if (response.status === 409) return { merged: false, conflict: true };
-      if (!response.ok) return { merged: false };
+      const errBody = !response.ok ? ((await response.json().catch(() => null)) as { message?: string } | null) : null;
+      if (response.status === 403) return { merged: false, forbidden: true, message: errBody?.message };
+      if (response.status === 405) return { merged: false, noAllowedMethod: true, message: errBody?.message };
+      if (response.status === 409) return { merged: false, conflict: true, message: errBody?.message };
+      if (!response.ok) return { merged: false, message: errBody?.message };
       const body = (await response.json()) as { merged?: boolean; sha?: string };
       return { merged: !!body.merged, sha: body.sha };
     },

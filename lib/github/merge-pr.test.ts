@@ -638,6 +638,23 @@ describe("mergePullRequest pins the head SHA and picks an allowed method (#492)"
     expect(JSON.parse(String(mergeCall![1]?.body))).toEqual({ merge_method: "merge", sha: "verified-sha" });
   });
 
+  it("falls back to squash when repo settings omit merge methods (non-admin integration caller)", async () => {
+    const fetchMock = stubFetch((url, init) => {
+      const token = tokenRoute(url);
+      if (token) return token;
+      // When caller lacks repo admin permission, GitHub returns 200 with these fields undefined
+      if (url === repoUrl && !init?.method) return jsonResponse({});
+      if (url === mergeUrl) return jsonResponse({ merged: true, sha: "merge-sha" });
+      return jsonResponse({}, false);
+    });
+
+    const result = await createInstallationClient("123", env).mergePullRequest(ref, "verified-sha");
+
+    expect(result.merged).toBe(true);
+    const mergeCall = fetchMock.mock.calls.find((call) => String(call[0]) === mergeUrl);
+    expect(JSON.parse(String(mergeCall![1]?.body))).toEqual({ merge_method: "squash", sha: "verified-sha" });
+  });
+
   it("refuses to guess when the repository allows no merge method at all", async () => {
     const fetchMock = stubFetch((url, init) => {
       const token = tokenRoute(url);

@@ -513,13 +513,14 @@ export async function acceptFix(
     }
 
     if (!mergeResult.merged) {
+      const detailSuffix = mergeResult.message ? `: ${mergeResult.message}` : ".";
       const failureReason = mergeResult.conflict
-        ? "The pull request changed after its checks were verified."
+        ? `The pull request changed after its checks were verified${detailSuffix}`
         : mergeResult.forbidden
-          ? "The app is not allowed to merge this repository."
+          ? `The app is not allowed to merge this repository${detailSuffix}`
           : mergeResult.noAllowedMethod
-            ? "The repository allows no merge method the app can use."
-            : "GitHub refused the merge.";
+            ? `The repository allows no merge method the app can use${detailSuffix}`
+            : (mergeResult.message ? `GitHub refused the merge: ${mergeResult.message}` : "GitHub refused the merge.");
 
       await publish(prisma, {
         tenantId: bug.tenantId,
