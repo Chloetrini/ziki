@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { awardBid } from "@/lib/agent-api/bid";
 import { isConfirmed } from "@/lib/agent-api/validation";
+import { openIssueStages } from "@/lib/issue-stage";
+import type { PrismaClient } from "@prisma/client";
 import { workflowFor } from "@/lib/workflow";
 import { WORK_READINESS_VOTE_THRESHOLD } from "@/lib/ticket-assignment";
 import { commentedSummary } from "@/lib/activity-log";
@@ -52,7 +54,7 @@ export async function sweepPendingBids(options?: {
   limit?: number;
 }): Promise<BidSweepResult> {
   const now = options?.now ?? new Date();
-  const limit = options?.limit ?? 50;
+  const limit = options?.limit ?? 200;
 
   const result: BidSweepResult = {
     invited: 0,
@@ -91,13 +93,20 @@ export async function sweepPendingBids(options?: {
       severity: true,
       voteCount: true,
     },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit,
   });
 
   for (const issue of candidateIssues) {
     try {
-      if (!(await isConfirmed(issue.id))) continue;
+      let isConfirmedIssue = await isConfirmed(issue.id);
+      if (!isConfirmedIssue && typeof (prisma as unknown as { bug?: { findMany?: unknown } }).bug?.findMany === "function") {
+        try {
+          const stage = (await openIssueStages(prisma as unknown as PrismaClient, { id: issue.id })).get(issue.id);
+          isConfirmedIssue = stage === "ready" || stage === "confirmed";
+        } catch {}
+      }
+      if (!isConfirmedIssue) continue;
 
       const workflow = await workflowFor(issue.projectId);
       const responseWindowMs =
@@ -310,6 +319,8 @@ export async function sweepPendingBids(options?: {
         if (bid.agent.revokedAt) continue;
 
         // Active claims check for this bidder's beneficiary in this project
+        // Used for fair workload-balancing sorting (fewest active claims first),
+        // without capping or skipping bidders who have reached maxActiveClaims.
         const activeClaimsCount = await prisma.issueClaim.count({
           where: {
             beneficiaryUserId: bid.beneficiaryUserId,
@@ -318,8 +329,6 @@ export async function sweepPendingBids(options?: {
             bug: { tenantId: issue.tenantId, projectId: issue.projectId },
           },
         });
-
-        if (activeClaimsCount >= workflow.maxActiveClaims) continue;
 
         // Total historical tasks awarded in this project
         const totalAwardedClaimsCount = await prisma.issueClaim.count({

@@ -123,7 +123,7 @@ const REJECTED_WHERE = { some: { kind: "real", verdict: "reject" } } satisfies P
 const DUPLICATE_STATUS = "duplicate";
 /** `?status=ready_to_merge`: resolved issues whose fix is ready for admin merge (#SDLC). */
 const READY_TO_MERGE_STATUS = "ready_to_merge";
-/** `?status=auto_merge`: resolved issues whose fix was auto-merged (#SDLC). */
+/** `?status=auto_merge`: resolved issues whose fix is live — merged to dev, staging, main/production (#SDLC). */
 const AUTO_MERGE_STATUS = "auto_merge";
 
 /** The filters under the All tab. Open, In progress and Done have tabs of their own. */
@@ -746,7 +746,7 @@ export default async function BugsPage({
   void _escalated;
   void _rejected;
   void _duplicate;
-  const [statusCounts, escalatedCount, rejectedCount, duplicateCount, readyToMergeCount, autoMergeCount] = isDeletedView || !tenantId ? [[], 0, 0, 0, 0, 0] : await Promise.all([
+  const [statusCounts, escalatedCount, rejectedCount, duplicateCount, readyToMergeCount, liveCount] = isDeletedView || !tenantId ? [[], 0, 0, 0, 0, 0] : await Promise.all([
     loadOrEmpty("status tabs", () => prisma.bug.groupBy({
       by: ["status"], where: statusTabWhere, _count: { _all: true },
     }), []),
@@ -762,7 +762,7 @@ export default async function BugsPage({
     loadOrEmpty("ready to merge tab", () => prisma.bug.count({
       where: { ...statusTabWhere, status: "resolved", reviewStatus: "ready_to_merge" },
     }), 0),
-    loadOrEmpty("auto merge tab", () => prisma.bug.count({
+    loadOrEmpty("live tab", () => prisma.bug.count({
       where: { ...statusTabWhere, status: "resolved", reviewStatus: "merged" },
     }), 0),
   ]);
@@ -915,11 +915,11 @@ export default async function BugsPage({
           {!isDeletedView ? (
             <nav aria-label="Issue status" className="issues-status-nav ml-auto min-w-0">
               <ul>
-                {[{ value: "open", label: "Open" }, { value: "in_progress", label: "In progress" }, { value: "resolved", label: "Done" }, { value: READY_TO_MERGE_STATUS, label: "Ready to Merge" }, { value: AUTO_MERGE_STATUS, label: "Auto Merge" }, { value: ALL_STATUS, label: "All" }].map(({ value, label }) => (
+                {[{ value: "open", label: "Open" }, { value: "in_progress", label: "In progress" }, { value: "resolved", label: "Done" }, { value: READY_TO_MERGE_STATUS, label: "Ready to Merge" }, { value: AUTO_MERGE_STATUS, label: "Live" }, { value: ALL_STATUS, label: "All" }].map(({ value, label }) => (
                   <li key={value}>
                     <Link href={statusHref(value)} aria-current={(value === ALL_STATUS ? allSelected : value === statusParam) ? "page" : undefined}>
                       <span className={`issues-status-dot issues-status-${value}`} aria-hidden="true" />
-                      {label}<span className="issues-status-count">{value === ALL_STATUS ? allCount : value === READY_TO_MERGE_STATUS ? readyToMergeCount : value === AUTO_MERGE_STATUS ? autoMergeCount : countForStatus(value)}</span>
+                      {label}<span className="issues-status-count">{value === ALL_STATUS ? allCount : value === READY_TO_MERGE_STATUS ? readyToMergeCount : value === AUTO_MERGE_STATUS ? liveCount : countForStatus(value)}</span>
                     </Link>
                   </li>
                 ))}

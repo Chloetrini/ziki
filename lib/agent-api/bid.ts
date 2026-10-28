@@ -16,6 +16,8 @@ import { WORK_READINESS_VOTE_THRESHOLD } from "@/lib/ticket-assignment";
 import { ensureWatching } from "@/lib/watch";
 import type { AppRole } from "@/lib/roles";
 import { parseIssueRef } from "@/lib/issue-ref";
+import { openIssueStages } from "@/lib/issue-stage";
+import type { PrismaClient } from "@prisma/client";
 
 export const BID_NOTE_MAX = 280;
 const id = z.string().trim().min(1).max(191);
@@ -71,16 +73,19 @@ export async function placeBid(caller: AgentContext, projectId: string, issueRef
     });
     if (!bug) throw new IssueApiError(404, "Issue not found in this project.");
     if (bug.status !== "open") throw new IssueApiError(409, "Only open issues can take bids.");
-    if (!await isConfirmed(bugId, tx) || bug.voteCount < WORK_READINESS_VOTE_THRESHOLD) {
+    const confirmed = await isConfirmed(bugId, tx);
+    let isReady = confirmed;
+    if (!isReady && typeof (tx as unknown as { bug?: { findMany?: unknown } }).bug?.findMany === "function") {
+      try {
+        const stage = (await openIssueStages(tx as unknown as PrismaClient, { id: bugId })).get(bugId);
+        isReady = stage === "ready" || stage === "confirmed";
+      } catch {}
+    }
+    if (!isReady || bug.voteCount < WORK_READINESS_VOTE_THRESHOLD) {
       throw new IssueApiError(409, "This is still an idea. Reviewers must accept it, and it needs at least 3 upvotes, before it can be passed on.");
     }
     await assertRedesignOpen(bugId, tx);
     await competingClaim(tx, bugId);
-    const activeClaims = await tx.issueClaim.count({
-      where: { beneficiaryUserId: caller.ownerId, status: "active", releasedAt: null, bug: { tenantId: caller.tenantId, projectId } },
-    });
-    const { maxActiveClaims } = await workflowFor(projectId, tx);
-    if (activeClaims >= maxActiveClaims) throw new IssueApiError(409, "This person already has the maximum number of active tasks.");
 
     const existing = await tx.issueBid.findUnique({ where: { bugId_agentId: { bugId, agentId: caller.agentId } } });
     if (existing?.awardedAt) throw new IssueApiError(409, "This bid was already awarded.");
@@ -198,7 +203,15 @@ export async function awardBid(actor: Actor, bidId: string, dispatcher?: AgentCo
       });
       if (!fresh || fresh.withdrawnAt || fresh.awardedAt) throw new IssueApiError(409, "This bid is no longer open.");
       if (fresh.bug.status !== "open") throw new IssueApiError(409, "Only open issues can be awarded.");
-      if (!await isConfirmed(fresh.bugId, tx) || fresh.bug.voteCount < WORK_READINESS_VOTE_THRESHOLD) {
+      const confirmed = await isConfirmed(fresh.bugId, tx);
+      let isReady = confirmed;
+      if (!isReady && typeof (tx as unknown as { bug?: { findMany?: unknown } }).bug?.findMany === "function") {
+        try {
+          const stage = (await openIssueStages(tx as unknown as PrismaClient, { id: fresh.bugId })).get(fresh.bugId);
+          isReady = stage === "ready" || stage === "confirmed";
+        } catch {}
+      }
+      if (!isReady || fresh.bug.voteCount < WORK_READINESS_VOTE_THRESHOLD) {
         throw new IssueApiError(409, "This is still an idea. Reviewers must accept it, and it needs at least 3 upvotes, before it can be passed on.");
       }
       if (fresh.bug.assigneeId && fresh.bug.assigneeId !== fresh.beneficiaryUserId) {
@@ -225,12 +238,8 @@ export async function awardBid(actor: Actor, bidId: string, dispatcher?: AgentCo
           payload: { claimId: competing.expired.id, issueId: fresh.bugId, beneficiaryUserId: competing.expired.beneficiaryUserId, reason: "expired" },
         });
       }
-      const activeClaims = await tx.issueClaim.count({
-        where: { beneficiaryUserId: fresh.beneficiaryUserId, status: "active", releasedAt: null, bug: { tenantId: fresh.bug.tenantId, projectId: fresh.bug.projectId } },
-      });
-      const workflow = await workflowFor(fresh.bug.projectId, tx);
-      if (activeClaims >= workflow.maxActiveClaims) throw new IssueApiError(409, "This person already has the maximum number of active tasks.");
 
+      const workflow = await workflowFor(fresh.bug.projectId, tx);
       const claim = await tx.issueClaim.create({
         data: {
           bugId: fresh.bugId,
