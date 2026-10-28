@@ -5,6 +5,10 @@ import { requireLevel } from "@/lib/agents/levels";
 import { isConfirmed } from "@/lib/agent-api/validation";
 import { reviewerConflict } from "@/lib/agents/independence";
 import { workflowFor } from "@/lib/workflow";
+import { MERGE_BLOCKED, MERGE_FAILED } from "@/lib/merge-status";
+
+/** Still waiting on the admin merge: ready, or blocked or failed and able to try again. */
+const AWAITING_MERGE = ["ready_to_merge", MERGE_BLOCKED, MERGE_FAILED];
 
 export type ReadyToMergeIssue = {
   id: string;
@@ -37,13 +41,13 @@ export async function findReadyToMergeIssues(
 
   let reviewStatusCondition: Prisma.StringNullableFilter | string | undefined;
   if (reviewStatusFilter === "ready_to_merge") {
-    reviewStatusCondition = "ready_to_merge";
+    reviewStatusCondition = { in: AWAITING_MERGE };
   } else if (reviewStatusFilter === "submitted") {
     reviewStatusCondition = { in: ["submitted", null] } as unknown as Prisma.StringNullableFilter;
   } else if (reviewStatusFilter === "all") {
     reviewStatusCondition = { not: "rejected" };
   } else if (agent.level === "admin_merger") {
-    reviewStatusCondition = "ready_to_merge";
+    reviewStatusCondition = { in: AWAITING_MERGE };
   } else {
     reviewStatusCondition = { not: "rejected" };
   }
@@ -57,7 +61,7 @@ export async function findReadyToMergeIssues(
       reviewStatus: reviewStatusCondition,
       pullRequestUrl: { not: null },
       OR: [
-        { reviewStatus: "ready_to_merge" },
+        { reviewStatus: { in: AWAITING_MERGE } },
         {
           claims: {
             some: {
@@ -119,7 +123,7 @@ export async function findReadyToMergeIssues(
       owners.add(verdict.agent.ownerUserId);
     }
 
-    if (bug.reviewStatus !== "ready_to_merge" && owners.size < verdictsNeeded) continue;
+    if (!AWAITING_MERGE.includes(bug.reviewStatus ?? "") && owners.size < verdictsNeeded) continue;
 
     const reviewed = {
       reporterId: bug.reporterId,

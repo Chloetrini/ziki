@@ -19,6 +19,7 @@ import { statusChangedSummary, commentedSummary, commentPreview } from "@/lib/ac
 import { workflowFor } from "@/lib/workflow";
 import {
   clientForInstallation,
+  codeRabbitThreadsMessage,
   isPullRequestClosedUnmerged,
   parseGitHubRepoUrl,
   parsePullRequestUrl,
@@ -29,6 +30,7 @@ import {
 } from "@/lib/github/merge-pr";
 import { recordMistake, type RecordMistakeInput } from "@/lib/agent-api/mistakes";
 import { notifyMergeFailed } from "@/lib/agent-notifications";
+import { MERGE_BLOCKED, MERGE_FAILED, recordMergeOutcome, type MergeOutcomeStatus } from "@/lib/merge-status";
 
 /**
  * A merger accepting a fix (#434). The gate: the issue is confirmed, no
@@ -95,7 +97,17 @@ export type AcceptFixResult =
   | {
       status: 409;
       error: "not_ready";
-      missing: "already_accepted" | "redesign" | "confirmation" | "verdicts" | "claim" | "pull_request" | "deployment_verification" | "github_merge_failed";
+      missing:
+        | "already_accepted"
+        | "redesign"
+        | "confirmation"
+        | "verdicts"
+        | "claim"
+        | "pull_request"
+        | "deployment_verification"
+        | "github_merge_failed"
+        | "github_app"
+        | "review_threads";
       message: string;
     };
 
@@ -108,8 +120,6 @@ export type AcceptFixOptions = {
   action?: "accept" | "reject";
   notes?: string;
   feedback?: string;
-  commitSha?: string;
-  mergeCommitSha?: string;
   mistake?: Partial<RecordMistakeInput> & {
     title: string;
     antiPattern: string;
@@ -415,114 +425,119 @@ export async function acceptFix(
     ? deps.client
     : (hasAppConfig ? clientForInstallation(bug.project?.githubInstallationId) : null);
 
-  let mergeCommitSha: string | null = options.mergeCommitSha ?? options.commitSha ?? null;
+  // Every way the merge can stop records a merge status and a comment, so the
+  // issue says exactly where it is. None of them resolves it or pays points.
+  const stop = async (
+    status: MergeOutcomeStatus,
+    missing: "pull_request" | "deployment_verification" | "github_merge_failed" | "github_app" | "review_threads",
+    message: string,
+  ) => {
+    // #1446: a failed check is logged so the issue page lists it under Ready to merge.
+    await audit(agent, "github.merge_failed", `bug:${bug.id}`, { reason: message, missing }, { bugId: bug.id, db: prisma });
+    await recordMergeOutcome(prisma, { agent, bug, status, reason: message });
+    return { status: 409 as const, error: "not_ready" as const, missing, message };
+  };
 
-  if (ghClient) {
-    // 1. Verify PR state directly from GitHub
-    let pullRequest: PullRequest;
+  // Without a GitHub client nothing can be checked or merged, so the merge
+  // stops here instead of marking the issue merged.
+  if (!ghClient) {
+    return stop(
+      MERGE_BLOCKED,
+      "github_app",
+      "The GitHub App is not set up for this project, so Ziki can't check or merge the pull request.",
+    );
+  }
+
+  // 1. Verify PR state directly from GitHub
+  let pullRequest: PullRequest;
+  try {
+    pullRequest = await ghClient.getPullRequest(ref);
+  } catch {
+    return stop(MERGE_BLOCKED, "deployment_verification", "GitHub could not be reached to verify the pull request.");
+  }
+
+  if (pullRequest.state === "closed" && !pullRequest.merged) {
+    return stop(MERGE_BLOCKED, "pull_request", "That pull request is closed without being merged.");
+  }
+
+  const headToVerify = acceptedHeadSha || pullRequest.headSha;
+  if (pullRequest.headSha && headToVerify && pullRequest.headSha !== headToVerify) {
+    return stop(MERGE_BLOCKED, "pull_request", "The pull request's head commit changed since verification. Please re-review.");
+  }
+
+  // 2. Verify CI/CD checks
+  let green = false;
+  try {
+    green = await ghClient.checksGreen(ref, headToVerify);
+  } catch {
+    green = false;
+  }
+  if (!green) {
+    return stop(
+      MERGE_BLOCKED,
+      "deployment_verification",
+      "GitHub Actions CI/CD checks or deployment runs have not passed for this pull request head commit.",
+    );
+  }
+
+  // The merge commit comes only from GitHub's answer, never from the request.
+  let mergeCommitSha: string | null;
+
+  // 3. Execute GitHub merge if not already merged
+  if (!pullRequest.merged) {
+    // Every review thread CodeRabbit opened must be resolved first. When the
+    // threads can't be read, the merge waits rather than guessing.
+    let openThreads: number;
     try {
-      pullRequest = await ghClient.getPullRequest(ref);
+      openThreads = await ghClient.unresolvedCodeRabbitThreads(ref);
     } catch {
-      const message = "GitHub could not be reached to verify the pull request.";
-      // #1446: a failed deployment check is logged so the issue page lists it under Ready to merge.
-      await audit(agent, "github.merge_failed", `bug:${bug.id}`, { reason: message, missing: "deployment_verification" }, { bugId: bug.id, db: prisma });
-      return {
-        status: 409 as const,
-        error: "not_ready" as const,
-        missing: "deployment_verification" as const,
-        message,
-      };
+      return stop(MERGE_BLOCKED, "review_threads", "GitHub could not be reached to read CodeRabbit's review threads.");
+    }
+    if (openThreads > 0) {
+      return stop(MERGE_BLOCKED, "review_threads", codeRabbitThreadsMessage(openThreads));
     }
 
-    if (pullRequest.state === "closed" && !pullRequest.merged) {
-      return {
-        status: 409 as const,
-        error: "not_ready" as const,
-        missing: "pull_request" as const,
-        message: "That pull request is closed without being merged.",
-      };
-    }
-
-    const headToVerify = acceptedHeadSha || pullRequest.headSha;
-    if (pullRequest.headSha && headToVerify && pullRequest.headSha !== headToVerify) {
-      return {
-        status: 409 as const,
-        error: "not_ready" as const,
-        missing: "pull_request" as const,
-        message: "The pull request's head commit changed since verification. Please re-review.",
-      };
-    }
-
-    // 2. Verify CI/CD checks
-    let green = false;
+    let mergeResult: MergePullResult;
     try {
-      green = await ghClient.checksGreen(ref, headToVerify);
+      mergeResult = await ghClient.mergePullRequest(ref, headToVerify);
     } catch {
-      green = false;
-    }
-    if (!green) {
-      const message = "GitHub Actions CI/CD checks or deployment runs have not passed for this pull request head commit.";
-      await audit(agent, "github.merge_failed", `bug:${bug.id}`, { reason: message, missing: "deployment_verification" }, { bugId: bug.id, db: prisma });
-      return {
-        status: 409 as const,
-        error: "not_ready" as const,
-        missing: "deployment_verification" as const,
-        message,
-      };
+      mergeResult = { merged: false };
     }
 
-    // 3. Execute GitHub merge if not already merged
-    if (!pullRequest.merged) {
-      let mergeResult: MergePullResult;
-      try {
-        mergeResult = await ghClient.mergePullRequest(ref, headToVerify);
-      } catch {
-        mergeResult = { merged: false };
-      }
+    if (!mergeResult.merged) {
+      const failureReason = mergeResult.conflict
+        ? "The pull request changed after its checks were verified."
+        : mergeResult.forbidden
+          ? "The app is not allowed to merge this repository."
+          : mergeResult.noAllowedMethod
+            ? "The repository allows no merge method the app can use."
+            : "GitHub refused the merge.";
 
-      if (!mergeResult.merged) {
-        const failureReason = mergeResult.conflict
-          ? "The pull request changed after its checks were verified."
-          : mergeResult.forbidden
-            ? "The app is not allowed to merge this repository."
-            : mergeResult.noAllowedMethod
-              ? "The repository allows no merge method the app can use."
-              : "GitHub refused the merge.";
+      await publish(prisma, {
+        tenantId: bug.tenantId,
+        type: "github.merge_failed",
+        payload: { issueId: bug.id, reason: failureReason, pullRequestUrl: bug.pullRequestUrl },
+        actorAgentId: agent.agentId,
+        bugId: bug.id,
+      });
 
-        await publish(prisma, {
-          tenantId: bug.tenantId,
-          type: "github.merge_failed",
-          payload: { issueId: bug.id, reason: failureReason, pullRequestUrl: bug.pullRequestUrl },
-          actorAgentId: agent.agentId,
+      const recipient = claim?.beneficiaryUserId ?? bug.assigneeId ?? null;
+      if (recipient) {
+        notifyMergeFailed({
           bugId: bug.id,
+          bugTitle: bug.title,
+          recipientId: recipient,
+          reason: failureReason,
+          agent: { name: agent.name },
         });
-        await audit(agent, "github.merge_failed", `bug:${bug.id}`, { reason: failureReason }, { bugId: bug.id, db: prisma });
-
-        const recipient = claim?.beneficiaryUserId ?? bug.assigneeId ?? null;
-        if (recipient) {
-          notifyMergeFailed({
-            bugId: bug.id,
-            bugTitle: bug.title,
-            recipientId: recipient,
-            reason: failureReason,
-            agent: { name: agent.name },
-          });
-        }
-
-        return {
-          status: 409 as const,
-          error: "not_ready" as const,
-          missing: "github_merge_failed" as const,
-          message: failureReason,
-        };
       }
 
-      mergeCommitSha = mergeResult.sha ?? mergeCommitSha ?? null;
-    } else {
-      mergeCommitSha = pullRequest.headSha ?? mergeCommitSha ?? null;
+      return stop(MERGE_FAILED, "github_merge_failed", failureReason);
     }
+
+    mergeCommitSha = mergeResult.sha ?? null;
   } else {
-    mergeCommitSha = mergeCommitSha ?? acceptedHeadSha ?? null;
+    mergeCommitSha = pullRequest.headSha ?? null;
   }
 
   return prisma.$transaction(async (tx) => {
@@ -555,7 +570,9 @@ export async function acceptFix(
       data: { status: "released", releasedAt: new Date(), releaseReason: "resolved" },
     });
 
-    const mergeCommentBody = "Fix accepted and merged by admin merger.";
+    const mergeCommentBody = mergeCommitSha
+      ? `Merged on GitHub by the admin merger: commit ${mergeCommitSha.slice(0, 7)} of ${bug.pullRequestUrl}.`
+      : `Merged on GitHub by the admin merger: ${bug.pullRequestUrl}.`;
     const mergeComment = await tx.comment.create({
       data: {
         bugId: bug.id,

@@ -51,6 +51,7 @@ function defaultMockGhClient(overrides: Partial<GitHubClient> = {}): GitHubClien
   return {
     getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: true, headSha: "linked-sha" })),
     checksGreen: vi.fn(async () => true),
+    unresolvedCodeRabbitThreads: vi.fn(async () => 0),
     mergePullRequest: vi.fn(async () => ({ merged: true, sha: "git-merge-commit-sha" })),
     ...overrides,
   };
@@ -295,6 +296,7 @@ describe("acceptFix: the gate (#434)", () => {
     const client = {
       getPullRequest: vi.fn(async () => ({ state: "closed", merged: false, mergeable: false, headSha: "sha1" })),
       checksGreen: vi.fn(async () => true),
+      unresolvedCodeRabbitThreads: vi.fn(async () => 0),
       mergePullRequest: vi.fn(),
     };
     const result = await acceptFix(merger("m1", "mo", "merger"), "bug1", { client });
@@ -644,26 +646,104 @@ describe("acceptFix: a successful accept (#434)", () => {
     });
   });
 
-  it("admin merger proceeds when GitHub client is unavailable in server environment", async () => {
+  it("admin merger without a GitHub App records merge_blocked and resolves nothing", async () => {
     confirmWith("rob", "sam");
     verdict("r1", "rob");
     verdict("r2", "sam");
     db.bug.findFirst.mockResolvedValue(bugRow());
 
-    const result = await executeAdminMerge(merger("m1", "mo", "admin_merger"), "bug1", { client: null }, { commitSha: "custom-commit-sha" });
-    expect(result).toMatchObject({
-      status: 200,
-      accepted: true,
-      merged: true,
-      mergeCommitSha: "custom-commit-sha",
-    });
-    expect(db.bug.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "bug1" },
-        data: expect.objectContaining({ status: "resolved", reviewStatus: "merged" }),
-      }),
+    const result = await executeAdminMerge(merger("m1", "mo", "admin_merger"), "bug1", { client: null });
+
+    expect(result).toMatchObject({ status: 409, error: "not_ready", missing: "github_app" });
+    expect(db.bug.update).toHaveBeenCalledWith({ where: { id: "bug1" }, data: { reviewStatus: "merge_blocked" } });
+    expect(db.bug.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "resolved" }) }),
     );
-    expect(db.pointEntry.createMany).toHaveBeenCalled();
+    expect(db.comment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ body: expect.stringMatching(/^Merge blocked: The GitHub App is not set up/) }) }),
+    );
+    expect(db.issueClaim.updateMany).not.toHaveBeenCalled();
+    expect(db.pointEntry.createMany).not.toHaveBeenCalled();
+  });
+
+  it("admin merger with no GitHub App configured on the server refuses instead of resolving", async () => {
+    vi.stubEnv("GITHUB_APP_ID", "");
+    vi.stubEnv("GITHUB_APP_PRIVATE_KEY", "");
+    confirmWith("rob", "sam");
+    verdict("r1", "rob");
+    verdict("r2", "sam");
+    db.bug.findFirst.mockResolvedValue(bugRow());
+
+    let result;
+    try {
+      result = await executeAdminMerge(merger("m1", "mo", "admin_merger"), "bug1");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    expect(result).toMatchObject({ status: 409, missing: "github_app" });
+    expect(db.pointEntry.createMany).not.toHaveBeenCalled();
+  });
+
+  it("admin merger records merge_blocked while CodeRabbit threads are open, and does not merge", async () => {
+    confirmWith("rob", "sam");
+    verdict("r1", "rob");
+    verdict("r2", "sam");
+    db.bug.findFirst.mockResolvedValue(bugRow());
+    const client = defaultMockGhClient({ unresolvedCodeRabbitThreads: vi.fn(async () => 2) });
+
+    const result = await executeAdminMerge(merger("m1", "mo", "admin_merger"), "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, missing: "review_threads", message: expect.stringContaining("2 unresolved review threads") });
+    expect(client.mergePullRequest).not.toHaveBeenCalled();
+    expect(db.bug.update).toHaveBeenCalledWith({ where: { id: "bug1" }, data: { reviewStatus: "merge_blocked" } });
+    expect(db.pointEntry.createMany).not.toHaveBeenCalled();
+  });
+
+  it("admin merger waits when CodeRabbit's threads can't be read", async () => {
+    confirmWith("rob", "sam");
+    verdict("r1", "rob");
+    verdict("r2", "sam");
+    db.bug.findFirst.mockResolvedValue(bugRow());
+    const client = defaultMockGhClient({ unresolvedCodeRabbitThreads: vi.fn(async () => { throw new Error("down"); }) });
+
+    const result = await executeAdminMerge(merger("m1", "mo", "admin_merger"), "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, missing: "review_threads" });
+    expect(client.mergePullRequest).not.toHaveBeenCalled();
+    expect(db.pointEntry.createMany).not.toHaveBeenCalled();
+  });
+
+  it("admin merger records merge_failed when GitHub refuses the merge", async () => {
+    confirmWith("rob", "sam");
+    verdict("r1", "rob");
+    verdict("r2", "sam");
+    db.bug.findFirst.mockResolvedValue(bugRow());
+    const client = defaultMockGhClient({ mergePullRequest: vi.fn(async () => ({ merged: false, forbidden: true })) });
+
+    const result = await executeAdminMerge(merger("m1", "mo", "admin_merger"), "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, missing: "github_merge_failed" });
+    expect(db.bug.update).toHaveBeenCalledWith({ where: { id: "bug1" }, data: { reviewStatus: "merge_failed" } });
+    expect(db.comment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ body: expect.stringMatching(/^Merge failed: The app is not allowed/) }) }),
+    );
+    expect(db.pointEntry.createMany).not.toHaveBeenCalled();
+  });
+
+  it("admin merger takes the merge commit from GitHub and ignores one sent in the request", async () => {
+    confirmWith("rob", "sam");
+    verdict("r1", "rob");
+    verdict("r2", "sam");
+    db.bug.findFirst.mockResolvedValue(bugRow());
+    const forged = { commitSha: "forged-sha", mergeCommitSha: "forged-sha" } as Parameters<typeof executeAdminMerge>[3];
+
+    const result = await executeAdminMerge(merger("m1", "mo", "admin_merger"), "bug1", { client: defaultMockGhClient() }, forged);
+
+    expect(result).toMatchObject({ status: 200, merged: true, mergeCommitSha: "git-merge-commit-sha" });
+    expect(db.comment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ body: `Merged on GitHub by the admin merger: commit git-mer of ${PR}.` }) }),
+    );
   });
 
   it("admin merger refuses to merge when GitHub Actions CI/CD checks fail", async () => {
@@ -674,6 +754,7 @@ describe("acceptFix: a successful accept (#434)", () => {
     const client = {
       getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: true, headSha: "linked-sha" })),
       checksGreen: vi.fn(async () => false),
+      unresolvedCodeRabbitThreads: vi.fn(async () => 0),
       mergePullRequest: vi.fn(),
     };
 
@@ -684,7 +765,8 @@ describe("acceptFix: a successful accept (#434)", () => {
       missing: "deployment_verification",
       message: expect.stringContaining("GitHub Actions CI/CD checks"),
     });
-    expect(db.bug.update).not.toHaveBeenCalled();
+    expect(db.bug.update).toHaveBeenCalledTimes(1);
+    expect(db.bug.update).toHaveBeenCalledWith({ where: { id: "bug1" }, data: { reviewStatus: "merge_blocked" } });
     expect(db.pointEntry.createMany).not.toHaveBeenCalled();
     // #1446: the failed deployment check is logged for the issue page.
     expect(db.agentAuditEvent.create).toHaveBeenCalledWith(
@@ -707,6 +789,7 @@ describe("acceptFix: a successful accept (#434)", () => {
         throw new Error("network");
       }),
       checksGreen: vi.fn(),
+      unresolvedCodeRabbitThreads: vi.fn(async () => 0),
       mergePullRequest: vi.fn(),
     };
 
@@ -725,6 +808,7 @@ describe("acceptFix: a successful accept (#434)", () => {
     const client = {
       getPullRequest: vi.fn(async () => ({ state: "closed", merged: false, mergeable: false, headSha: "linked-sha" })),
       checksGreen: vi.fn(async () => true),
+      unresolvedCodeRabbitThreads: vi.fn(async () => 0),
       mergePullRequest: vi.fn(),
     };
 
@@ -748,6 +832,7 @@ describe("acceptFix: a successful accept (#434)", () => {
     const client = {
       getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: true, headSha: "linked-sha" })),
       checksGreen: vi.fn(async () => true),
+      unresolvedCodeRabbitThreads: vi.fn(async () => 0),
       mergePullRequest: vi.fn(async () => ({ merged: false, conflict: true })),
     };
 
@@ -759,7 +844,8 @@ describe("acceptFix: a successful accept (#434)", () => {
       message: "The pull request changed after its checks were verified.",
     });
     expect(client.mergePullRequest).toHaveBeenCalled();
-    expect(db.bug.update).not.toHaveBeenCalled();
+    expect(db.bug.update).toHaveBeenCalledTimes(1);
+    expect(db.bug.update).toHaveBeenCalledWith({ where: { id: "bug1" }, data: { reviewStatus: "merge_failed" } });
     expect(db.pointEntry.createMany).not.toHaveBeenCalled();
     expect(db.agentAuditEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -778,6 +864,7 @@ describe("acceptFix: a successful accept (#434)", () => {
     const client = {
       getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: true, headSha: "linked-sha" })),
       checksGreen: vi.fn(async () => true),
+      unresolvedCodeRabbitThreads: vi.fn(async () => 0),
       mergePullRequest: vi.fn(async () => ({ merged: true, sha: "git-merge-commit-sha-999" })),
     };
 

@@ -27,6 +27,7 @@ import { isConfirmed } from "@/lib/agent-api/validation";
 import { notifyLater } from "@/lib/notify";
 import type { NotificationEvent } from "@/lib/notifications";
 import { logger } from "@/lib/logger";
+import { REVIEW_STATUSES } from "@/lib/merge-status";
 
 export class IssueApiError extends Error {
   constructor(public status: number, message: string, public body?: Record<string, unknown>) { super(message); }
@@ -171,7 +172,7 @@ export async function listAgentIssues(scope: Scope, params: URLSearchParams) {
   const assignee = params.get("assignee");
   const stage: IssueStage | null = enumFilter("stage", params.get("stage"), stageSchema.options);
   const reviewStatusParam = params.get("reviewStatus");
-  const reviewStatus = enumFilter("reviewStatus", reviewStatusParam, ["submitted", "ready_to_merge", "rejected", "merged"]);
+  const reviewStatus = enumFilter("reviewStatus", reviewStatusParam, REVIEW_STATUSES);
   let assigneeId: string | null | undefined;
   if (assignee) {
     if (assignee === "none") assigneeId = null;

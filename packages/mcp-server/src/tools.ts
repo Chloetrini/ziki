@@ -745,7 +745,7 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "ziki_admin_merge",
-    summary: "Execute the final Git merge for an issue fix approved as ready to merge, resolve the issue, and distribute points. Requires admin merger level.",
+    summary: "Merge an approved fix on GitHub through the GitHub App, then resolve the issue and distribute points. Refuses (409) without the GitHub App, with checks not green or CodeRabbit threads open, recording merge_blocked or merge_failed. Requires admin merger level.",
     level: "admin_merger",
     method: "POST",
     route: "/issues/{id}/admin-merge",
