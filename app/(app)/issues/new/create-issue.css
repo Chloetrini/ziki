@@ -1,5 +1,5 @@
 /* Create an Issue only; shared editor, controls and the app shell are unchanged. */
-.create-issue-page { max-width: 760px; }
+.create-issue-page { max-width: 1040px; }
 .create-issue-heading > a { min-height: 40px; gap: 8px; border-radius: 4px; }
 .create-issue-heading > a:focus-visible { outline: 2px solid var(--zk-accent); outline-offset: 4px; }
 .create-issue-heading h1 { margin-top: 12px; font-size: 30px; line-height: 40px; font-weight: 800; letter-spacing: -.025em; }
@@ -47,4 +47,41 @@
   .create-mode-switch button { padding-left: 12px; padding-right: 12px; }
   .create-description textarea { min-height: 200px; }
   .create-issue-form .create-submit { width: 100%; }
+}
+
+/* Detailed report: main column plus a details column on wide screens. */
+.create-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; }
+@media (min-width: 1024px) {
+  .create-layout:not(.create-layout--single) { grid-template-columns: minmax(0, 1fr) 300px; align-items: start; }
+  .create-side { padding: 20px; border: 1px solid var(--zk-border); border-radius: 16px; background: var(--zk-bg); }
+}
+.create-mode-note { line-height: 22px; }
+.create-mode-link { display: inline-flex; align-items: center; min-height: 32px; padding: 0 2px; border-radius: 6px; color: var(--zk-accent); font-weight: 700; text-decoration: none; background: transparent; border: 0; cursor: pointer; }
+.create-mode-link:hover { text-decoration: underline; }
+.create-mode-link:focus-visible { outline: 2px solid var(--zk-accent); outline-offset: 2px; }
+.create-from { line-height: 20px; }
+.create-modal-actions { padding-top: 16px; border-top: 1px solid var(--zk-divider); }
+.create-modal-actions .create-cancel { min-height: 44px; padding: 10px 18px; }
+
+/* Quick report modal: centred dialog, full-screen sheet on phones. */
+.report-modal { width: min(600px, calc(100vw - 32px)); max-height: calc(100dvh - 64px); margin: 64px auto auto; padding: 0; border: 0; border-radius: 20px; background: var(--zk-surface); color: var(--zk-text); box-shadow: 0 24px 64px rgb(21 18 31 / 0.28); overflow: auto; }
+.report-modal::backdrop { background: rgb(21 18 31 / 0.45); }
+.report-modal-header { display: flex; align-items: flex-start; gap: 12px; padding: 24px 24px 0; }
+.report-modal-header h2 { margin: 0; font-size: 20px; line-height: 28px; font-weight: 800; }
+.report-modal-header p { margin: 4px 0 0; color: var(--zk-text2); font-size: 14px; line-height: 22px; }
+.report-modal-close { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin: -10px -10px 0 auto; border: 0; border-radius: 12px; background: transparent; color: var(--zk-muted); cursor: pointer; }
+.report-modal-close:hover { background: var(--zk-chip); color: var(--zk-text); }
+.report-modal-close:focus-visible { outline: 2px solid var(--zk-accent); outline-offset: 2px; }
+.report-modal-body { padding: 20px 24px 24px; }
+.report-modal .create-description textarea, .report-modal .create-description .rich-text { min-height: 140px; }
+.report-modal-confirm { position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; padding: 24px; background: color-mix(in srgb, var(--zk-surface) 92%, transparent); }
+.report-modal-confirm > div { max-width: 380px; padding: 24px; border: 1px solid var(--zk-border); border-radius: 16px; background: var(--zk-surface); box-shadow: 0 12px 32px rgb(21 18 31 / 0.18); }
+.report-modal-confirm h3 { margin: 0 0 8px; font-size: 18px; font-weight: 800; }
+.report-modal-confirm p { margin: 0 0 16px; color: var(--zk-text2); font-size: 14px; line-height: 22px; }
+@media (max-width: 639px) {
+  .report-modal { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border-radius: 0; }
+  .report-modal-header { padding: 16px 16px 0; }
+  .report-modal-body { padding: 16px; }
+  .create-modal-actions { position: sticky; bottom: 0; background: var(--zk-surface); padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+  .create-modal-actions .create-submit { width: 100%; }
 }

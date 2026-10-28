@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { newIssueHref } from "@/lib/reported-from";
 import "./issues.css";
 import { Avatar } from "@/components/avatar";
 import { Suspense } from "react";
@@ -138,7 +139,7 @@ const ALL_FILTERS = [
 function NewIssueButton({ className = "" }: { className?: string }) {
   return (
     <Link
-      href="/issues/new"
+      href={newIssueHref("/issues")}
       title="New issue"
       className={`issues-new inline-flex w-8 items-center justify-center rounded-lg border border-zk-border bg-zk-surface text-zk-text hover:bg-zk-chip ${className}`}
     >
@@ -1308,7 +1309,7 @@ function FirstRunWelcome({
       </p>
       <div className="mt-5">
         <Link
-          href="/issues/new"
+          href={newIssueHref("/issues")}
           className="inline-flex h-[42px] items-center justify-center rounded-full bg-electric-blue-strong px-5 text-sm font-bold text-white shadow-[0_8px_20px_rgba(46,111,239,0.35)]"
         >
           Report the first issue

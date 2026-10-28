@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { newIssueHref } from "@/lib/reported-from";
 import type { Metadata } from "next";
 import { requireUser } from "@/lib/auth-helpers";
 import { bugInTenant, currentTenantIdFor } from "@/lib/tenant-context";
@@ -244,7 +245,7 @@ export default async function DashboardPage() {
           </p>
         </div>
         <Link
-          href="/issues/new"
+          href={newIssueHref("/dashboard")}
           className="inline-flex h-[42px] items-center gap-2 rounded-full border border-zk-border bg-zk-surface px-5 text-sm font-semibold text-zk-text hover:bg-zk-chip"
         >
           <svg

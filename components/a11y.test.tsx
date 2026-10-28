@@ -112,6 +112,21 @@ describe("component accessibility (axe)", () => {
     await expectNoA11yViolations(container);
   });
 
+  it("CreateBugForm quick report in the modal has no violations (#report-modal)", async () => {
+    const { container } = render(
+      <CreateBugForm
+        users={users}
+        categories={[{ id: "c1", name: "macOS" }]}
+        types={[{ id: "t1", name: "Bug" }]}
+        isAdmin={false}
+        currentUserId="u1"
+        variant="modal"
+        reportedFrom="/issues"
+      />,
+    );
+    await expectNoA11yViolations(container);
+  });
+
   it("UserSearch has no violations", async () => {
     const { container } = render(<UserSearch />);
     await expectNoA11yViolations(container);

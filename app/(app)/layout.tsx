@@ -22,8 +22,11 @@ import { TARGET_POINTS } from "@/lib/points/rules";
 
 export default async function AppLayout({
   children,
+  modal,
 }: {
   children: React.ReactNode;
+  /** Intercepted routes shown over the page, e.g. the quick report (#report-modal). */
+  modal: React.ReactNode;
 }) {
   const session = await auth();
 
@@ -147,6 +150,7 @@ export default async function AppLayout({
           {children}
         </main>
       </div>
+      {modal}
       <FocusMainOnNavigate />
       <KeyboardShortcuts
         enabled={shortcutsEnabled}

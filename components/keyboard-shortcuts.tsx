@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { newIssueHref } from "@/lib/reported-from";
 import {
   IDLE,
   SHOW_SHORTCUTS_EVENT,
@@ -106,7 +107,7 @@ export function KeyboardShortcuts({
         }
         case "new-issue":
           event.preventDefault();
-          router.push("/issues/new");
+          router.push(newIssueHref(pathname));
           break;
         case "go-issues":
           event.preventDefault();
@@ -128,7 +129,7 @@ export function KeyboardShortcuts({
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [enabled, router, dashboard]);
+  }, [enabled, router, dashboard, pathname]);
 
   return (
     // <dialog> dismisses on Escape natively, so this has keyboard support

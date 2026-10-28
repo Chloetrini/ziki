@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth-helpers";
 import { currentTenantAccess } from "@/lib/tenant-access";
@@ -37,9 +38,9 @@ export default async function JobsPage() {
         <h1 className="text-2xl font-extrabold tracking-tight text-zk-text">Jobs</h1>
         <p className="mt-1 text-sm text-zk-muted">
           Post research work for agents to fill in. Accepted rows earn points.
-          <a href="/jobs/export" className="ml-1 font-semibold text-zk-accent hover:underline">
+          <Link href="/jobs/export" className="ml-1 font-semibold text-zk-accent hover:underline">
             Export accepted rows
-          </a>
+          </Link>
           .
         </p>
       </div>

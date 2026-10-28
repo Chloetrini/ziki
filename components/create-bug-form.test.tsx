@@ -281,8 +281,8 @@ describe("CreateBugForm optimistic submission", () => {
     expect(screen.getByLabelText("Type")).toBeDefined();
     expect(screen.getByLabelText("GitHub PR")).toBeDefined();
 
-    // Switch to Quick report mode
-    await user.click(screen.getByRole("button", { name: "Quick report" }));
+    // Switch to a quick report from the full page
+    await user.click(screen.getByRole("button", { name: "Send a quick report" }));
 
     // Technical fields should now be omitted from view
     expect(screen.queryByLabelText("Platform")).toBeNull();
@@ -290,9 +290,10 @@ describe("CreateBugForm optimistic submission", () => {
     expect(screen.queryByLabelText("GitHub PR")).toBeNull();
 
     // Describe the issue in plain words
-    await user.clear(descriptionTextarea());
+    const whatHappened = screen.getByRole("textbox", { name: "What happened?" }) as HTMLTextAreaElement;
+    await user.clear(whatHappened);
     await user.type(
-      descriptionTextarea(),
+      whatHappened,
       "When clicking on profile settings on mobile, the screen flashes white and logs out.",
     );
 
@@ -415,3 +416,80 @@ describe("CreateBugForm project-scoped drafts (#729)", () => {
   });
 });
 
+describe("CreateBugForm quick report in a modal (#report-modal)", () => {
+  let user: ReturnType<typeof userEvent.setup>;
+
+  beforeEach(() => {
+    mockedCreateBug.mockReset();
+    mockedCreateBug.mockResolvedValue({ ok: true });
+    capturedFormData = null;
+    window.localStorage.clear();
+    user = userEvent.setup();
+  });
+
+  function renderModal(extra: Partial<Parameters<typeof CreateBugForm>[0]> = {}) {
+    return render(<CreateBugForm {...defaultProps} variant="modal" {...extra} />);
+  }
+
+  it("shows only what happened, files and the page it came from", () => {
+    renderModal({ reportedFrom: "/issues" });
+    expect(screen.getByRole("textbox", { name: "What happened?" })).toBeDefined();
+    expect(screen.queryByLabelText("Title")).toBeNull();
+    expect(screen.queryByLabelText("Platform")).toBeNull();
+    expect(screen.queryByLabelText("GitHub PR")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Send a quick report" })).toBeNull();
+    expect(screen.getByText("/issues")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Send report" })).toBeDefined();
+    expect(screen.getByRole("link", { name: "Add more detail" }).getAttribute("href")).toBe("/issues/new");
+  });
+
+  it("sends a report with the page it came from, unless removed", async () => {
+    mockedCreateBug.mockImplementation((formData) => {
+      capturedFormData = formData;
+      return Promise.resolve({ ok: true });
+    });
+    renderModal({ reportedFrom: "/issues/42" });
+    await user.type(screen.getByRole("textbox", { name: "What happened?" }), "The save button does nothing on Safari.");
+    await user.click(screen.getByRole("button", { name: "Send report" }));
+    await waitFor(() => expect(mockedCreateBug).toHaveBeenCalledTimes(1));
+    expect(capturedFormData?.get("isReport")).toBe("true");
+    expect(capturedFormData?.get("description")).toBe(
+      "The save button does nothing on Safari.\n\nReported from: /issues/42",
+    );
+  });
+
+  it("leaves the page out once it's removed", async () => {
+    mockedCreateBug.mockImplementation((formData) => {
+      capturedFormData = formData;
+      return Promise.resolve({ ok: true });
+    });
+    renderModal({ reportedFrom: "/issues/42" });
+    await user.click(screen.getByRole("button", { name: /^Remove \/issues\/42/ }));
+    expect(screen.queryByText("/issues/42")).toBeNull();
+    await user.type(screen.getByRole("textbox", { name: "What happened?" }), "The save button does nothing on Safari.");
+    await user.click(screen.getByRole("button", { name: "Send report" }));
+    await waitFor(() => expect(mockedCreateBug).toHaveBeenCalledTimes(1));
+    expect(capturedFormData?.get("description")).toBe("The save button does nothing on Safari.");
+  });
+
+  it("reports whether anything has been typed, and Cancel asks to close", async () => {
+    const onDirtyChange = vi.fn();
+    const onCancel = vi.fn();
+    renderModal({ onDirtyChange, onCancel });
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    await user.type(screen.getByRole("textbox", { name: "What happened?" }), "Broken");
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("saves the draft before opening the full form, so the text carries over", async () => {
+    renderModal({ currentUserId: "u1", projectId: "p1" });
+    await user.type(screen.getByRole("textbox", { name: "What happened?" }), "Carry me over");
+    const link = screen.getByRole("link", { name: "Add more detail" });
+    link.addEventListener("click", (event) => event.preventDefault());
+    await user.click(link);
+    const saved = window.localStorage.getItem("draft:u1:bug:new:p1");
+    expect(saved).toContain("Carry me over");
+  });
+});

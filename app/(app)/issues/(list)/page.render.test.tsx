@@ -112,7 +112,7 @@ describe("issue list layout", () => {
     const html = await renderList();
     expect(html).toContain("Login button does nothing");
     expect(html).toMatch(/<h1[^>]*>Issues<\/h1>/);
-    expect(html).toContain('href="/issues/new"');
+    expect(html).toContain('href="/issues/new?from=%2Fissues"');
     expect(html).toContain("New issue");
   });
 
@@ -122,7 +122,7 @@ describe("issue list layout", () => {
     findMany.mockResolvedValue([]);
     const html = await renderList({ q: "nothing matches", status: "all" });
     expect(html).toContain("No issues match these filters.");
-    expect(html).toContain('href="/issues/new"');
+    expect(html).toContain('href="/issues/new?from=%2Fissues"');
   });
 
   it("welcomes a new, empty project even when the workspace has issues elsewhere", async () => {

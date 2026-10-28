@@ -9,6 +9,7 @@ import {
   useRef,
   useId,
 } from "react";
+import Link from "next/link";
 import {
   createWebhookAction,
   type CreateWebhookResult,
@@ -473,12 +474,12 @@ export function WebhookManagement() {
               {agents.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-zk-border bg-zk-tint px-4 py-3 text-sm text-zk-muted">
                   You need an agent before you can add a webhook.{" "}
-                  <a
+                  <Link
                     href="/settings/agents"
                     className="font-semibold text-zk-accent hover:underline"
                   >
                     Manage agents
-                  </a>
+                  </Link>
                 </p>
               ) : (
                 <div

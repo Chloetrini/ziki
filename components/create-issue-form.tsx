@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { unstable_rethrow } from "next/navigation";
 import { createBugAction, type ActionResult } from "@/app/actions/issues";
 import { submitFailureMessage } from "@/lib/submit-error";
@@ -18,7 +18,8 @@ import { SimilarIssues } from "@/components/similar-issues";
 import { isIssueCreatedRedirect } from "@/lib/issue-created-redirect";
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { useFormDraft } from "@/components/use-form-draft";
-import { buildDraftKey } from "@/lib/form-drafts";
+import { buildDraftKey, saveDraftToStorage } from "@/lib/form-drafts";
+import { reportedFromLine } from "@/lib/reported-from";
 import { DraftBanner } from "@/components/draft-banner";
 import { AssigneeCombobox } from "@/components/assignee-combobox";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -56,6 +57,10 @@ export function CreateIssueForm({
   isAdmin,
   currentUserId,
   projectId,
+  variant = "page",
+  reportedFrom = null,
+  onCancel,
+  onDirtyChange,
 }: {
   users: UserOption[];
   assigneeUsers?: UserOption[];
@@ -64,7 +69,19 @@ export function CreateIssueForm({
   isAdmin: boolean;
   currentUserId?: string;
   projectId?: string | null;
+  /**
+   * "page": the full report page (detailed by default, with a link to a
+   * quick report). "modal": the quick report opened over the current page.
+   */
+  variant?: "page" | "modal";
+  /** The in-app page a modal report was opened from, already validated. */
+  reportedFrom?: string | null;
+  /** Modal only: Cancel asks the modal to close. */
+  onCancel?: () => void;
+  /** Modal only: whether anything has been typed or attached, for the discard prompt. */
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
+  const inModal = variant === "modal";
   const defaultTypeId =
     types.find((t) => t.name.toLowerCase() === "fix")?.id ?? types[0]?.id ?? "";
   const templateOf = (id: string) => types.find((t) => t.id === id)?.template ?? null;
@@ -111,7 +128,8 @@ export function CreateIssueForm({
     },
   );
   const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
-  const [mode, setMode] = useState<"report" | "detailed">("detailed");
+  const [mode, setMode] = useState<"report" | "detailed">(inModal ? "report" : "detailed");
+  const [includeFrom, setIncludeFrom] = useState(Boolean(reportedFrom));
   const [editorUploading, setEditorUploading] = useState(false);
   const [pickerUploading, setPickerUploading] = useState(false);
   const isUploading = editorUploading || pickerUploading;
@@ -123,6 +141,20 @@ export function CreateIssueForm({
   const [pending, startTransition] = useTransition();
   const errs = useFieldErrors("report", formRef);
   const mentionUsers = users.map((user) => ({ id: user.id, name: user.name }));
+  const untouchedDescription = initialDescription(templateOf(values.typeId));
+  const dirty =
+    values.title.trim() !== "" ||
+    (values.description.trim() !== "" && values.description !== untouchedDescription) ||
+    attachmentIds.length > 0;
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  // Similar issues are matched as you type: on the title, or in a quick
+  // report (where the title is optional) on the start of the description.
+  const similarQuery =
+    values.title.trim() || (mode === "report" ? values.description.trim().slice(0, 160) : "");
+  const sideHasFields =
+    !inModal && (mode === "detailed" || isAdmin || Boolean(currentUserId));
 
   return (
     <form
@@ -136,7 +168,12 @@ export function CreateIssueForm({
         errs.clear();
         const formData = new FormData();
         formData.set("title", values.title);
-        formData.set("description", values.description);
+        formData.set(
+          "description",
+          mode === "report" && includeFrom && reportedFrom
+            ? `${values.description.trimEnd()}\n\n${reportedFromLine(reportedFrom)}`
+            : values.description,
+        );
         formData.set("attachmentIds", attachmentIds.join(","));
         formData.set("isReport", mode === "report" ? "true" : "false");
         if (mode === "detailed") {
@@ -178,260 +215,260 @@ export function CreateIssueForm({
         />
       ) : null}
 
-      <div className="create-mode-switch flex border-b border-zk-border" role="group" aria-label="Reporting mode">
-        <button
-          type="button"
-          onClick={() => setMode("report")}
-          aria-pressed={mode === "report"}
-          className={`border-b-2 px-4 py-2 text-sm font-semibold transition-colors ${
-            mode === "report"
-              ? "border-teal-600 text-teal-700"
-              : "border-transparent text-slate-500 hover:text-slate-800"
-          }`}
-        >
-          Quick report
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode("detailed")}
-          aria-pressed={mode === "detailed"}
-          className={`border-b-2 px-4 py-2 text-sm font-semibold transition-colors ${
-            mode === "detailed"
-              ? "border-teal-600 text-teal-700"
-              : "border-transparent text-slate-500 hover:text-slate-800"
-          }`}
-        >
-          Detailed issue
-        </button>
-      </div>
-
-      {mode === "report" ? (
-        <div className="rounded-lg border border-teal-200 bg-teal-50/60 p-3 text-xs text-teal-900">
-          <p className="font-semibold">✨ Lightweight human report intake</p>
-          <p className="mt-0.5 text-teal-700">
-            Describe what happened in plain language and upload media. Autonomous agents will analyze, deduplicate, infer platform/type, and structure your report.
-          </p>
-        </div>
-      ) : null}
+      {inModal ? null : mode === "detailed" ? (
+        <p className="create-mode-note text-sm text-zk-text2">
+          Short on time?{" "}
+          <button type="button" onClick={() => setMode("report")} className="create-mode-link">
+            Send a quick report
+          </button>
+        </p>
+      ) : (
+        <p className="create-mode-note text-sm text-zk-text2">
+          Quick report: tell us what happened. We&apos;ll sort out the details.{" "}
+          <button type="button" onClick={() => setMode("detailed")} className="create-mode-link">
+            Add more detail
+          </button>
+        </p>
+      )}
 
       <ErrorSummary errors={errs.fieldErrors} labels={FIELD_LABELS} />
 
-      <div className="create-fields space-y-4">
-        <div className="create-title-fields grid gap-4">
-          <div className="space-y-1.5">
-            <label htmlFor="title" className="text-sm font-medium text-slate-700">
-              Title
+      <div className={sideHasFields ? "create-layout" : "create-layout create-layout--single"}>
+        <div className="create-main create-fields space-y-4">
+          {inModal ? null : (
+              <div className="space-y-1.5">
+                <label htmlFor="title" className="text-sm font-medium text-slate-700">
+                  Title
+                </label>
+                <Input
+                  id="title"
+                  name="title"
+                  required={mode === "detailed"}
+                  minLength={mode === "detailed" ? 3 : undefined}
+                  maxLength={TITLE_MAX_LENGTH}
+                  placeholder={
+                    mode === "report"
+                      ? "Short summary (optional — auto-generated from description if empty)"
+                      : "Short summary of the issue"
+                  }
+                  value={values.title}
+                  onChange={(event) => setValue("title", event.target.value)}
+                  {...errs.attrs("title")}
+                />
+                <CharacterCounter
+                  length={values.title.length}
+                  max={TITLE_MAX_LENGTH}
+                  className="text-right"
+                />
+                <FieldError formId={errs.formId} field="title" errors={errs.fieldErrors} />
+                <SimilarIssues title={similarQuery} />
+              </div>
+          )}
+          <div className="create-description space-y-1.5">
+            <label
+              id="description-label"
+              htmlFor="description"
+              className="text-sm font-medium text-slate-700"
+            >
+              {mode === "report" ? "What happened?" : "Description"}
             </label>
-            <Input
-              id="title"
-              name="title"
-              required={mode === "detailed"}
-              minLength={mode === "detailed" ? 3 : undefined}
-              maxLength={TITLE_MAX_LENGTH}
+            <MarkdownEditor
+              id="description"
+              labelId="description-label"
+              name="description"
+              required
+              minLength={10}
+              maxLength={5000}
+              rows={6}
               placeholder={
                 mode === "report"
-                  ? "Short summary (optional — auto-generated from description if empty)"
-                  : "Short summary of the issue"
+                  ? "Describe what happened in your own words. What were you doing, and what went wrong?"
+                  : "Steps to reproduce, expected vs actual, environment…"
               }
-              value={values.title}
-              onChange={(event) => setValue("title", event.target.value)}
-              {...errs.attrs("title")}
+              value={values.description}
+              onChange={(val) => setValue("description", val)}
+              onUploadingChange={setEditorUploading}
+              users={mentionUsers}
+              {...errs.attrs("description")}
+              footer={
+                <p className="text-xs text-slate-500">
+                  {mode === "report"
+                    ? "Markdown is supported. Plain language is welcome; our agents will structure the report."
+                    : "Markdown is supported. Be specific: what should happen, what actually happens, and how to reproduce it."}
+                </p>
+              }
             />
-            <CharacterCounter
-              length={values.title.length}
-              max={TITLE_MAX_LENGTH}
-              className="text-right"
-            />
-            <FieldError formId={errs.formId} field="title" errors={errs.fieldErrors} />
-            <SimilarIssues title={values.title} />
+            <FieldError formId={errs.formId} field="description" errors={errs.fieldErrors} />
           </div>
-
-          {mode === "detailed" && types.length > 0 ? (
-            <div className="space-y-1.5">
-              <label htmlFor="typeId" className="text-sm font-medium text-slate-700">
-                Type
-              </label>
-              <Select
-                id="typeId"
-                name="typeId"
-                value={values.typeId}
-                onChange={(event) => void changeType(event.target.value)}
-                {...errs.attrs("typeId")}
+          {inModal ? <SimilarIssues title={similarQuery} /> : null}
+          <fieldset className="create-attachments space-y-1.5">
+            <legend className="text-sm font-medium text-slate-700">
+              Screenshots and files
+            </legend>
+            <p className="text-xs text-slate-500">
+              Optional. No GitHub account needed: attach a screenshot, console log
+              or recording export straight to the report.
+            </p>
+            <AttachmentPicker
+              name="attachmentIdsPicker"
+              onChange={setAttachmentIds}
+              onUploadingChange={setPickerUploading}
+              disabled={pending}
+            />
+          </fieldset>
+          {inModal && reportedFrom && includeFrom ? (
+            <div className="create-from flex flex-wrap items-center gap-2 rounded-xl bg-zk-bg px-3 py-2 text-sm text-zk-text2">
+              <span className="min-w-0 flex-1">
+                We&apos;ll include the page you were on:{" "}
+                <span className="font-semibold text-zk-text break-all">{reportedFrom}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIncludeFrom(false)}
+                className="create-mode-link"
+                aria-label={`Remove ${reportedFrom} from the report`}
               >
-                {types.map((type) => (
-                  <option key={type.id} value={type.id}>
-                    {type.name}
-                  </option>
-                ))}
-              </Select>
-              <FieldError formId={errs.formId} field="typeId" errors={errs.fieldErrors} />
+                Remove
+              </button>
             </div>
           ) : null}
         </div>
-
-        {mode === "detailed" ? (
-          <div className="space-y-1.5">
-            <label
-              htmlFor="categoryId"
-              className="text-sm font-medium text-slate-700"
-            >
-              Platform
-            </label>
-            <Select
-              id="categoryId"
-              name="categoryId"
-              value={values.categoryId}
-              onChange={(event) => setValue("categoryId", event.target.value)}
-              {...errs.attrs("categoryId")}
-            >
-              <option value="">Select a platform</option>
-              {categories.map((cat) => (
-                <option key={cat.id} value={cat.id}>
-                  {cat.name}
-                </option>
-              ))}
-            </Select>
-            <FieldError formId={errs.formId} field="categoryId" errors={errs.fieldErrors} />
-          </div>
-        ) : null}
-        <div className="create-description space-y-1.5">
-          <label
-            id="description-label"
-            htmlFor="description"
-            className="text-sm font-medium text-slate-700"
-          >
-            Description
-          </label>
-          <MarkdownEditor
-            id="description"
-            labelId="description-label"
-            name="description"
-            required
-            minLength={10}
-            maxLength={5000}
-            rows={6}
-            placeholder={
-              mode === "report"
-                ? "Describe what happened in your own words. What were you doing, and what went wrong?"
-                : "Steps to reproduce, expected vs actual, environment…"
-            }
-            value={values.description}
-            onChange={(val) => setValue("description", val)}
-            onUploadingChange={setEditorUploading}
-            users={mentionUsers}
-            {...errs.attrs("description")}
-            footer={
-              <p className="text-xs text-slate-500">
-                {mode === "report"
-                  ? "Markdown is supported. Plain language is welcome; our agents will structure the report."
-                  : "Markdown is supported. Be specific: what should happen, what actually happens, and how to reproduce it."}
+        {sideHasFields ? (
+          <aside className="create-side create-fields space-y-4" aria-label="Issue details">
+            {mode === "detailed" && types.length > 0 ? (
+              <div className="space-y-1.5">
+                <label htmlFor="typeId" className="text-sm font-medium text-slate-700">
+                  Type
+                </label>
+                <Select
+                  id="typeId"
+                  name="typeId"
+                  value={values.typeId}
+                  onChange={(event) => void changeType(event.target.value)}
+                  {...errs.attrs("typeId")}
+                >
+                  {types.map((type) => (
+                    <option key={type.id} value={type.id}>
+                      {type.name}
+                    </option>
+                  ))}
+                </Select>
+                <FieldError formId={errs.formId} field="typeId" errors={errs.fieldErrors} />
+              </div>
+            ) : null}
+          {mode === "detailed" ? (
+            <div className="space-y-1.5">
+              <label
+                htmlFor="categoryId"
+                className="text-sm font-medium text-slate-700"
+              >
+                Platform
+              </label>
+              <Select
+                id="categoryId"
+                name="categoryId"
+                value={values.categoryId}
+                onChange={(event) => setValue("categoryId", event.target.value)}
+                {...errs.attrs("categoryId")}
+              >
+                <option value="">Select a platform</option>
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
+              </Select>
+              <FieldError formId={errs.formId} field="categoryId" errors={errs.fieldErrors} />
+            </div>
+          ) : null}
+          {mode === "detailed" ? (
+            <div className="space-y-1.5">
+              <label
+                htmlFor="proofLinks"
+                className="text-sm font-medium text-slate-700"
+              >
+                GitHub PR
+              </label>
+              <Textarea
+                id="proofLinks"
+                name="proofLinks"
+                rows={3}
+                placeholder={
+                  "https://github.com/organization/repo/pull/123"
+                }
+                value={values.proofLinks}
+                onChange={(event) => setValue("proofLinks", event.target.value)}
+                {...errs.attrs("proofLinks")}
+              />
+              <FieldError formId={errs.formId} field="proofLinks" errors={errs.fieldErrors} />
+              <p className="text-xs text-zk-muted">
+                Optional. One GitHub link per line (e.g. https://github.com/organization/repo/pull/123).
               </p>
-            }
-          />
-          <FieldError formId={errs.formId} field="description" errors={errs.fieldErrors} />
-        </div>
+            </div>
+          ) : null}
 
-        {mode === "detailed" ? (
-          <div className="space-y-1.5">
-            <label
-              htmlFor="proofLinks"
-              className="text-sm font-medium text-slate-700"
-            >
-              GitHub PR
-            </label>
-            <Textarea
-              id="proofLinks"
-              name="proofLinks"
-              rows={3}
-              placeholder={
-                "https://github.com/organization/repo/pull/123"
-              }
-              value={values.proofLinks}
-              onChange={(event) => setValue("proofLinks", event.target.value)}
-              {...errs.attrs("proofLinks")}
-            />
-            <FieldError formId={errs.formId} field="proofLinks" errors={errs.fieldErrors} />
-            <p className="text-xs text-slate-500">
-              Optional. One GitHub link per line (e.g. https://github.com/organization/repo/pull/123).
-            </p>
-          </div>
+          {isAdmin ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="severity"
+                  className="text-sm font-medium text-slate-700"
+                >
+                  Severity
+                </label>
+                <Select
+                  id="severity"
+                  name="severity"
+                  value={values.severity}
+                  onChange={(event) =>
+                    setValue("severity", event.target.value as (typeof severities)[number])
+                  }
+                  {...errs.attrs("severity")}
+                >
+                  {severities.map((value) => (
+                    <option key={value} value={value}>
+                      {severityLabels[value]}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="assigneeId"
+                  className="text-sm font-medium text-slate-700"
+                >
+                  Assignee
+                </label>
+                <AssigneeCombobox
+                  id="assigneeId"
+                  name="assigneeId"
+                  people={assigneeUsers}
+                  value={values.assigneeId}
+                  onChange={(val) => setValue("assigneeId", val)}
+                />
+                <FieldError formId={errs.formId} field="assigneeId" errors={errs.fieldErrors} />
+              </div>
+            </div>
+          ) : currentUserId ? (
+            <div className="create-self-assignment flex items-center gap-2 pt-1">
+              <input
+                type="checkbox"
+                id="assignToMe"
+                checked={values.assignToMe}
+                onChange={(e) => setValue("assignToMe", e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+              />
+              <label
+                htmlFor="assignToMe"
+                className="text-sm font-medium text-slate-700 cursor-pointer"
+              >
+                Assign this issue to myself
+              </label>
+            </div>
+          ) : null}
+          </aside>
         ) : null}
-
-        <fieldset className="create-attachments space-y-1.5">
-          <legend className="text-sm font-medium text-slate-700">
-            Screenshots and files
-          </legend>
-          <p className="text-xs text-slate-500">
-            Optional. No GitHub account needed: attach a screenshot, console log
-            or recording export straight to the report.
-          </p>
-          <AttachmentPicker
-            name="attachmentIdsPicker"
-            onChange={setAttachmentIds}
-            onUploadingChange={setPickerUploading}
-            disabled={pending}
-          />
-        </fieldset>
       </div>
-      {isAdmin ? (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <label
-              htmlFor="severity"
-              className="text-sm font-medium text-slate-700"
-            >
-              Severity
-            </label>
-            <Select
-              id="severity"
-              name="severity"
-              value={values.severity}
-              onChange={(event) =>
-                setValue("severity", event.target.value as (typeof severities)[number])
-              }
-              {...errs.attrs("severity")}
-            >
-              {severities.map((value) => (
-                <option key={value} value={value}>
-                  {severityLabels[value]}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <label
-              htmlFor="assigneeId"
-              className="text-sm font-medium text-slate-700"
-            >
-              Assignee
-            </label>
-            <AssigneeCombobox
-              id="assigneeId"
-              name="assigneeId"
-              people={assigneeUsers}
-              value={values.assigneeId}
-              onChange={(val) => setValue("assigneeId", val)}
-            />
-            <FieldError formId={errs.formId} field="assigneeId" errors={errs.fieldErrors} />
-          </div>
-        </div>
-      ) : currentUserId ? (
-        <div className="create-self-assignment flex items-center gap-2 pt-1">
-          <input
-            type="checkbox"
-            id="assignToMe"
-            checked={values.assignToMe}
-            onChange={(e) => setValue("assignToMe", e.target.checked)}
-            className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-          />
-          <label
-            htmlFor="assignToMe"
-            className="text-sm font-medium text-slate-700 cursor-pointer"
-          >
-            Assign this issue to myself
-          </label>
-        </div>
-      ) : null}
       {error ? (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1" role="alert">
           <p className="text-sm text-red-600">{error}</p>
@@ -447,9 +484,33 @@ export function CreateIssueForm({
           ) : null}
         </div>
       ) : null}
-      <Button className="create-submit" type="submit" disabled={pending || isUploading}>
-        {pending ? "Creating…" : isUploading ? "Uploading…" : "Create issue"}
-      </Button>
+      {inModal ? (
+        <div className="create-modal-actions flex flex-wrap items-center gap-3">
+          {/* A full page load on purpose: a client-side navigation would be
+              intercepted again and keep the modal open. The draft is saved
+              first (it normally saves after a pause), so the full form opens
+              with what was typed. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a
+            href="/issues/new"
+            className="create-mode-link create-more-detail"
+            onClick={() => saveDraftToStorage(draftKey, values)}
+          >
+            Add more detail
+          </a>
+          <span className="flex-1" />
+          <Button type="button" variant="secondary" className="create-cancel" onClick={() => onCancel?.()}>
+            Cancel
+          </Button>
+          <Button className="create-submit" type="submit" disabled={pending || isUploading}>
+            {pending ? "Sending…" : isUploading ? "Uploading…" : "Send report"}
+          </Button>
+        </div>
+      ) : (
+        <Button className="create-submit" type="submit" disabled={pending || isUploading}>
+          {pending ? "Creating…" : isUploading ? "Uploading…" : "Create issue"}
+        </Button>
+      )}
     </form>
   );
 }
