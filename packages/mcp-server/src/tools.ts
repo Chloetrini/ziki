@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { RequestSpec } from "./client.js";
 
@@ -47,7 +47,7 @@ const idempotencyKey = z
   .min(1)
   .max(191)
   .optional()
-  .describe("Unique key for this action, sent as the Idempotency-Key header. Reuse the same key when retrying so it is not applied twice. Generated if omitted.");
+  .describe("Unique key for this action, sent as the Idempotency-Key header. Reuse the same key when retrying so it is not applied twice. Derived from the call itself when omitted, so an identical retry sends the same key — which also means two deliberate identical calls collapse into one for 24 hours. Pass a new key to repeat an identical action on purpose.");
 
 const cursor = z.string().optional().describe("Opaque cursor from a previous response.");
 const wait = z.number().int().min(0).max(25).optional().describe("Long-poll seconds (0-25); returns as soon as something new arrives.");
@@ -977,6 +977,36 @@ export function describeTool(tool: ToolDef): string {
   return `${tool.summary} (${tool.method} /api/v1${tool.route}; requires ${tool.name === "ziki_validate_issue" ? "triager permission for duplicate verdicts or reviewer permission for other kinds" : `${tool.level} permission`}. Specialist roles do not inherit one another; dispatcher inherits specialist permissions, and merger inherits dispatcher permissions.)`;
 }
 
+/**
+ * Fallback for an omitted idempotency key (#633). The key is derived from the
+ * call itself, so an identical retry — after a timeout, a dropped connection or
+ * a 429 the assistant retries — sends the same key and the API's idempotency
+ * window discards the duplicate. A fresh random key per call made every retry
+ * look like a new action, so a retried create or comment could be applied twice.
+ *
+ * Object keys are sorted before hashing so the digest does not depend on the
+ * order in which fields were assembled.
+ *
+ * The trade-off is deliberate: because the key follows the content, two
+ * genuinely intended identical calls — the same comment posted twice on
+ * purpose — also collapse into one inside the API's 24-hour window. A caller
+ * that means to repeat itself passes an explicit idempotencyKey, which is sent
+ * unchanged. Silently duplicating a retried write is the worse failure, so the
+ * safe default is to deduplicate and let the caller opt out.
+ */
+function derivedIdempotencyKey(
+  request: Pick<RequestSpec, "method" | "path" | "query" | "body">,
+): string {
+  const canonical = JSON.stringify(request, (_key, value: unknown) =>
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(
+          Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+        )
+      : value,
+  );
+  return createHash("sha256").update(canonical).digest("hex");
+}
+
 /** Turn validated tool input into the HTTP request for its route. */
 export function buildRequest(
   tool: ToolDef,
@@ -1022,7 +1052,9 @@ export function buildRequest(
   let headers: Record<string, string> | undefined;
   for (const [header, key] of Object.entries(tool.headers ?? {})) {
     headers ??= {};
-    headers[header] = (values[key] as string | undefined) ?? randomUUID();
+    headers[header] =
+      (values[key] as string | undefined) ??
+      derivedIdempotencyKey({ method: tool.method, path, query, body });
   }
 
   return { method: tool.method, path, query, body, headers, file, streamForSeconds };
