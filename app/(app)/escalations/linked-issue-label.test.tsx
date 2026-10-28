@@ -7,6 +7,7 @@ const currentTenantIdFor = vi.hoisted(() => vi.fn());
 const listOwnerQuestions = vi.hoisted(() => vi.fn());
 const ownerQuestion = vi.hoisted(() => vi.fn());
 const findProposals = vi.hoisted(() => vi.fn());
+const redirect = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth-helpers", () => ({ requireUser }));
 vi.mock("@/lib/tenant-context", () => ({ currentTenantIdFor }));
@@ -16,7 +17,12 @@ vi.mock("@/lib/agent-questions", async (importOriginal) => ({
   listOwnerQuestions,
   ownerQuestion,
 }));
-vi.mock("next/navigation", () => ({ notFound: vi.fn(() => { throw new Error("notFound"); }) }));
+vi.mock("next/navigation", () => ({
+  redirect,
+  notFound: vi.fn(() => {
+    throw new Error("notFound");
+  }),
+}));
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => (
     <a href={href} {...rest}>{children}</a>
@@ -51,25 +57,9 @@ describe("escalation linked issue label (#559)", () => {
     currentTenantIdFor.mockResolvedValue("tenant-1");
   });
 
-  it("labels question and redesign rows on the list with #<number> <title>", async () => {
-    listOwnerQuestions.mockResolvedValue([question]);
-    findProposals.mockResolvedValue([
-      {
-        id: "r-1",
-        title: "Rework login",
-        body: "Proposal",
-        status: "proposed",
-        createdAt: new Date("2026-10-19T10:00:00.000Z"),
-        bug: { id: "bug-2", number: 7, title: "Slow login" },
-        authorAgent: { name: "Helper" },
-      },
-    ]);
-
-    const html = renderToStaticMarkup(await EscalationsPage({ searchParams: Promise.resolve({ status: "all" }) })).replace(/<!-- -->/g, "");
-
-    expect(html).toContain("#42 Login button broken");
-    expect(html).toContain("#7 Slow login");
-    expect(findProposals.mock.calls[0][0].select.bug.select.number).toBe(true);
+  it("redirects the escalation list to the unified issues inbox", async () => {
+    await EscalationsPage({ searchParams: Promise.resolve({ status: "all" }) });
+    expect(redirect).toHaveBeenCalledWith("/issues?inbox=input");
   });
 
   it("labels the associated issue on the detail page with #<number> <title>", async () => {
