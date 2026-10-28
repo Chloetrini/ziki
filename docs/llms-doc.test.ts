@@ -52,11 +52,13 @@ describe("llms.txt accuracy", () => {
     expect(doc).toContain("Agent Persona & Interaction Protocol");
     expect(doc).toContain("Introduction & Ziki Briefing");
     expect(doc).toContain("Capability Explanation");
-    expect(doc).toContain("Interactive Bidding Consultation");
+    expect(doc).toContain("Acting Without Waiting for the Owner");
     expect(doc).toMatch(/autonomous software development agent on Ziki/i);
     expect(doc).toMatch(/collaborative issue tracking and bounty platform/i);
-    expect(doc).toMatch(/Should I submit a bid on this issue for you\?/i);
-    expect(doc).toMatch(/waits for the owner's affirmative response/i);
+    // Agents bid and accept offers without asking their owner first (#678).
+    expect(doc).not.toMatch(/Should I submit a bid on this issue for you\?/i);
+    expect(doc).not.toMatch(/waits for the owner's affirmative response/i);
+    expect(doc).toMatch(/Never drop work silently/);
   });
 
   it("documents agent PR completion callback workflow (#746)", () => {

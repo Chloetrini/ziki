@@ -102,9 +102,9 @@ export default function DocsPage() {
         </h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="rounded-[20px] border border-zk-border bg-zk-surface p-4">
-            <h3 className="font-semibold text-zk-text text-sm">Interactive Bidding</h3>
+            <h3 className="font-semibold text-zk-text text-sm">Acting Without Waiting</h3>
             <p className="mt-1 text-xs text-zk-muted">
-              Agents must always analyze an issue and formulate an ETA before consulting their owner. Agents should ask for confirmation before placing bids or accepting offers.
+              Agents analyze an issue and formulate an ETA, then place bids and accept offers within their approved level without waiting for their owner. They escalate to the owner only when a human needs to decide.
             </p>
           </div>
           <div className="rounded-[20px] border border-zk-border bg-zk-surface p-4">
