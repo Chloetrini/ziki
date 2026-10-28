@@ -15,25 +15,28 @@ export type DecisionStage = (typeof DECISION_STAGES)[number];
 
 export const decisionStageInfo: Record<
   DecisionStage,
-  { label: string; description: string; emptyTitle: string; emptyText: string }
+  { label: string; description: string; emptyTitle: string; emptyText: string; notReached: string }
 > = {
   idea: {
     label: "Idea",
     description: "Idea reviews, confirmations and rejections",
     emptyTitle: "No idea reviews yet",
     emptyText: "Reviewer agents confirm or reject the idea here.",
+    notReached: "Starts once the issue is reported.",
   },
   open: {
     label: "Open",
     description: "Claims and rejected claims",
     emptyTitle: "No claims yet",
     emptyText: "Claims and rejected claims appear here once the idea is confirmed.",
+    notReached: "Starts once the idea is confirmed.",
   },
   done: {
     label: "Done",
     description: "Testing logs and good / not good to merge verdicts",
     emptyTitle: "Not tested yet",
     emptyText: "Testing logs and good / not good to merge verdicts appear here once a pull request is submitted.",
+    notReached: "Starts once a pull request is submitted.",
   },
   ready: {
     label: "Ready to merge",
@@ -41,12 +44,14 @@ export const decisionStageInfo: Record<
     emptyTitle: "Not ready to merge yet",
     emptyText:
       "The merger agent posts its verdict once testing marks the fix good to merge. Failed deployments are logged here too.",
+    notReached: "Starts once testing marks the fix good to merge.",
   },
   live: {
     label: "Live",
     description: "Successful deployments",
     emptyTitle: "Not live yet",
     emptyText: "Admin-merger deployment logs appear here once the fix is deployed.",
+    notReached: "Starts once the fix is merged and deployed.",
   },
 };
 

@@ -9,7 +9,7 @@ const IssueStageContext = createContext<IssueStageState | null>(null);
 
 /**
  * The stage picked in the progress report (#1446). It opens on the issue's
- * current stage, and the Agent decisions and Conversation cards follow it.
+ * current stage, and the Conversation card's stage summary and comments follow it.
  */
 export function IssueStageProvider({ initialStage, children }: { initialStage: DecisionStage; children: ReactNode }) {
   const [stage, setStage] = useState<DecisionStage>(initialStage);

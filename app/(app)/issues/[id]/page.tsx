@@ -40,6 +40,7 @@ import { ActivityTimeline, type ActivityEntry } from "@/components/activity-time
 import { type AgentDecision } from "@/components/issue-agent-activity";
 import { IssueProgressReport } from "@/components/issue-progress-report";
 import { IssueStageProvider } from "@/components/issue-stage-context";
+import { IssueStageSummary } from "@/components/issue-stage-summary";
 import { StageCommentThread, StageConversationCount } from "@/components/stage-comment-thread";
 import {
   claimDecisionKind,
@@ -651,7 +652,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
             return a.id.localeCompare(b.id);
           });
 
-          // #1446: merger decisions sit with the rest under Agent decisions.
+          // #1446: merger decisions sit with the rest, counted by stage.
           return [...otherDecisions, ...mergerDecisions];
         },
       ),
@@ -1011,7 +1012,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
       <div className="flex flex-wrap items-start gap-5">
         {/* MAIN COLUMN */}
         <div className="flex min-w-0 flex-[999_1_600px] flex-col gap-5">
-          {/* #1446: the progress report's stage filters Agent decisions and the Conversation. */}
+          {/* #1446: the progress report's stage filters the Conversation (#186). */}
           <IssueStageProvider initialStage={currentStage}>
           <EditableIssueDescription
             bugId={bug.id}
@@ -1054,13 +1055,12 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
             </section>
           ) : null}
 
-          {/* Progress report and the selected stage's agent decisions (#1446), where the summary strip was. */}
+          {/* Progress report (#1446), where the summary strip was; its stage drives the Conversation card. */}
           <IssueProgressReport
             decisions={agentDecisions}
             currentStage={currentStage}
             setback={bug.reviewStatus === "rejected"}
             commentCounts={stageCommentCounts}
-            pullRequestUrl={bug.pullRequestUrl}
           />
 
               <section
@@ -1085,6 +1085,14 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
                     />
                   )}
                 </div>
+                {/* #186: the picked stage's summary, in place of the Agent decisions card. */}
+                <IssueStageSummary
+                  decisions={agentDecisions}
+                  currentStage={currentStage}
+                  setback={bug.reviewStatus === "rejected"}
+                  pullRequestUrl={bug.pullRequestUrl}
+                  severity={bug.severity}
+                />
                 {comments.hiddenThreads > 0 ? (
                   <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-zk-chip px-3 py-2 text-sm text-zk-text2 print:hidden">
                     <span>

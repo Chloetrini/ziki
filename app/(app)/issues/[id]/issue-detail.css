@@ -19,7 +19,7 @@
 }
 
 /*
- * Progress report, Agent decisions and the staged Conversation (#1446), from
+ * Progress report and the staged Conversation with its stage summary (#1446, #186), from
  * the "Ziki for Businesses" design. Colours are zk tokens (and Tailwind's
  * violet, which theme-dark.css remaps) so both themes follow.
  */
@@ -147,20 +147,40 @@
   color: var(--zk-muted);
 }
 .issue-progress .pgc { margin-top: -4px; font-size: 11px; color: var(--zk-muted); }
-.issue-progress .pgsum {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 12px;
-  padding: 9px 12px;
-  border-radius: 10px;
+/* The picked stage's summary at the top of the Conversation card (#186). */
+.issue-progress.ssum {
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--zk-divider);
+  border-radius: 14px;
   background: var(--zk-chip);
-  font-size: 12.5px;
-  line-height: 1.45;
-  color: var(--zk-text2);
 }
-.issue-progress .pgsum b { color: var(--zk-text); }
+.issue-progress .ssd {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  place-items: center;
+  border-radius: 50%;
+}
+.issue-progress .ssd .i { width: 13px; height: 13px; }
+.issue-progress .ssd.done { background: var(--zk-ok-bg); color: var(--zk-ok-fg); }
+.issue-progress .ssd.warn { background: var(--zk-warn-bg); color: var(--zk-warn-fg); }
+.issue-progress .ssd.now { background: var(--zk-accent); color: #fff; }
+.issue-progress .ssd.todo {
+  border: 1.5px dashed var(--zk-border);
+  background: var(--zk-surface);
+  color: var(--zk-muted);
+}
+.issue-progress .spd {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  margin-top: 3px;
+  border: 1.5px dashed var(--zk-muted);
+  border-radius: 50%;
+  animation: spd-spin 6s linear infinite;
+}
 
 /* A decision or comment card, and the dashed empty box. */
 .issue-progress .cm {
@@ -236,7 +256,6 @@
 }
 .issue-progress .ctab.cur { border-color: var(--zk-accent); background: var(--zk-accent); color: #fff; }
 .issue-progress .ctab.cur .n { padding: 0 5px; border-radius: 5px; background: rgba(255, 255, 255, 0.25); color: #fff; }
-.issue-progress .stage-pill { height: 28px; padding: 0 10px; border-radius: 999px; }
 
 @media (max-width: 720px) {
   .issue-progress .cm { padding: 12px; }
@@ -248,7 +267,7 @@
   .issue-progress .pgl { font-size: 11px; }
   .issue-progress .pgn,
   .issue-progress .pgc { font-size: 10px; }
-  .issue-progress .pgsum { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .issue-progress.ssum { padding: 12px; }
 }
 
 @media (max-width: 400px) {
@@ -261,6 +280,7 @@
 }
 
 @keyframes zk-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes spd-spin { to { transform: rotate(360deg); } }
 @keyframes zk-pop { from { opacity: 0; transform: scale(0.7); } to { opacity: 1; transform: none; } }
 @keyframes pg-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes pg-flow { from { background-position: 200% 0; } to { background-position: 0 0; } }
