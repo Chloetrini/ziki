@@ -94,7 +94,7 @@ export async function sweepPendingBids(options?: {
       voteCount: true,
     },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: limit,
+    ...(options?.limit ? { take: options.limit } : {}),
   });
 
   for (const issue of candidateIssues) {
