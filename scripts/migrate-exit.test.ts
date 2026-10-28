@@ -4,6 +4,27 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+const isWindows = process.platform === "win32";
+
+function jsPath(p: string): string {
+  return p.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function writePrismaStub(dir: string, script: string) {
+  const binDir = join(dir, "node_modules/.bin");
+  mkdirSync(binDir, { recursive: true });
+  if (isWindows) {
+    const mjsPath = join(binDir, "prisma.mjs");
+    writeFileSync(mjsPath, script);
+    const cmdPath = join(binDir, "prisma.cmd");
+    writeFileSync(cmdPath, "@echo off\r\nnode \"%~dp0prisma.mjs\" %*\r\n");
+  } else {
+    const prisma = join(binDir, "prisma");
+    writeFileSync(prisma, script);
+    chmodSync(prisma, 0o755);
+  }
+}
+
 /**
  * Runs scripts/migrate.mjs against a stand-in `prisma` binary, so the exit
  * code can be checked without a database (#580).
@@ -16,13 +37,19 @@ function run(prismaExitCode: number, env: Record<string, string | undefined>) {
   mkdirSync(join(dir, "scripts"));
   cpSync("scripts/migrate.mjs", join(dir, "scripts/migrate.mjs"));
   cpSync("scripts/migration-database-url.mjs", join(dir, "scripts/migration-database-url.mjs"));
-  mkdirSync(join(dir, "node_modules/.bin"), { recursive: true });
-  const prisma = join(dir, "node_modules/.bin/prisma");
-  writeFileSync(
-    prisma,
-    `#!/bin/sh\necho "url=$DATABASE_URL" >> "${join(dir, "calls.log")}"\necho "prisma $*" >> "${join(dir, "calls.log")}"\nexit ${prismaExitCode}\n`,
-  );
-  chmodSync(prisma, 0o755);
+  const callsLog = join(dir, "calls.log");
+  let prismaScript: string;
+  if (isWindows) {
+    prismaScript = `import { appendFileSync } from "node:fs";
+import { argv, env, exit } from "node:process";
+const callsLog = '${jsPath(callsLog)}';
+appendFileSync(callsLog, \`url=\${env.DATABASE_URL ?? ''}\\nprisma \${argv.slice(2).join(' ')}\\n\`);
+exit(${prismaExitCode});
+`;
+  } else {
+    prismaScript = `#!/bin/sh\necho "url=$DATABASE_URL" >> "${callsLog}"\necho "prisma $*" >> "${callsLog}"\nexit ${prismaExitCode}\n`;
+  }
+  writePrismaStub(dir, prismaScript);
   const result = spawnSync(process.execPath, ["scripts/migrate.mjs"], {
     cwd: dir,
     // Only what the script needs, so the parent's NODE_ENV and DATABASE_URL don't leak in.
@@ -31,7 +58,7 @@ function run(prismaExitCode: number, env: Record<string, string | undefined>) {
   });
   const calls = (() => {
     try {
-      return readFileSync(join(dir, "calls.log"), "utf8");
+      return readFileSync(callsLog, "utf8");
     } catch {
       return "";
     }
@@ -45,11 +72,9 @@ function runStub(script: string, env: Record<string, string | undefined>) {
   mkdirSync(join(dir, "scripts"));
   cpSync("scripts/migrate.mjs", join(dir, "scripts/migrate.mjs"));
   cpSync("scripts/migration-database-url.mjs", join(dir, "scripts/migration-database-url.mjs"));
-  mkdirSync(join(dir, "node_modules/.bin"), { recursive: true });
-  const prisma = join(dir, "node_modules/.bin/prisma");
   const calls = join(dir, "calls.log");
-  writeFileSync(prisma, script.replaceAll("__CALLS__", calls));
-  chmodSync(prisma, 0o755);
+  const replaced = script.replaceAll("__CALLS__", isWindows ? jsPath(calls) : calls);
+  writePrismaStub(dir, replaced);
   const result = spawnSync(process.execPath, ["scripts/migrate.mjs"], {
     cwd: dir,
     env: { PATH: process.env.PATH, ...env } as unknown as NodeJS.ProcessEnv,
@@ -66,6 +91,29 @@ function runStub(script: string, env: Record<string, string | undefined>) {
 }
 
 function initThenSuccessStub() {
+  if (isWindows) {
+    return `import { appendFileSync, readFileSync } from "node:fs";
+import { argv, exit } from "node:process";
+const callsLog = '__CALLS__';
+const args = argv.slice(2).join(' ');
+appendFileSync(callsLog, \`prisma \${args}\\n\`);
+if (/db\\ execute/.test(args)) { exit(0); }
+if (/migrate\\ resolve/.test(args)) { exit(0); }
+if (/migrate\\ deploy/.test(args)) {
+  try {
+    const calls = readFileSync(callsLog, "utf8");
+    const n = (calls.match(/migrate deploy/g) || []).length;
+    if (n === 1) {
+      console.error("Error: P3009");
+      console.error("The \`20261014193427_init\` migration started at 2026-10-15 10:32:25.619809 UTC failed");
+      exit(1);
+    }
+  } catch {}
+  exit(0);
+}
+exit(1);
+`;
+  }
   return `#!/bin/sh
 echo "prisma $*" >> "__CALLS__"
 case "$*" in
@@ -75,7 +123,7 @@ case "$*" in
     n=$(grep -c "migrate deploy" "__CALLS__" || true)
     if [ "$n" -eq 1 ]; then
       echo "Error: P3009" >&2
-      echo "The \\\`20261014193427_init\\\` migration started at 2026-10-15 10:32:25.619809 UTC failed" >&2
+      echo 'The \`20261014193427_init\` migration started at 2026-10-15 10:32:25.619809 UTC failed' >&2
       exit 1
     fi
     exit 0
@@ -86,13 +134,28 @@ exit 1
 }
 
 function initMissingUserStub() {
+  if (isWindows) {
+    return `import { appendFileSync } from "node:fs";
+import { argv, exit } from "node:process";
+const callsLog = '__CALLS__';
+const args = argv.slice(2).join(' ');
+appendFileSync(callsLog, \`prisma \${args}\\n\`);
+if (/db\\ execute/.test(args)) { console.error("missing User"); exit(1); }
+if (/migrate\\ deploy/.test(args)) {
+  console.error("Error: P3009");
+  console.error("The \`20261014193427_init\` migration started at 2026-10-15 10:32:25.619809 UTC failed");
+  exit(1);
+}
+exit(1);
+`;
+  }
   return `#!/bin/sh
 echo "prisma $*" >> "__CALLS__"
 case "$*" in
   *db\\ execute*) echo "missing User" >&2; exit 1 ;;
   *migrate\\ deploy*)
     echo "Error: P3009" >&2
-    echo "The \\\`20261014193427_init\\\` migration started at 2026-10-15 10:32:25.619809 UTC failed" >&2
+    echo 'The \`20261014193427_init\` migration started at 2026-10-15 10:32:25.619809 UTC failed' >&2
     exit 1
     ;;
 esac
@@ -101,6 +164,36 @@ exit 1
 }
 
 function duplicateColumnStub() {
+  if (isWindows) {
+    return `import { appendFileSync, readFileSync } from "node:fs";
+import { argv, exit } from "node:process";
+const callsLog = '__CALLS__';
+const args = argv.slice(2).join(' ');
+appendFileSync(callsLog, \`prisma \${args}\\n\`);
+if (/db\\ execute/.test(args)) { exit(0); }
+if (/migrate\\ resolve/.test(args)) { exit(0); }
+if (/migrate\\ deploy/.test(args)) {
+  try {
+    const calls = readFileSync(callsLog, "utf8");
+    const n = (calls.match(/migrate deploy/g) || []).length;
+    if (n === 1) {
+      console.error("Error: P3009");
+      console.error("The \`20261014193427_init\` migration started at 2026-10-15 10:32:25.619809 UTC failed");
+      exit(1);
+    }
+    if (n === 2) {
+      console.error("Error: P3018");
+      console.error("Migration name: 20261014195331_add_votes_and_proof_links");
+      console.error("Database error code: 42701");
+      console.error('ERROR: column "voteCount" of relation "Bug" already exists');
+      exit(1);
+    }
+  } catch {}
+  exit(0);
+}
+exit(1);
+`;
+  }
   return `#!/bin/sh
 echo "prisma $*" >> "__CALLS__"
 case "$*" in
@@ -110,14 +203,14 @@ case "$*" in
     n=$(grep -c "migrate deploy" "__CALLS__" || true)
     if [ "$n" -eq 1 ]; then
       echo "Error: P3009" >&2
-      echo "The \\\`20261014193427_init\\\` migration started at 2026-10-15 10:32:25.619809 UTC failed" >&2
+      echo 'The \`20261014193427_init\` migration started at 2026-10-15 10:32:25.619809 UTC failed' >&2
       exit 1
     fi
     if [ "$n" -eq 2 ]; then
       echo "Error: P3018" >&2
       echo "Migration name: 20261014195331_add_votes_and_proof_links" >&2
       echo "Database error code: 42701" >&2
-      echo "ERROR: column \\"voteCount\\" of relation \\"Bug\\" already exists" >&2
+      echo "ERROR: column \"voteCount\" of relation \"Bug\" already exists" >&2
       exit 1
     fi
     exit 0

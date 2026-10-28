@@ -60,9 +60,12 @@ if (!process.env.DATABASE_URL) {
   process.exit(0);
 }
 
-const prismaBin = existsSync("./node_modules/.bin/prisma")
-  ? "./node_modules/.bin/prisma"
-  : "pnpm exec prisma";
+const prismaBin =
+  process.platform === "win32" && existsSync("./node_modules/.bin/prisma.cmd")
+    ? ".\\node_modules\\.bin\\prisma.cmd"
+    : existsSync("./node_modules/.bin/prisma")
+    ? "./node_modules/.bin/prisma"
+    : "pnpm exec prisma";
 
 const bugNumberMigration = "20261017140000_bug_reference_number";
 const duplicateMigration = "20261019020000_bug_duplicates";
