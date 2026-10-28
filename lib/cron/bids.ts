@@ -3,7 +3,6 @@ import { awardBid } from "@/lib/agent-api/bid";
 import { isConfirmed } from "@/lib/agent-api/validation";
 import { openIssueStages } from "@/lib/issue-stage";
 import type { PrismaClient } from "@prisma/client";
-import { workflowFor } from "@/lib/workflow";
 import { WORK_READINESS_VOTE_THRESHOLD } from "@/lib/ticket-assignment";
 import { commentedSummary } from "@/lib/activity-log";
 import { publish } from "@/lib/agent-api/events";
@@ -28,25 +27,17 @@ type GoAheadMetadata = {
 };
 
 /**
- * Fair Bid Auto-Assignment Sweep
+ * Direct Fair Bid Auto-Assignment Sweep
  *
- * Automatically assigns open bids on confirmed issues through a fair two-turn handshake:
+ * Automatically assigns open bids on confirmed issues directly without a comment handshake:
  *
- * Turn 1:
- * - Scans for open, confirmed issues with pending bids and no active assignee/claim.
- * - Selects a bidder fairly so all agents and contributors have a fair chance at tasks:
- *     1. Prioritizes bidders with fewest active claims (workload balancing).
- *     2. Prioritizes bidders with fewest total historical tasks in the project.
- *     3. Uses earliest bid creation time as tie-breaker.
- * - Posts a "go ahead" comment to the selected bidder asking them to confirm:
- *     "@[agent]: Go ahead! Please reply 'I am ready to work' or comment back to confirm you are ready to take this task."
- *
- * Turn 2:
- * - Inspects pending "go ahead" comments on subsequent cron runs.
- * - If the selected bidder (agent or beneficiary user) has commented back:
- *     Officially awards the bid and assigns the task to that agent.
- * - If the response window has expired without a reply:
- *     Marks the invitation lapsed and frees the issue for the next bidder.
+ * 1. Scans for open, confirmed issues with pending bids and no active assignee/claim.
+ * 2. Selects a bidder fairly so all agents and contributors have an equal chance at tasks:
+ *     - Prioritizes bidders with fewest active claims (workload balancing).
+ *     - Prioritizes bidders with fewest total historical tasks in the project.
+ *     - Uses earliest bid creation time as tie-breaker (FIFO).
+ * 3. Immediately awards the bid and assigns the task to the selected bidder.
+ * 4. Resolves any legacy pending go-ahead comments and posts an assignment notification.
  */
 export async function sweepPendingBids(options?: {
   now?: Date;
@@ -108,184 +99,7 @@ export async function sweepPendingBids(options?: {
       }
       if (!isConfirmedIssue) continue;
 
-      const workflow = await workflowFor(issue.projectId);
-      const responseWindowMs =
-        options?.responseWindowMs ?? workflow.offerWindowSeconds * 1000;
-
-      // Check for any existing "go ahead" comments on this issue
-      const recentComments = await prisma.comment.findMany({
-        where: {
-          bugId: issue.id,
-          deletedAt: null,
-        },
-        orderBy: { createdAt: "desc" },
-        take: 20,
-      });
-
-      // Identify bids that previously lapsed on this issue
-      const lapsedBidIds = new Set<string>();
-      for (const comment of recentComments) {
-        const cMeta = comment.metadata as { action?: string; bidId?: string } | null;
-        if (cMeta?.action === "bid_lapsed" && cMeta.bidId) {
-          lapsedBidIds.add(cMeta.bidId);
-        }
-      }
-
-      const goAheadComment = recentComments.find(
-        (c) => (c.metadata as GoAheadMetadata | null)?.action === "bid_go_ahead",
-      );
-
-      const meta = (goAheadComment?.metadata ?? null) as GoAheadMetadata | null;
-
-      // ---------------------------------------------------------------------
-      // Turn 2: Existing pending invitation
-      // ---------------------------------------------------------------------
-      if (goAheadComment && meta && !meta.resolved) {
-        // Look for any comment from the selected bidder after the invitation
-        const bidderReply = await prisma.comment.findFirst({
-          where: {
-            bugId: issue.id,
-            deletedAt: null,
-            createdAt: { gt: goAheadComment.createdAt },
-            OR: [
-              ...(meta.agentId ? [{ agentId: meta.agentId }] : []),
-              ...(meta.beneficiaryUserId ? [{ authorId: meta.beneficiaryUserId }] : []),
-            ],
-          },
-          orderBy: { createdAt: "asc" },
-        });
-
-        if (bidderReply) {
-          // The bidder commented back! Assign the task to this agent.
-          if (meta.bidId) {
-            const bid = await prisma.issueBid.findUnique({
-              where: { id: meta.bidId },
-              select: { id: true, awardedAt: true, withdrawnAt: true },
-            });
-
-            if (bid && !bid.awardedAt && !bid.withdrawnAt) {
-              await awardBid(
-                { id: issue.reporterId ?? meta.beneficiaryUserId ?? "system", role: "super_admin" },
-                meta.bidId,
-              );
-
-              // Mark the invitation as resolved
-              await prisma.comment.update({
-                where: { id: goAheadComment.id },
-                data: {
-                  metadata: {
-                    ...meta,
-                    resolved: true,
-                    assignedAt: now.toISOString(),
-                  },
-                },
-              });
-
-              // Post confirmation comment
-              const confirmText = `Confirmed! Issue assigned to @[${meta.agentName ?? "agent"}](${meta.agentName ?? "agent"}).`;
-              const authorId = issue.reporterId ?? meta.beneficiaryUserId ?? "system";
-
-              const confirmComment = await prisma.comment.create({
-                data: {
-                  bugId: issue.id,
-                  authorId,
-                  body: confirmText,
-                  type: "comment",
-                  metadata: {
-                    action: "bid_assigned",
-                    bidId: meta.bidId,
-                    agentId: meta.agentId,
-                    beneficiaryUserId: meta.beneficiaryUserId,
-                  },
-                },
-              });
-
-              await prisma.bugActivity.create({
-                data: {
-                  bugId: issue.id,
-                  actorId: authorId,
-                  type: "commented",
-                  summary: commentedSummary(confirmText),
-                  metadata: { commentId: confirmComment.id, action: "bid_assigned" },
-                },
-              });
-
-              await publish(prisma, {
-                tenantId: issue.tenantId,
-                type: "comment.created",
-                bugId: issue.id,
-                payload: { commentId: confirmComment.id, issueId: issue.id, authorId },
-              });
-
-              result.assigned++;
-              continue;
-            }
-          }
-        }
-
-        // Has the response window expired?
-        const elapsedMs = now.getTime() - goAheadComment.createdAt.getTime();
-        if (elapsedMs < responseWindowMs) {
-          // Still waiting for bidder response within allowed window
-          continue;
-        }
-
-        // Window expired without reply: mark lapsed so another bidder gets a chance
-        await prisma.comment.update({
-          where: { id: goAheadComment.id },
-          data: {
-            metadata: {
-              ...meta,
-              resolved: true,
-              lapsed: true,
-              lapsedAt: now.toISOString(),
-            },
-          },
-        });
-        if (meta.bidId) {
-          lapsedBidIds.add(meta.bidId);
-        }
-
-        const lapseText = `Response window expired for @[${meta.agentName ?? "agent"}](${meta.agentName ?? "agent"}). Giving another bidder a fair chance.`;
-        const authorId = issue.reporterId ?? meta.beneficiaryUserId ?? "system";
-
-        const lapseComment = await prisma.comment.create({
-          data: {
-            bugId: issue.id,
-            authorId,
-            body: lapseText,
-            type: "comment",
-            metadata: {
-              action: "bid_lapsed",
-              bidId: meta.bidId,
-              agentId: meta.agentId,
-            },
-          },
-        });
-
-        await prisma.bugActivity.create({
-          data: {
-            bugId: issue.id,
-            actorId: authorId,
-            type: "commented",
-            summary: commentedSummary(lapseText),
-            metadata: { commentId: lapseComment.id, action: "bid_lapsed" },
-          },
-        });
-
-        await publish(prisma, {
-          tenantId: issue.tenantId,
-          type: "comment.created",
-          bugId: issue.id,
-          payload: { commentId: lapseComment.id, issueId: issue.id, authorId },
-        });
-
-        result.lapsed++;
-      }
-
-      // ---------------------------------------------------------------------
-      // Turn 1: Select a bidder fairly and post "go ahead" comment
-      // ---------------------------------------------------------------------
+      // Find all open, unawarded bids on this issue
       const openBids = await prisma.issueBid.findMany({
         where: {
           bugId: issue.id,
@@ -319,8 +133,7 @@ export async function sweepPendingBids(options?: {
         if (bid.agent.revokedAt) continue;
 
         // Active claims check for this bidder's beneficiary in this project
-        // Used for fair workload-balancing sorting (fewest active claims first),
-        // without capping or skipping bidders who have reached maxActiveClaims.
+        // Used for fair workload-balancing sorting (fewest active claims first)
         const activeClaimsCount = await prisma.issueClaim.count({
           where: {
             beneficiaryUserId: bid.beneficiaryUserId,
@@ -343,19 +156,16 @@ export async function sweepPendingBids(options?: {
           bid,
           activeClaimsCount,
           totalAwardedClaimsCount,
-          hasLapsed: lapsedBidIds.has(bid.id),
         });
       }
 
       if (candidateBidders.length === 0) continue;
 
       // Fairness sorting:
-      // 1. Unlapsed bidders before lapsed bidders
-      // 2. Fewest current active tasks (workload balancing)
-      // 3. Fewest historical tasks awarded in project (fair opportunity)
-      // 4. Earliest bid createdAt (FIFO)
+      // 1. Fewest current active tasks (workload balancing)
+      // 2. Fewest historical tasks awarded in project (fair opportunity)
+      // 3. Earliest bid createdAt (FIFO tie-breaker)
       candidateBidders.sort((a, b) => {
-        if (a.hasLapsed !== b.hasLapsed) return a.hasLapsed ? 1 : -1;
         if (a.activeClaimsCount !== b.activeClaimsCount) {
           return a.activeClaimsCount - b.activeClaimsCount;
         }
@@ -367,23 +177,57 @@ export async function sweepPendingBids(options?: {
 
       const selected = candidateBidders[0].bid;
       const agentName = selected.agent.name;
-      const authorId = issue.reporterId ?? selected.beneficiaryUserId;
-      const goAheadBody = `@[${agentName}](${agentName}): Go ahead! Please reply "I am ready to work" or comment back to confirm you are ready to take this task.`;
+      const authorId = issue.reporterId ?? selected.beneficiaryUserId ?? "system";
 
-      const comment = await prisma.comment.create({
+      // Directly award the bid to the fair winner!
+      await awardBid(
+        { id: authorId, role: "super_admin" },
+        selected.id,
+      );
+
+      // Clean up / resolve any existing legacy go-ahead comments on this issue
+      try {
+        const legacyGoAheadComments = await prisma.comment.findMany({
+          where: {
+            bugId: issue.id,
+            deletedAt: null,
+          },
+          take: 10,
+          orderBy: { createdAt: "desc" },
+        });
+
+        for (const comment of legacyGoAheadComments) {
+          const meta = comment.metadata as GoAheadMetadata | null;
+          if (meta?.action === "bid_go_ahead" && !meta.resolved) {
+            await prisma.comment.update({
+              where: { id: comment.id },
+              data: {
+                metadata: {
+                  ...meta,
+                  resolved: true,
+                  assignedAt: now.toISOString(),
+                },
+              },
+            });
+          }
+        }
+      } catch (cleanupErr) {
+        logger.warn(`[cron] Could not resolve legacy go-ahead comment on issue ${issue.id}:`, cleanupErr);
+      }
+
+      // Post confirmation assignment comment
+      const confirmText = `Confirmed! Issue assigned to @[${agentName}](${agentName}) via bid sweep.`;
+      const confirmComment = await prisma.comment.create({
         data: {
           bugId: issue.id,
           authorId,
-          body: goAheadBody,
+          body: confirmText,
           type: "comment",
           metadata: {
-            action: "bid_go_ahead",
+            action: "bid_assigned",
             bidId: selected.id,
             agentId: selected.agentId,
             beneficiaryUserId: selected.beneficiaryUserId,
-            agentName,
-            selectedAt: now.toISOString(),
-            resolved: false,
           },
         },
       });
@@ -393,8 +237,8 @@ export async function sweepPendingBids(options?: {
           bugId: issue.id,
           actorId: authorId,
           type: "commented",
-          summary: commentedSummary(goAheadBody),
-          metadata: { commentId: comment.id, action: "bid_go_ahead" },
+          summary: commentedSummary(confirmText),
+          metadata: { commentId: confirmComment.id, action: "bid_assigned" },
         },
       });
 
@@ -402,10 +246,10 @@ export async function sweepPendingBids(options?: {
         tenantId: issue.tenantId,
         type: "comment.created",
         bugId: issue.id,
-        payload: { commentId: comment.id, issueId: issue.id, authorId },
+        payload: { commentId: confirmComment.id, issueId: issue.id, authorId },
       });
 
-      result.invited++;
+      result.assigned++;
     } catch (error) {
       logger.error(`[cron] Error processing bids for issue ${issue.id}:`, error);
       result.errors.push({
