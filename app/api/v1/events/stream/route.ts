@@ -103,40 +103,61 @@ export async function GET(request: NextRequest) {
         }
       }, 15000);
 
-      if (cursorResult) {
-        replayMissedEvents(agent, cursorResult, filters)
-          .then((events) => {
-            if (closed || !events) return;
-            for (const event of events) {
-              const sseLine = formatSseEvent({
-                id: event.id,
-                type: event.type,
-                payload: event.payload,
-                actorAgentId: event.actorAgentId,
-                bugId: event.bugId,
-                tenantId: agent.tenantId,
-                createdAt: event.createdAt,
-              });
-              try {
-                controller.enqueue(encoder.encode(sseLine));
-              } catch {
-                break;
-              }
-            }
-          })
-          .catch(() => {});
+      const deliveredIds = new Set<string>();
+      let replaying = Boolean(cursorResult);
+      const liveBuffer: StreamEvent[] = [];
+
+      function sendEvent(event: StreamEvent): boolean {
+        if (closed) return false;
+        if (deliveredIds.has(event.id)) return true;
+        deliveredIds.add(event.id);
+        if (deliveredIds.size > 5000) {
+          const first = deliveredIds.values().next().value;
+          if (first) deliveredIds.delete(first);
+        }
+        try {
+          const sseLine = formatSseEvent(event);
+          controller.enqueue(encoder.encode(sseLine));
+          return true;
+        } catch (err) {
+          cleanup();
+          try { controller.error(err); } catch {}
+          return false;
+        }
       }
 
       subscriptionId = eventStreamBus.subscribe(agent, filters, (event: StreamEvent) => {
         if (closed) return;
-        try {
-          const sseLine = formatSseEvent(event);
-          controller.enqueue(encoder.encode(sseLine));
-        } catch (err) {
-          cleanup();
-          controller.error(err);
+        if (replaying) {
+          liveBuffer.push(event);
+        } else {
+          sendEvent(event);
         }
       });
+
+      if (cursorResult) {
+        drainHistoricalEvents(agent, cursorResult, filters, (event) => {
+          return sendEvent({
+            id: event.id,
+            type: event.type,
+            payload: event.payload,
+            actorAgentId: event.actorAgentId,
+            bugId: event.bugId,
+            tenantId: agent.tenantId,
+            createdAt: event.createdAt,
+          });
+        })
+          .catch(() => {})
+          .finally(() => {
+            if (closed) return;
+            replaying = false;
+            for (const live of liveBuffer) {
+              if (closed) break;
+              sendEvent(live);
+            }
+            liveBuffer.length = 0;
+          });
+      }
 
       request.signal.addEventListener("abort", () => {
         cleanup();
@@ -206,23 +227,36 @@ function formatSseEvent(event: StreamEvent): string {
 }
 
 /**
- * Replay missed events from database after cursor position.
+ * Drain historical events from the database after the cursor across all pages (#478).
  * @param agent - Agent context
- * @param cursor - Event cursor
+ * @param initialCursor - Event cursor to start after
  * @param filters - Event filters
- * @returns Array of events or null
+ * @param onEvent - Callback for each event; returns false if consumer closed
  */
-async function replayMissedEvents(
+async function drainHistoricalEvents(
   agent: { tenantId: string },
-  cursor: import("@/lib/agent-api/events").EventCursor | null,
+  initialCursor: import("@/lib/agent-api/events").EventCursor,
   filters: import("@/lib/agent-api/events").EventFilters,
-) {
-  try {
-    const { listEvents } = await import("@/lib/agent-api/events");
-    const events = await listEvents(agent, cursor, filters);
-    return events;
-  } catch {
-    return null;
+  onEvent: (event: import("@/lib/agent-api/events").AgentEventRow) => boolean,
+): Promise<void> {
+  const { listEvents } = await import("@/lib/agent-api/events");
+  let cursor: import("@/lib/agent-api/events").EventCursor | null = initialCursor;
+
+  while (cursor) {
+    const page = await listEvents(agent, cursor, filters);
+    if (!page || page.length === 0) break;
+
+    for (const event of page) {
+      const ok = onEvent(event);
+      if (!ok) return;
+    }
+
+    if (page.length < 101) {
+      break;
+    }
+
+    const last = page[page.length - 1];
+    cursor = { txid: last.txid, id: last.id };
   }
 }
 

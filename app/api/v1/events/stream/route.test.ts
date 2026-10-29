@@ -335,4 +335,128 @@ describe("events/stream SSE endpoint", () => {
     const body = await res.json();
     expect(body.error).toContain("invalid.type");
   });
+
+  it("replays a multi-page backlog (> 101 events) completely and buffers live events (#478)", async () => {
+    const page1 = Array.from({ length: 101 }, (_, i) => ({
+      id: `evt-${i + 1}`,
+      type: "issue.created",
+      payload: { n: i + 1 },
+      actorAgentId: null,
+      bugId: `issue-${i + 1}`,
+      createdAt: new Date("2026-10-19T12:00:00Z"),
+      txid: BigInt(100 + i),
+    }));
+    const page2 = [
+      {
+        id: "evt-102",
+        type: "issue.created",
+        payload: { n: 102 },
+        actorAgentId: null,
+        bugId: "issue-102",
+        createdAt: new Date("2026-10-19T12:05:00Z"),
+        txid: BigInt(250),
+      },
+    ];
+
+    db.agentEvent.findMany
+      .mockResolvedValueOnce(page1)
+      .mockResolvedValueOnce(page2)
+      .mockResolvedValueOnce([]);
+
+    const cursor = encodeEventCursor({ txid: BigInt(50), id: "evt-0" });
+    const res = await GET(request(`/events/stream?after=${cursor}`));
+    expect(res.status).toBe(200);
+    const reader = res.body?.getReader();
+    await reader!.read(); // connected
+
+    // Broadcast a live event while replaying
+    eventStreamBus.broadcast({
+      id: "evt-live-103",
+      type: "issue.created",
+      payload: { n: 103 },
+      actorAgentId: null,
+      bugId: "issue-103",
+      tenantId: "tenant-a",
+      createdAt: new Date("2026-10-19T12:10:00Z"),
+    });
+
+    const receivedIds: string[] = [];
+    while (receivedIds.length < 103) {
+      const { value, done } = await reader!.read();
+      if (done) break;
+      const text = new TextDecoder().decode(value);
+      const matches = text.matchAll(/id: (evt-[a-z0-9-]+)/g);
+      for (const match of matches) {
+        receivedIds.push(match[1]);
+      }
+    }
+
+    expect(receivedIds).toContain("evt-1");
+    expect(receivedIds).toContain("evt-101");
+    expect(receivedIds).toContain("evt-102");
+    expect(receivedIds).toContain("evt-live-103");
+    expect(receivedIds.length).toBe(103);
+    // Historical events 1..102 delivered before live 103
+    expect(receivedIds.indexOf("evt-102")).toBeLessThan(receivedIds.indexOf("evt-live-103"));
+
+    reader!.cancel();
+  });
+
+  it("handles replay database failures gracefully and still delivers live events (#478)", async () => {
+    db.agentEvent.findMany.mockRejectedValueOnce(new Error("Database error"));
+    const cursor = encodeEventCursor({ txid: BigInt(50), id: "evt-0" });
+    const res = await GET(request(`/events/stream?after=${cursor}`));
+    expect(res.status).toBe(200);
+    const reader = res.body?.getReader();
+    await reader!.read(); // connected
+
+    eventStreamBus.broadcast({
+      id: "evt-live-after-err",
+      type: "issue.created",
+      payload: {},
+      actorAgentId: null,
+      bugId: null,
+      tenantId: "tenant-a",
+      createdAt: new Date(),
+    });
+
+    // Let the failed replay promise settle and flush live buffer
+    await new Promise((r) => setTimeout(r, 20));
+
+    const { value } = await reader!.read();
+    const text = new TextDecoder().decode(value);
+    expect(text).toContain("evt-live-after-err");
+
+    reader!.cancel();
+  });
+
+  it("cancels replay loop when the stream reader aborts (#478)", async () => {
+    const controller = new AbortController();
+    const req = new NextRequest(`http://localhost/api/v1/events/stream?after=${encodeEventCursor({ txid: BigInt(1), id: "e0" })}`, {
+      method: "GET",
+      headers: { authorization: "Bearer ziki_test-key" },
+      signal: controller.signal,
+    });
+
+    const page1 = Array.from({ length: 101 }, (_, i) => ({
+      id: `evt-${i + 1}`,
+      type: "issue.created",
+      payload: {},
+      actorAgentId: null,
+      bugId: null,
+      createdAt: new Date(),
+      txid: BigInt(10 + i),
+    }));
+    db.agentEvent.findMany.mockResolvedValue(page1);
+
+    const res = await GET(req);
+    const reader = res.body?.getReader();
+    await reader!.read(); // connected
+
+    controller.abort();
+    await new Promise((r) => setTimeout(r, 20));
+    try { await reader!.cancel(); } catch {}
+
+    expect(eventStreamBus.subscriptionCount).toBe(0);
+  });
 });
