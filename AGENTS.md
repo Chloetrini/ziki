@@ -85,16 +85,21 @@ Every new report is an idea. People and agents give it one verdict each (good, b
 
 - Run `pnpm test` and fix failures before claiming a task complete.
 
-### Fast local loop: set up once, don't re-run everything
+### Code first, test once at the end
 
-Every `vitest` start pays about 5 s of fixed start-up on Windows before a single test runs, and the full suite pays per-file setup about 500 times (about 65 s). Iterate without repeating that:
+Tests must not slow the coding down. Every `vitest` start pays about 5 s of fixed start-up on Windows before a single test runs, and the full suite builds a fresh test environment for each of its ~500 files (about 65 s). So:
+
+1. **Write the whole change first.** Don't stop to run tests after each edit. Keep coding until the change is complete, including its new or updated tests.
+2. **Then run the checks once, in this order:** `pnpm typecheck`, `pnpm lint`, `pnpm test`. Save the test output (e.g. `pnpm test > .test-output.txt 2>&1`) and read the failures from it. Don't run the suite again just to see what failed.
+3. **Fix every failure in one pass**, then rerun **only the failing test files**: `pnpm vitest run path/to/a.test.ts path/to/b.test.ts`. Rerun the full suite only if a fix touched code many tests share.
+4. Call the change done when those pass.
+
+Also:
 
 - **Reuse one checkout.** Switch branches in a checkout that already has `node_modules`; don't make a fresh worktree and `pnpm install` per task (about 2 minutes each time).
-- **Keep one warm test process.** Run `pnpm test:watch` (optionally with the test files you're working on) and leave it running. It reruns only the affected tests about 1 s after you save, instead of about 5 s for a cold run.
-- **Or run just the test files you touched:** `pnpm vitest run lib/voting.test.ts lib/agent-api/votes.test.ts`. Avoid `vitest related` for a quick check: it scans every test file's imports first and is slower than naming the files.
-- **`pnpm test:changed`** runs the tests affected by everything changed since `origin/main`, as a pre-push check.
 - **`pnpm lint` is cached** (`node_modules/.cache/eslint/`): after the first run, it only re-lints changed files (about 8 s instead of about 40 s). `tsc` is already incremental.
-- Run the full `pnpm test` **once**, at the end, before you call the change done.
+- **`pnpm test:changed`** runs only the tests affected since `origin/main`, if you want a quicker check than the full suite before pushing.
+- If you want feedback while you work (for example, writing a tricky function test-first), keep **one** `pnpm test:watch` running instead of starting new runs; it reruns affected tests about 1 s after a save. Avoid `vitest related`: it scans every test file's imports first.
 - Use Node 22 as required by `package.json`. On Node 26, experimental native web storage can break jsdom theme tests; `NODE_OPTIONS=--no-experimental-webstorage pnpm test` avoids that runtime conflict without changing project configuration.
 - Validation schemas live in `lib/validations/bug.ts`; unit tests cover happy + invalid cases under `lib/validations/`.
 - Prefer Vitest for pure logic; do not invent heavy E2E unless asked.
