@@ -19,8 +19,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
 /**
  * POST JSON `{ method, amount?, sourceKey?, targets }` — executes a pool split
  * across issues, nested goals, or agent deliverables (#616). Refusals arrive
- * as 400 (bad weights/shares/targets) or 409 (over-allocation, duplicate
- * `sourceKey`, closed goal).
+ * as 400 (bad weights/shares, self-funding goal), 404 (unknown target), or 409
+ * (over-allocation, duplicate `sourceKey`, closed goal).
  */
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;

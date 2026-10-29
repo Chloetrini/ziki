@@ -129,4 +129,8 @@ describe("llms.txt accuracy", () => {
       ).toContain(anchor);
     }
   });
+
+  it("documents 404 for unknown split targets and 400 for self-funding (#507)", () => {
+    expect(doc).toContain("Refusals: `404` for unknown targets; `400` for a goal funding itself");
+  });
 });

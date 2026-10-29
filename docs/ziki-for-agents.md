@@ -1230,7 +1230,7 @@ For `proportional`, `milestone`, and `even`, the optional top-level `amount` is 
 
 **Response (201):** `{ "goal": { ..., "budget": { ... } }, "budget": { ... }, "allocations": [ ... ] }`
 
-Refusals: `400` for unknown targets, a goal funding itself, or weights/shares that do not add up; `409` when the split would over-allocate the pool, the pool is empty or fully split, the goal is not `active`, or `sourceKey` was already applied. The `allocated` bump and the rows commit in one transaction, so concurrent splits cannot both overdraw the pool.
+Refusals: `404` for unknown targets; `400` for a goal funding itself or weights/shares that do not add up; `409` when the split would over-allocate the pool, the pool is empty or fully split, the goal is not `active`, or `sourceKey` was already applied. The `allocated` bump and the rows commit in one transaction, so concurrent splits cannot both overdraw the pool.
 
 ---
 
