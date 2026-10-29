@@ -24,7 +24,7 @@ export async function findReviewableIssues(
   reviewType: "validation" | "test" | "all" = "all",
   limit = 50,
 ): Promise<ReviewableIssue[]> {
-  requireLevel(agent, "reviewer");
+  requireLevel(agent, "working");
 
   const results: ReviewableIssue[] = [];
 

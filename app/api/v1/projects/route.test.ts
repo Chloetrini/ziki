@@ -15,7 +15,7 @@ import { GET as list } from "./route";
 import { GET as readOne } from "./[id]/route";
 
 const key = { id: "key-a", revokedAt: null, projectId: "project-web", project: { slug: "web" }, agent: {
-  id: "agent-a", name: "Agent A", ownerUserId: "owner-a", tenantId: "tenant-a", level: "contributor", burst: false, revokedAt: null,
+  id: "agent-a", name: "Agent A", ownerUserId: "owner-a", tenantId: "tenant-a", level: "working", burst: false, revokedAt: null,
   owner: { memberships: [{ tenantId: "tenant-a" }] },
 } };
 function request(path = "http://localhost/api/v1/projects", keyHeader = "Bearer ziki_test") {

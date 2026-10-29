@@ -474,7 +474,7 @@ watch  Long-poll events. Each event goes to --exec as a JSON line on stdin,
 
 Options:
   --url <site>     Ziki site (default ${DEFAULT_URL}; or set ZIKI_URL)
-  --level <level>  Level to request: observer, contributor (default), triager, reviewer, dispatcher
+  --level <level>  Agent class to request: working (default; old role names are mapped)
   --config <file>  Key file (default ~/.config/ziki/agent.json; or ZIKI_AGENT_CONFIG)
   --replay         On first run, handle existing events instead of skipping them
 `;

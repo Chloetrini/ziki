@@ -57,11 +57,16 @@ export const createSchema = createBugSchema.pick({ title: true, description: tru
   }).strict();
 const agentCommentSchema = commentSchema.extend({ projectId: idSchema.optional(), attachmentIds: attachmentIdsSchema }).strict();
 
-/** Authenticate before parsing input, charge the shared budget, and audit outcomes including denials. */
+/**
+ * Authenticate before parsing input, charge the shared budget, and audit outcomes including denials.
+ *
+ * `level` is the agent class the route needs. `"read"` is a route any agent may
+ * call that only reads, so it is charged to the read budget rather than write.
+ */
 export async function agentIssueRequest(
-  request: NextRequest, action: string, level: AgentLevel | "comment", target: string | null,
+  request: NextRequest, action: string, level: AgentLevel | "read", target: string | null,
   run: (agent: AgentContext) => Promise<Response>,
-  // `write` charges an observer-level route that changes data (#515) to the write budget.
+  // `write` charges a `"read"` route that changes data (#515) to the write budget.
   // `heartbeat` charges the claim-keeping-ping budget instead of write (#556), so an
   // agent at its write cap can still heartbeat the claims it's actively working.
   options: { budget?: "none" | "write" | "heartbeat" } = {},
@@ -71,14 +76,14 @@ export async function agentIssueRequest(
   let quota: AgentBudgetQuota | undefined;
   try {
     agent = await requireAgent(request);
-    requireLevel(agent, level);
+    requireLevel(agent, level === "read" ? "working" : level);
     if (options.budget === "none") {
       // Retired or non-working routes must not spend the caller's budget (#554).
       response = await run(agent);
     } else {
       const budgetKind = options.budget === "heartbeat"
         ? "heartbeat"
-        : level === "observer" && options.budget !== "write" ? "read" : "write";
+        : level === "read" && options.budget !== "write" ? "read" : "write";
       const budget = await consumeAgentBudget(
         { id: agent.agentId, burst: agent.burst, burstUntil: agent.burstUntil ?? null },
         budgetKind,

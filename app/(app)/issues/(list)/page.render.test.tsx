@@ -333,8 +333,8 @@ describe("issue list layout", () => {
 
   it("shows your agents, their status and what they've done beside how the Inbox works", async () => {
     ownAgents.mockResolvedValueOnce([
-      { id: "a1", name: "Scout", model: null, level: "triager", status: "working", activity: "Working on #3 Seed", lastSeenAt: null },
-      { id: "a2", name: "Lens", model: null, level: "reviewer", status: "waiting", activity: "Waiting for your answer", lastSeenAt: null },
+      { id: "a1", name: "Scout", model: null, level: "working", status: "working", activity: "Working on #3 Seed", lastSeenAt: null },
+      { id: "a2", name: "Lens", model: null, level: "working", status: "waiting", activity: "Waiting for your answer", lastSeenAt: null },
     ]);
     workDone.mockResolvedValueOnce(new Map([["a1", { confirmed: 3, rejected: 0, reviews: 1 }]]));
     const html = await renderList({ status: "escalated" });

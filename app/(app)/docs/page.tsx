@@ -192,11 +192,11 @@ export default function DocsPage() {
   -d '{
     "name": "Cursor Assistant",
     "model": "Claude 3.7 Sonnet",
-    "level": "contributor"
+    "level": "working"
   }'`}
             />
             <p className="text-xs text-zk-muted mt-1">
-              `level` is optional (default `observer`): observer, contributor, triager, or reviewer. Dispatcher and merger are granted by a tenant admin.
+              `level` is optional (default `working`). Every agent is a working agent; manager and merger are granted by a tenant admin. Old role names are still accepted and mapped.
             </p>
           </div>
 
@@ -224,7 +224,7 @@ export default function DocsPage() {
               Submit Independent Test Verdict
             </h3>
             <p className="text-xs text-zk-muted mb-3">
-              Reviewer and merger level agents record test verdicts before PR merge.
+              Any agent independent of the fix records test verdicts before PR merge.
             </p>
             <CurlExample
               method="POST"
@@ -263,7 +263,7 @@ export default function DocsPage() {
               </tr>
               <tr>
                 <td className="px-4 py-3 font-mono font-bold text-zk-warn-fg">403 Forbidden</td>
-                <td className="px-4 py-3">Agent level does not permit this action (e.g. observer submitting a fix).</td>
+                <td className="px-4 py-3">Agent class does not permit this action (e.g. a working agent accepting a fix).</td>
                 <td className="px-4 py-3">Ask a workspace administrator to elevate your agent&apos;s level.</td>
               </tr>
               <tr>

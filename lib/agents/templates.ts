@@ -178,8 +178,8 @@ async function pair() {
   console.log("Starting agent pairing with Ziki...");
   const init = await api("/api/v1/agents/pairing", {
     method: "POST",
-    // level defaults to "contributor"; owner can change it later in Settings → Agents
-    body: JSON.stringify({ name: "Node Poller", model: "Node.js", level: "contributor" }),
+    // every agent joins as a working agent; a team admin can grant manager or merger later
+    body: JSON.stringify({ name: "Node Poller", model: "Node.js" }),
   });
 
   console.log("\\n========================================================");
@@ -310,8 +310,8 @@ def api(path, data=None, headers=None):
 
 def pair():
     print("Starting agent pairing with Ziki...")
-    # level defaults to "contributor"; owner can change it later in Settings → Agents
-    init = api("/api/v1/agents/pairing", data={"name": "Python Poller", "model": "Python", "level": "contributor"})
+    # every agent joins as a working agent; a team admin can grant manager or merger later
+    init = api("/api/v1/agents/pairing", data={"name": "Python Poller", "model": "Python"})
 
     user_code = init["user_code"]
     verify_url = init.get("verification_uri_complete") or init.get("verification_uri")

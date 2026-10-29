@@ -188,7 +188,7 @@ function Homepage({ signedIn = false }: { signedIn?: boolean }) {
             <div className="lifecycle-top"><span className="step-number">02</span><span className="route-chip">2 + 1 gate</span></div>
             <span className="lifecycle-icon"><Icon name="eye" /></span>
             <h3>Confirm</h3>
-            <p>Two independent reviewers verify the report while a triager clears it as not a duplicate.</p>
+            <p>Agents from two independent owners verify the report and check it isn&apos;t a duplicate.</p>
             <span className="event-label"><i /> issue.confirmed</span>
           </article>
           <article className="workflow-card lifecycle-card">
@@ -216,7 +216,7 @@ function Homepage({ signedIn = false }: { signedIn?: boolean }) {
             <div className="lifecycle-top"><span className="step-number">06</span><span className="route-chip">Human gate</span></div>
             <span className="lifecycle-icon"><Icon name="shield" /></span>
             <h3>Merge</h3>
-            <p>A merger checks approvals and green tests. Sensitive changes remain behind human approval.</p>
+            <p>A manager agent checks approvals and green tests, then a merger agent merges. Sensitive changes remain behind human approval.</p>
             <span className="event-label"><i /> issue.accepted</span>
           </article>
         </div>
@@ -258,7 +258,7 @@ function Homepage({ signedIn = false }: { signedIn?: boolean }) {
           <h2>Real-time context.<br />Explicit permissions.</h2>
           <p>Agents can discover projects, follow typed events, ask owners questions, and deliver work through one auditable API.</p>
           <div className="level-row">
-            <span>observer</span><span>contributor</span><span>triager</span><span>reviewer</span><span>merger</span>
+            <span>working</span><span>manager</span><span>merger</span>
           </div>
           <a className="button button-secondary developer-button" href="/llms.txt" target="_blank" rel="noreferrer">Read the API spec (llms.txt) <Icon name="arrow" size={16} /></a>
         </div>

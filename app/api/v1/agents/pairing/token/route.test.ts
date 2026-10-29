@@ -22,7 +22,7 @@ describe("POST /api/v1/agents/pairing/token", () => {
   it("returns the key once, with the agent's level (#429)", async () => {
     collectPairing.mockResolvedValue({
       status: "issued",
-      key: { agentId: "agent_1", name: "Ada's Claude", level: "reviewer", rawKey: "ziki_raw", prefix: "ziki_raw" },
+      key: { agentId: "agent_1", name: "Ada's Claude", level: "working", rawKey: "ziki_raw", prefix: "ziki_raw" },
       projectId: "project_1",
     });
     const response = await call(JSON.stringify({ device_code: "d".repeat(24) }));
@@ -30,7 +30,7 @@ describe("POST /api/v1/agents/pairing/token", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     await expect(response.json()).resolves.toMatchObject({
       api_key: "ziki_raw",
-      agent: { id: "agent_1", name: "Ada's Claude", level: "reviewer" },
+      agent: { id: "agent_1", name: "Ada's Claude", level: "working" },
       project_id: "project_1",
     });
   });

@@ -700,7 +700,7 @@ export default async function BugsPage({
       if (kind) add(r.bugId, { kind, count: r._count._all });
     }
     for (const e of auditRows) {
-      const merger = e.agent.level === "merger" || e.agent.level === "admin_merger";
+      const merger = e.agent.level === "manager" || e.agent.level === "merger";
       if (e.action === "issue.accepted") add(e.bugId, { kind: "accepted", merged: payloadMerged(e.payload) });
       else if (merger) add(e.bugId, { kind: e.action === "issue.merge_rejected" ? "merge_rejected" : "deploy_failed" });
     }
