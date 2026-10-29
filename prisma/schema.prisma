@@ -894,6 +894,9 @@ model Agent {
   defaultProjectId     String?
   /// The owner's standing brief (#605), returned by `GET /api/v1/agents/me`.
   instructions         String?
+  /// The robot avatar its owner picked, a key from lib/agents/avatars.ts.
+  /// Null means the automatic one drawn from the agent's id.
+  avatar               String?
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)

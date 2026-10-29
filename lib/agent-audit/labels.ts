@@ -5,6 +5,7 @@
 const ACTION_LABELS: Record<string, string> = {
   "agent.created": "Was added",
   "agent.renamed": "Was renamed",
+  "agent.avatar_changed": "Got a new avatar",
   "agent.level_changed": "Changed level",
   "agent.promoted": "Was promoted",
   "agent.key_rotated": "Got a new key",

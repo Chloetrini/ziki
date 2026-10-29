@@ -12,6 +12,7 @@ import { LocalTime } from "@/components/local-time";
 import { InstructionsForm, SendMessageForm } from "./message-forms";
 import { AgentActivity, AgentProfileCard, type AgentActivityItem, type AgentProfileData } from "./agent-profile";
 import { AgentSettingsForm } from "./agent-settings-form";
+import { AgentAvatarPicker } from "./agent-avatar-picker";
 import { agentsLink, agentsMutedClass, agentsSurface } from "@/app/(app)/settings/agents/agents-ui";
 
 export const metadata = { title: "Agent" };
@@ -70,6 +71,7 @@ async function loadAgentProfile(
       tenantId: true,
       name: true,
       model: true,
+      avatar: true,
       level: true,
       revokedAt: true,
       createdAt: true,
@@ -112,6 +114,7 @@ async function loadAgentProfile(
       id: agent.id,
       name: agent.name,
       model: agent.model,
+      avatar: agent.avatar,
       level: agent.level,
       revokedAt: agent.revokedAt,
       createdAt: agent.createdAt,
@@ -157,6 +160,11 @@ export default async function AgentPage({ params }: { params: Promise<{ name: st
         agent={profile.agent}
         title={
           <h1 className="break-words text-3xl font-extrabold tracking-tight text-zk-text">{thread.agent.name}</h1>
+        }
+        avatarControl={
+          thread.agent.revoked ? null : (
+            <AgentAvatarPicker agentId={agentId} agentName={profile.agent.name} avatar={profile.agent.avatar} />
+          )
         }
         settings={
           thread.agent.revoked ? null : (

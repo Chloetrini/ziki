@@ -6,6 +6,7 @@ import { audit } from "@/lib/agents/audit";
 import { generateApiKey } from "@/lib/agents/keys";
 import { sealSecret } from "@/lib/secret-box";
 import { CREATION_LEVELS, DEFAULT_AGENT_LEVEL, canSetLevel } from "@/lib/agents/levels";
+import { isAgentAvatar } from "@/lib/agents/avatars";
 import { isTenantAdmin } from "@/lib/agents/membership";
 import { currentTenantIdFor } from "@/lib/tenant-context";
 import type { AgentContext } from "@/lib/agents/require-agent";
@@ -279,6 +280,30 @@ export async function renameAgent(actor: Actor, agentId: string, input: unknown)
     );
   });
   return { ok: true, name };
+}
+
+/**
+ * Pick the agent's robot avatar, as its owner or a team admin. Null goes back
+ * to the automatic one drawn from its id.
+ */
+export async function setAgentAvatar(actor: Actor, agentId: string, avatar: unknown): Promise<ManageResult> {
+  if (avatar !== null && !isAgentAvatar(avatar)) return { ok: false, error: "Pick one of the avatars." };
+  const managed = await managedAgent(actor, agentId);
+  if (!managed) return { ok: false, error: NOT_FOUND };
+  if (managed.agent.revokedAt) return { ok: false, error: "That agent is revoked." };
+  const before = await prisma.agent.findUniqueOrThrow({ where: { id: agentId }, select: { avatar: true } });
+  if (before.avatar === avatar) return { ok: true };
+  await prisma.$transaction(async (tx) => {
+    await tx.agent.update({ where: { id: agentId }, data: { avatar } });
+    await audit(
+      { agentId, tenantId: managed.agent.tenantId },
+      "agent.avatar_changed",
+      `agent:${agentId}`,
+      { from: before.avatar, to: avatar, by: managed.isOwner ? "owner" : "tenant_admin" },
+      { actorUserId: actor.id, db: tx },
+    );
+  });
+  return { ok: true };
 }
 
 /** Save an agent's preferred areas for one project (#609). */

@@ -20,7 +20,7 @@ vi.mock("@/lib/prisma", () => ({ prisma: db }));
 
 import { hashSecret } from "./keys";
 import { openSecret } from "@/lib/secret-box";
-import { createAgent, deleteAgent, regenerateKey, renameAgent, revokeAgent, rotateKey, setAgentAreaPreferences, setAgentBurst, setAgentLevel } from "./registry";
+import { createAgent, deleteAgent, regenerateKey, renameAgent, revokeAgent, rotateKey, setAgentAreaPreferences, setAgentAvatar, setAgentBurst, setAgentLevel } from "./registry";
 import { MAX_ACTIVE_AGENTS_PER_OWNER } from "./registry-limits";
 
 const ada = { id: "ada", role: "user" as const };
@@ -392,6 +392,35 @@ describe("renameAgent", () => {
     expect(await renameAgent({ id: "bob", role: "user" }, "agent1", "Scout")).toMatchObject({ ok: false });
     db.agent.findUnique.mockResolvedValue({ ...agentRow, revokedAt: new Date() });
     expect(await renameAgent(ada, "agent1", "Scout")).toMatchObject({ ok: false });
+    expect(db.agent.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("setAgentAvatar", () => {
+  it("lets the owner pick a robot, and logs it", async () => {
+    db.agent.findUnique.mockResolvedValue(agentRow);
+    db.agent.findUniqueOrThrow.mockResolvedValue({ avatar: null });
+    expect(await setAgentAvatar(ada, "agent1", "grape")).toEqual({ ok: true });
+    expect(db.agent.update).toHaveBeenCalledWith({ where: { id: "agent1" }, data: { avatar: "grape" } });
+    expect(db.agentAuditEvent.create.mock.calls[0][0].data).toMatchObject({
+      action: "agent.avatar_changed",
+      payload: { from: null, to: "grape", by: "owner" },
+    });
+  });
+
+  it("goes back to the automatic robot with null", async () => {
+    db.agent.findUnique.mockResolvedValue(agentRow);
+    db.agent.findUniqueOrThrow.mockResolvedValue({ avatar: "grape" });
+    expect(await setAgentAvatar(ada, "agent1", null)).toEqual({ ok: true });
+    expect(db.agent.update).toHaveBeenCalledWith({ where: { id: "agent1" }, data: { avatar: null } });
+  });
+
+  it("refuses an unknown avatar, a revoked agent and anyone else", async () => {
+    db.agent.findUnique.mockResolvedValue(agentRow);
+    expect(await setAgentAvatar(ada, "agent1", "not-a-robot")).toMatchObject({ ok: false });
+    expect(await setAgentAvatar({ id: "bob", role: "user" }, "agent1", "sky")).toMatchObject({ ok: false });
+    db.agent.findUnique.mockResolvedValue({ ...agentRow, revokedAt: new Date() });
+    expect(await setAgentAvatar(ada, "agent1", "sky")).toMatchObject({ ok: false });
     expect(db.agent.update).not.toHaveBeenCalled();
   });
 });

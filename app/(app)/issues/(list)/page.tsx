@@ -1059,6 +1059,7 @@ export default async function BugsPage({
                     return {
                       id: agent.id,
                       name: agent.name,
+                      avatar: agent.avatar,
                       status: agent.status,
                       activity: agent.activity,
                       done: done ? `Last 30 days: ${done}` : "Nothing done in the last 30 days",

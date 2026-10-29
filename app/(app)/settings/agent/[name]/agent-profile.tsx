@@ -16,6 +16,8 @@ export type AgentProfileData = {
   id: string;
   name: string;
   model: string | null;
+  /** The owner's avatar pick; null wears the automatic one. */
+  avatar: string | null;
   level: AgentLevel;
   revokedAt: Date | null;
   createdAt: Date;
@@ -39,10 +41,13 @@ export type AgentActivityItem = {
 export function AgentProfileCard({
   agent,
   title,
+  avatarControl = null,
   settings = null,
 }: {
   agent: AgentProfileData;
   title: React.ReactNode;
+  /** Stands in for the avatar when the viewer may change it: the avatar, opening a picker. */
+  avatarControl?: React.ReactNode;
   /** Rename and level controls, for those who may change them. */
   settings?: React.ReactNode;
 }) {
@@ -54,7 +59,7 @@ export function AgentProfileCard({
   return (
     <section className={`${agentsSurface} space-y-5 p-5 sm:p-6`} aria-label="Profile">
       <div className="flex items-start gap-4">
-        <AgentAvatar agentId={agent.id} size={72} />
+        {avatarControl ?? <AgentAvatar agentId={agent.id} avatar={agent.avatar} size={72} />}
         <div className="min-w-0 space-y-1.5">
           {title}
           <div className="flex flex-wrap items-center gap-2">
