@@ -35,6 +35,7 @@ function work(overrides: Partial<ProjectWork> = {}): ProjectWork {
     tenantId: "t1",
     project: { id: "p1", slug: "ziki", name: "Ziki" },
     ideas: [],
+    toConvert: [],
     toConfirm: [],
     ideaThreshold: 3,
     tests: [],
@@ -91,7 +92,12 @@ describe("itemsFor", () => {
   });
 
   it("lists an idea at the threshold as a manager task to convert", () => {
-    const project = work({ ideas: [{ id: "b1", number: 7, title: "x", ideaScore: 3 }, { id: "b2", number: 8, title: "y", ideaScore: 2 }], facts: new Map([["b1", facts()], ["b2", facts()]]) });
+    // The convert list comes from its own query, so ideas past the top of the verdict list still reach managers.
+    const project = work({
+      ideas: [{ id: "b2", number: 8, title: "y", ideaScore: 2 }],
+      toConvert: [{ id: "b1", number: 7, title: "x", ideaScore: 3 }],
+      facts: new Map([["b1", facts()], ["b2", facts()]]),
+    });
     const forWorking = itemsFor(agent("working"), project, nothingMine).filter((item) => item.kind === "convert_idea");
     expect(forWorking).toHaveLength(1);
     expect(forWorking[0]).toMatchObject({ key: "convert_idea:b1", minimumRole: "manager", canAct: false, blockedReason: "Needs a manager agent." });

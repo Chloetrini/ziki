@@ -33,6 +33,8 @@ import { eventStreamBus, TENANT_WRITE, type StreamEvent } from "@/lib/events/str
 
 const SNAPSHOT_TTL_MS = 20_000;
 const PER_KIND_LIMIT = 25;
+/** Every idea at the threshold reaches the managers, not just the top of the verdict list. */
+const CONVERT_LIMIT = 100;
 export const WORK_POLL_SECONDS = 30;
 
 export type WorkKind =
@@ -108,6 +110,8 @@ export type ProjectWork = {
   project: { id: string; slug: string; name: string };
   /** Open ideas, with their verdict score. */
   ideas: (IssueRef & { ideaScore: number })[];
+  /** Open ideas at or past the project's threshold, waiting for a manager agent to convert them. */
+  toConvert: (IssueRef & { ideaScore: number })[];
   /** Converted issues still being confirmed. */
   toConfirm: (IssueRef & { needs: ConfirmNeed[] })[];
   ideaThreshold: number;
@@ -183,11 +187,13 @@ async function buildProjectWork(tenantId: string, project: { id: string; slug: s
   for (const issue of toValidate) addNeed(issue, "validation");
   for (const issue of toTriage) if (!readyIds.has(issue.id)) addNeed(issue, "duplicate_check");
 
-  const ids = new Set([...ideas.map((i) => i.id), ...toConfirm.keys(), ...tests.map((t) => t.id), ...toAccept.map((t) => t.id), ...toMerge.map((t) => t.id)]);
+  const toConvert = await convertibleIdeas(tenantId, project.id, workflow.ideaThreshold);
+  const ids = new Set([...ideas.map((i) => i.id), ...toConvert.map((i) => i.id), ...toConfirm.keys(), ...tests.map((t) => t.id), ...toAccept.map((t) => t.id), ...toMerge.map((t) => t.id)]);
   return {
     tenantId,
     project,
     ideas,
+    toConvert,
     toConfirm: [...toConfirm.values()].slice(0, PER_KIND_LIMIT),
     ideaThreshold: workflow.ideaThreshold,
     tests: tests.map((t) => ({ id: t.id, number: t.number, title: t.title, pullRequestUrl: t.pullRequestUrl ?? null })),
@@ -206,6 +212,16 @@ async function openIdeas(tenantId: string, projectId: string): Promise<ProjectWo
     where: { tenantId, projectId, isDeleted: false, status: "open", convertedToIssueAt: null },
     orderBy: [{ ideaScore: "desc" }, { createdAt: "asc" }],
     take: PER_KIND_LIMIT,
+    select: { id: true, number: true, title: true, ideaScore: true },
+  });
+}
+
+/** Open ideas whose score reached the threshold, highest first. */
+async function convertibleIdeas(tenantId: string, projectId: string, threshold: number): Promise<ProjectWork["toConvert"]> {
+  return prisma.bug.findMany({
+    where: { tenantId, projectId, isDeleted: false, status: "open", convertedToIssueAt: null, ideaScore: { gte: threshold } },
+    orderBy: [{ ideaScore: "desc" }, { createdAt: "asc" }],
+    take: CONVERT_LIMIT,
     select: { id: true, number: true, title: true, ideaScore: true },
   });
 }
@@ -463,8 +479,7 @@ export function itemsFor(agent: AgentContext, work: ProjectWork, mine: AgentWork
     if (id && !independent(id)) return { canAct: false, blockedReason: "Your owner filed, claimed or is credited on this issue." };
     return { canAct: true };
   };
-  for (const idea of work.ideas) {
-    if (idea.ideaScore < work.ideaThreshold) continue;
+  for (const idea of work.toConvert) {
     items.push({
       kind: "convert_idea",
       key: `convert_idea:${idea.id}`,

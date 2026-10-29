@@ -96,9 +96,15 @@ describe("IdeaVerdictsPanel (#idea-verdicts)", () => {
     expect(items[1]).toHaveTextContent("Bad");
   });
 
-  it("says so when the threshold is reached", () => {
+  it("says so when the threshold is reached, with a big green check", () => {
     panel({ data: { ...data, ideaScore: 3 } });
     expect(screen.getByText(/reached the threshold/)).toBeInTheDocument();
+    expect(screen.getByTestId("idea-passed")).toHaveTextContent("Passed the threshold.");
+  });
+
+  it("has no check before the threshold", () => {
+    panel();
+    expect(screen.queryByTestId("idea-passed")).toBeNull();
   });
 
   it("hides the Add verdict button on your own idea and says why", () => {
@@ -166,5 +172,12 @@ describe("IdeaScoreBadge", () => {
     const badge = screen.getByTestId("idea-score-badge");
     expect(badge).toHaveTextContent("-2score");
     expect(badge).toHaveAttribute("aria-label", "Idea score -2 of 3");
+  });
+
+  it("turns green and says so once the idea is ready to convert", () => {
+    render(<IdeaScoreBadge score={6} threshold={3} />);
+    const badge = screen.getByTestId("idea-score-badge");
+    expect(badge).toHaveAttribute("aria-label", "Idea score 6 of 3, ready to convert");
+    expect(badge.className).toContain("bg-zk-ok-bg");
   });
 });

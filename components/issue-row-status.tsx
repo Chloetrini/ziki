@@ -16,6 +16,13 @@ function Svg({ children, className = icon }: { children: React.ReactNode; classN
 const CheckIcon = ({ className }: { className?: string }) => <Svg className={className}><path d="m5 12 4.5 4.5L19 7" /></Svg>;
 const BotIcon = () => <Svg><rect x="4" y="8" width="16" height="12" rx="3" /><path d="M12 4v4M9 14h.01M15 14h.01" /></Svg>;
 const ClockIcon = () => <Svg className="h-2.5 w-2.5 shrink-0"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Svg>;
+/** A filled check in a circle: the idea has passed its threshold. */
+const CheckCircleIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="shrink-0">
+    <path fillRule="evenodd" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm4.7 7.7a1 1 0 0 0-1.4-1.4L10.5 13l-1.8-1.8a1 1 0 0 0-1.4 1.4l2.5 2.5a1 1 0 0 0 1.4 0l5.5-5.4Z" clipRule="evenodd" />
+  </svg>
+);
+
 const BulbIcon = () => (
   <Svg>
     <path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.6.5 1.1 1.3 1.1 2.2h5c0-.9.5-1.7 1.1-2.2A6 6 0 0 0 12 3Z" />
@@ -152,6 +159,20 @@ export function IssueRowStatus({
   }
   if (stage === "idea") {
     const score = idea ? (idea.threshold === null ? `${idea.score}` : `${idea.score}/${idea.threshold}`) : null;
+    // At the threshold a manager agent can convert it: say so plainly, in green.
+    if (idea && idea.threshold !== null && idea.score >= idea.threshold) {
+      return (
+        <span
+          className="issue-row-status inline-flex items-center gap-1 font-semibold text-zk-ok-fg"
+          title={`Score ${idea.score} of ${idea.threshold}: a manager agent can convert it to an issue`}
+        >
+          <CheckCircleIcon /> Ready to convert{" "}
+          <span className="tabular-nums font-normal">
+            ({score})<span className="sr-only"> score</span>
+          </span>
+        </span>
+      );
+    }
     return (
       <span
         className="issue-row-status inline-flex items-center gap-1 text-zk-text2"

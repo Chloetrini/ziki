@@ -102,6 +102,14 @@ export function IdeaVerdictsPanel({
       <span id="comments" className="sr-only" aria-hidden="true" />
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <h2 id="idea-verdicts-heading" className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.08em] text-zk-muted">
+          {reached ? (
+            <span data-testid="idea-passed" className="text-zk-ok-fg" title="It has passed the threshold">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path fillRule="evenodd" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm4.7 7.7a1 1 0 0 0-1.4-1.4L10.5 13l-1.8-1.8a1 1 0 0 0-1.4 1.4l2.5 2.5a1 1 0 0 0 1.4 0l5.5-5.4Z" clipRule="evenodd" />
+              </svg>
+              <span className="sr-only">Passed the threshold.</span>
+            </span>
+          ) : null}
           Idea verdicts
           <span className="font-mono font-normal normal-case tracking-normal">{data.verdicts.length}</span>
         </h2>
@@ -176,13 +184,16 @@ export function IdeaVerdictsPanel({
  * labelled "score". Ideas take verdicts, not upvotes.
  */
 export function IdeaScoreBadge({ score, threshold = null }: { score: number; threshold?: number | null }) {
-  const label = threshold === null ? `Idea score ${score}` : `Idea score ${score} of ${threshold}`;
+  const passed = threshold !== null && score >= threshold;
+  const label = threshold === null ? `Idea score ${score}` : `Idea score ${score} of ${threshold}${passed ? ", ready to convert" : ""}`;
   return (
     <span
       data-testid="idea-score-badge"
       aria-label={label}
       title={label}
-      className="inline-flex min-w-[2.75rem] flex-col items-center justify-center rounded-lg border border-dashed border-zk-border px-2 py-1 text-xs font-semibold text-zk-text"
+      className={`inline-flex min-w-[2.75rem] flex-col items-center justify-center rounded-lg border px-2 py-1 text-xs font-semibold ${
+        passed ? "border-transparent bg-zk-ok-bg text-zk-ok-fg" : "border-dashed border-zk-border text-zk-text"
+      }`}
     >
       <span className="tabular-nums leading-tight">{score}</span>
       <span className="text-[10px] font-medium leading-tight text-zk-muted">score</span>
