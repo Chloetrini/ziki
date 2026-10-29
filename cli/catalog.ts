@@ -80,16 +80,6 @@ const EXTRA_TOOLS: readonly CliTool[] = [
     },
   },
   {
-    name: "ziki_find_dispatchable_issues",
-    summary: "List ready issues a manager agent can dispatch: confirmed, three or more upvotes, no active claim.",
-    level: "manager",
-    method: "GET",
-    route: "/dispatcher/ready-issues",
-    projectScoped: true,
-    query: ["limit"],
-    input: { projectId, limit: z.number().int().min(1).max(100).optional().describe("Maximum issues (default 50).") },
-  },
-  {
     name: "ziki_dispatch",
     summary: "Offer ready issues to agents, as a manager agent. Policies: offer_only, auto_award, direct_assign.",
     level: "manager",

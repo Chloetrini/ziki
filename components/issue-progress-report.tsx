@@ -77,6 +77,7 @@ export function StageIcon({ name, style }: { name: IconName; style?: CSSProperti
 
 export const stageIconName: Record<DecisionStage, IconName> = {
   idea: "bulb",
+  confirm: "eye",
   open: "bot",
   done: "flask",
   ready: "merge",
@@ -193,6 +194,8 @@ function statusChip(stage: DecisionStage, setback: boolean): { label: string; to
   switch (stage) {
     case "idea":
       return { label: `${label} · in review`, tone: "cn" };
+    case "confirm":
+      return { label: `${label} · with reviewers`, tone: "ca" };
     case "open":
       return { label: `${label} · in progress`, tone: "cb" };
     case "done":
@@ -242,7 +245,7 @@ export function IssueProgressReport({
       </div>
       <div className="pgw">
         <div className="pg-track" aria-hidden="true">
-          <span className="pg-fill" style={{ width: `${currentIndex * 25}%` }} />
+          <span className="pg-fill" style={{ width: `${(currentIndex * 100) / (DECISION_STAGES.length - 1)}%` }} />
         </div>
         <ol className="pg" aria-label="Progress report: pick a stage to see its logs">
           {DECISION_STAGES.map((stage, index) => {

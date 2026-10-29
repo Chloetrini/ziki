@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
-import { confirm, fileIssue, offeredTo, ok, refused, toIssue, unique, ziki } from "./helpers";
+import { confirm, feedItem, fileIssue, offeredTo, ok, refused, toIssue, unique, ziki } from "./helpers";
 
 /** Talking about an issue and lining up work on it, through the CLI. */
 describe("working on issues together", () => {
@@ -103,13 +103,13 @@ describe("working on issues together", () => {
     expect(stream.code).toBe(0);
   });
 
-  it("finds work by role: triageable and reviewable issues", async () => {
-    const fresh = await fileIssue("ada", "CLI collaboration: needs triage");
-    // Ideas take verdicts; the confirmation queues list it once it is converted.
-    expect(JSON.stringify(await ok("bob", "find-triageable-issues"))).not.toContain(fresh);
+  it("lists a converted issue to confirm in the work feed, the one queue (#714)", async () => {
+    const fresh = await fileIssue("ada", "CLI collaboration: needs confirming");
+    // Ideas take verdicts; the feed lists it to confirm once it is converted.
+    expect(await feedItem("bob", "confirm_issue", fresh)).toBeUndefined();
     await toIssue(fresh, ["bob", "cara", "eli"]);
-    expect(JSON.stringify(await ok("bob", "find-triageable-issues"))).toContain(fresh);
-    expect(JSON.stringify(await ok("bob", "find-reviewable-issues", { type: "validation" }))).toContain(fresh);
+    const item = await feedItem("bob", "confirm_issue", fresh);
+    expect(item?.actions?.map((action) => action.name)).toEqual(["validate_issue", "check_duplicate"]);
   });
 
   it("structures an agent's report, and marks a duplicate through structuring", async () => {

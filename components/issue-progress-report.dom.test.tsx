@@ -70,7 +70,7 @@ function renderPage(
   } = {},
 ) {
   const starts = stageStarts(list);
-  const counts: Record<DecisionStage, number> = { idea: 0, open: 0, done: 0, ready: 0, live: 0 };
+  const counts: Record<DecisionStage, number> = { idea: 0, confirm: 0, open: 0, done: 0, ready: 0, live: 0 };
   for (const c of threadComments) counts[stageOfComment(c.type, c.createdAt, starts)] += 1;
   return render(
     <IssueStageProvider initialStage={stage}>
@@ -121,8 +121,9 @@ describe("IssueProgressReport (#1446)", () => {
 
   it("shows the stage's log count and keeps ✓/✕ for screen readers", () => {
     renderPage(decisions, "done");
-    expect(stageButton(/^Idea/)).toHaveTextContent("2 logs");
-    expect(screen.getByText("Idea: 1 positive, 1 negative")).toBeInTheDocument();
+    expect(stageButton(/^Requires confirmation/)).toHaveTextContent("2 logs");
+    expect(stageButton(/^Idea/)).toHaveTextContent("0 logs");
+    expect(screen.getByText("Requires confirmation: 1 positive, 1 negative")).toBeInTheDocument();
     expect(screen.getByText("Ready to merge: 1 positive, 1 negative")).toBeInTheDocument();
   });
 
@@ -161,7 +162,7 @@ describe("IssueProgressReport (#1446)", () => {
 
     expect(stageButton(/^Idea/)).toHaveTextContent("0 logs");
     expect(stageButton(/^Live/)).toHaveTextContent("not yet");
-    expect(summary("Idea").getByText("Reviewer agents confirm or reject the idea here.")).toBeInTheDocument();
+    expect(summary("Idea").getByText("People give the idea good, bad or neutral verdicts; a manager agent then converts it to an issue.")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("No comments at the Idea stage yet.");
     expect(screen.getByTestId("conv-count")).toHaveTextContent("0");
   });
@@ -171,10 +172,16 @@ describe("IssueStageSummary (#186)", () => {
   it("shows the stage's up and down totals and, on the Idea stage, the verdicts", () => {
     renderPage(decisions, "idea", comments, { ideaVerdicts: { score: 2, threshold: 3, votes: { good: 3, bad: 1, neutral: 2 } } });
     const totals = within(screen.getByLabelText("Idea stage totals"));
-    expect(totals.getByTitle("1 agent decision up")).toHaveTextContent("1 up");
-    expect(totals.getByTitle("1 agent decision down")).toHaveTextContent("1 down");
+    // Confirmations belong to the next stage now (#714), so the Idea stage counts none.
+    expect(totals.getByTitle("0 agent decisions up")).toHaveTextContent("0 up");
     expect(totals.getByTestId("idea-verdict-totals")).toHaveTextContent("Score 2 of 3 · 3 good · 1 bad · 2 neutral");
     expect(totals.queryByText(/upvote/)).toBeNull();
+
+    fireEvent.click(stageButton(/^Requires confirmation/));
+    const confirm = within(screen.getByLabelText("Requires confirmation stage totals"));
+    expect(confirm.getByTitle("1 agent decision up")).toHaveTextContent("1 up");
+    expect(confirm.getByTitle("1 agent decision down")).toHaveTextContent("1 down");
+    expect(confirm.queryByTestId("idea-verdict-totals")).toBeNull();
 
     fireEvent.click(stageButton(/^Done/));
     const done = within(screen.getByLabelText("Done stage totals"));
@@ -209,9 +216,9 @@ describe("IssueStageSummary (#186)", () => {
     expect(done.getByText("Fix the findings and resubmit the pull request")).toBeInTheDocument();
   });
 
-  it("summarises the Idea stage with counts, severity and the latest decision", () => {
-    renderPage(decisions, "idea");
-    const idea = summary("Idea");
+  it("summarises Requires confirmation with counts, severity and the latest decision (#714)", () => {
+    renderPage(decisions, "confirm");
+    const idea = summary("Requires confirmation");
     expect(idea.getByText("Confirmed as a real issue by 1 agent, severity Medium. 1 agent rejected it.")).toBeInTheDocument();
     expect(idea.getByText("1 Confirmed")).toBeInTheDocument();
     expect(idea.getByText("1 Rejected")).toBeInTheDocument();

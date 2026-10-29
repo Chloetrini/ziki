@@ -18,7 +18,8 @@ describe("IssueRowStageTallies (#1446)", () => {
     ]);
     const { container } = render(<IssueRowStageTallies tallies={tallies} />);
 
-    expect(screen.getByText("Idea: 8 positive, 1 negative")).toBeInTheDocument();
+    expect(screen.getByText("Requires confirmation: 8 positive, 1 negative")).toBeInTheDocument();
+    expect(screen.queryByText(/^Idea:/)).not.toBeInTheDocument();
     expect(screen.getByText("Open: 1 positive, 0 negative")).toBeInTheDocument();
     expect(screen.getByText("Done: 7 positive, 0 negative")).toBeInTheDocument();
     expect(screen.queryByText(/^Ready to merge:/)).not.toBeInTheDocument();

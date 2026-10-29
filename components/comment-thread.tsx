@@ -14,7 +14,7 @@ import type { CommentType } from "@/lib/validations/issue";
 import { decisionStageInfo, stageOfComment, type DecisionStage, type StageStarts } from "@/lib/decision-stages";
 import { StageIcon, stageIconName } from "@/components/issue-progress-report";
 
-const NO_STAGE_STARTS: StageStarts = { open: null, done: null, ready: null, live: null };
+const NO_STAGE_STARTS: StageStarts = { confirm: null, open: null, done: null, ready: null, live: null };
 import { deleteCommentAction, updateCommentAction } from "@/app/actions/comments";
 import { Button } from "@/components/ui/button";
 import { CommentBody, MentionText } from "@/components/comment-body";

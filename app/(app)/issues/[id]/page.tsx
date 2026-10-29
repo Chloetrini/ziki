@@ -15,7 +15,7 @@ import { ClearDuplicateButton, MarkDuplicateButton } from "@/components/duplicat
 import { currentResolution, isFinishedStatus, type StatusChangeActivity } from "@/lib/resolution-note";
 import { statusLabel as resolutionStatusLabel } from "@/lib/labels";
 import { formatIssueNumber } from "@/lib/issue-number";
-import { intakeDetail, openIssueStages, type IssueStage } from "@/lib/issue-stage";
+import { intakeDetail, openIssueConfirmations, type IssueConfirmation, type IssueStage } from "@/lib/issue-stage";
 import { buildCommentTree } from "@/lib/comments";
 import {
   COMMENT_PARAM,
@@ -704,9 +704,11 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
 
   const milestoneOptions = await milestoneOptionsPromise;
   let intakeStage: IssueStage | null = null;
+  let confirmation: IssueConfirmation | null = null;
   if (!bug.isDeleted && bug.status === "open") {
     try {
-      intakeStage = (await openIssueStages(prisma, { id: bug.id })).get(bug.id) ?? null;
+      confirmation = (await openIssueConfirmations(prisma, { id: bug.id })).get(bug.id) ?? null;
+      intakeStage = confirmation?.stage ?? null;
     } catch (error) {
       console.error("[bugs] issue stage lookup failed", error);
     }
@@ -758,11 +760,12 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
     reviewStatus: bug.reviewStatus,
     pullRequestUrl: bug.pullRequestUrl,
     hasClaim: agentDecisions.some((d) => d.kind === "claimed"),
+    converted: bug.convertedToIssueAt !== null,
     ideaAccepted: intakeStage === "ready",
   });
   // When each stage began, so every comment lands in the stage it was posted in.
-  const starts = stageStarts(agentDecisions);
-  const stageCommentCounts: Record<DecisionStage, number> = { idea: 0, open: 0, done: 0, ready: 0, live: 0 };
+  const starts = stageStarts(agentDecisions, bug.convertedToIssueAt);
+  const stageCommentCounts: Record<DecisionStage, number> = { idea: 0, confirm: 0, open: 0, done: 0, ready: 0, live: 0 };
   // An idea shows only its verdicts, so old comments on it are not counted either.
   if (!isIdea) {
     for (const comment of commentTree) {
@@ -1145,6 +1148,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
                       ? { score: ideaVerdicts.ideaScore, threshold: ideaVerdicts.ideaThreshold, votes: ideaVerdicts.votes }
                       : undefined
                   }
+                  confirmation={confirmation}
                 />
                 {comments.hiddenThreads > 0 ? (
                   <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-zk-chip px-3 py-2 text-sm text-zk-text2 print:hidden">

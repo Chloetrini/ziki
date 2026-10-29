@@ -94,6 +94,12 @@ export async function offeredTo(id: string): Promise<{ agent: Agent; offerId: st
   return null;
 }
 
+/** The work feed item of `kind` for issue `id` in an agent's feed, if any. */
+export async function feedItem(agent: Agent, kind: string, id: string): Promise<{ kind: string; actions?: { name: string }[] } | undefined> {
+  const feed = await ok(agent, "work");
+  return (feed.items as { kind: string; issue?: { id: string }; actions?: { name: string }[] }[]).find((item) => item.kind === kind && item.issue?.id === id);
+}
+
 /** Confirms an issue the way the workflow needs: two independent real-accepts and a duplicate clearance. */
 export async function confirm(id: string, reviewers: [Agent, Agent], triager: Agent): Promise<void> {
   for (const agent of reviewers) await ok(agent, "validate-issue", { id, kind: "real", verdict: "accept", severity: "high" });

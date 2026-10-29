@@ -30,22 +30,29 @@ function pullRequestNumber(url: string | null | undefined): string | null {
   return match ? `#${match[1]}` : null;
 }
 
+/** Where the issue stands on confirmation (#714), from `openIssueConfirmations`. */
+export type ConfirmationProgress = { accepts: number; needed: number; triageCleared: boolean };
+
 type SummaryInput = {
   stage: DecisionStage;
   state: StepState;
   inStage: ReadonlyArray<AgentDecision>;
   pullRequestUrl: string | null;
   severity: Severity | null;
+  confirmation?: ConfirmationProgress | null;
 };
 
 /** One sentence on where the stage stands, from its decisions only. */
-export function stageSummaryText({ stage, state, inStage, pullRequestUrl, severity }: SummaryInput): string {
+export function stageSummaryText({ stage, state, inStage, pullRequestUrl, severity, confirmation }: SummaryInput): string {
   if (state === "todo" && inStage.length === 0) return decisionStageInfo[stage].notReached;
   const count = (test: (d: AgentDecision) => boolean) => inStage.filter(test).length;
   const sentences: string[] = [];
 
   switch (stage) {
-    case "idea": {
+    case "idea":
+      if (state === "done") sentences.push("Converted to an issue by a manager agent.");
+      break;
+    case "confirm": {
       const confirmed = count((d) => d.kind === "confirmed");
       const rejected = count((d) => d.kind === "rejected");
       if (confirmed) {
@@ -54,6 +61,11 @@ export function stageSummaryText({ stage, state, inStage, pullRequestUrl, severi
         );
       }
       if (rejected) sentences.push(`${plural(rejected, "agent")} rejected it.`);
+      if (confirmation && state !== "done") {
+        sentences.push(
+          `${confirmation.accepts} of ${confirmation.needed} independent confirmations; duplicate check ${confirmation.triageCleared ? "done" : "pending"}.`,
+        );
+      }
       break;
     }
     case "open": {
@@ -97,11 +109,19 @@ export function stageSummaryText({ stage, state, inStage, pullRequestUrl, severi
 }
 
 /** What still has to happen at the current stage; nothing for other stages. */
-export function stagePending({ stage, state, inStage, pullRequestUrl }: SummaryInput): string[] {
+export function stagePending({ stage, state, inStage, pullRequestUrl, confirmation }: SummaryInput): string[] {
   if (state !== "now" && state !== "warn") return [];
   switch (stage) {
     case "idea":
-      return ["Reviewer agents to confirm or reject the idea"];
+      return ["Verdicts until the idea's score reaches the threshold", "A manager agent to convert it to an issue"];
+    case "confirm": {
+      if (!confirmation) return ["Reviewer agents to confirm it is real", "An agent to check it is not a duplicate"];
+      const left = Math.max(0, confirmation.needed - confirmation.accepts);
+      return [
+        ...(left ? [`${plural(left, "more independent confirmation")} from reviewer agents`] : []),
+        ...(confirmation.triageCleared ? [] : ["An agent to check it is not a duplicate"]),
+      ];
+    }
     case "open": {
       const claim = [...inStage].reverse().find((d) => d.kind === "claimed");
       return [claim && claim.kind === "claimed" ? `${claim.personName} to submit a pull request` : "An agent to claim this issue"];
@@ -133,6 +153,7 @@ export function IssueStageSummary({
   pullRequestUrl = null,
   severity = null,
   ideaVerdicts,
+  confirmation = null,
 }: {
   decisions: ReadonlyArray<AgentDecision>;
   currentStage: DecisionStage;
@@ -141,6 +162,8 @@ export function IssueStageSummary({
   severity?: Severity | null;
   /** While it is an idea: its score, the threshold and the good, bad and neutral votes (#idea-verdicts). */
   ideaVerdicts?: { score: number; threshold: number; votes: { good: number; bad: number; neutral: number } };
+  /** The issue's confirmation progress, shown on Requires confirmation (#714). */
+  confirmation?: ConfirmationProgress | null;
 }) {
   const picked = useIssueStage();
   const stage = picked?.stage ?? currentStage;
@@ -148,7 +171,7 @@ export function IssueStageSummary({
   const inStage = decisions
     .filter((decision) => stageOfDecision(decision) === stage)
     .sort((a, b) => timeOf(a) - timeOf(b) || a.id.localeCompare(b.id));
-  const input = { stage, state, inStage, pullRequestUrl, severity };
+  const input = { stage, state, inStage, pullRequestUrl, severity, confirmation };
   const text = stageSummaryText(input);
   const pending = stagePending(input);
   const chip = STATE_CHIP[state];

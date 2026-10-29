@@ -1,16 +1,18 @@
 import type { CommentType } from "@/lib/validations/issue";
 
 /**
- * The five stages an issue's agent decisions and conversation are grouped by
+ * The six stages an issue's agent decisions and conversation are grouped by
  * on the issue page, and counted by on the issues list card (#1446).
  *
- * - Idea: reviewers confirm the issue is real, or reject it.
+ * - Idea: people give the idea verdicts until a manager agent converts it.
+ * - Requires confirmation: the first step of an issue. Reviewers confirm it is
+ *   real, or reject it, and an agent checks it is not a duplicate (#714).
  * - Open: an agent claims it, or the claim is released.
  * - Done: testers say the fix is good to merge, or not.
  * - Ready to merge: a merger accepts or rejects the fix; failed deployments.
  * - Live: the admin merger merged and deployed it.
  */
-export const DECISION_STAGES = ["idea", "open", "done", "ready", "live"] as const;
+export const DECISION_STAGES = ["idea", "confirm", "open", "done", "ready", "live"] as const;
 export type DecisionStage = (typeof DECISION_STAGES)[number];
 
 export const decisionStageInfo: Record<
@@ -19,17 +21,24 @@ export const decisionStageInfo: Record<
 > = {
   idea: {
     label: "Idea",
-    description: "Idea reviews, confirmations and rejections",
-    emptyTitle: "No idea reviews yet",
-    emptyText: "Reviewer agents confirm or reject the idea here.",
+    description: "Verdicts on the idea, until a manager agent converts it",
+    emptyTitle: "No verdicts yet",
+    emptyText: "People give the idea good, bad or neutral verdicts; a manager agent then converts it to an issue.",
     notReached: "Starts once the issue is reported.",
+  },
+  confirm: {
+    label: "Requires confirmation",
+    description: "Confirmations, rejections and the duplicate check",
+    emptyTitle: "Not confirmed yet",
+    emptyText: "Reviewer agents confirm the issue is real, and an agent checks it is not a duplicate.",
+    notReached: "Starts once a manager agent converts the idea to an issue.",
   },
   open: {
     label: "Open",
     description: "Claims and rejected claims",
     emptyTitle: "No claims yet",
-    emptyText: "Claims and rejected claims appear here once the idea is confirmed.",
-    notReached: "Starts once the idea is confirmed.",
+    emptyText: "Claims and rejected claims appear here once the issue is confirmed.",
+    notReached: "Starts once the issue is confirmed.",
   },
   done: {
     label: "Done",
@@ -74,7 +83,7 @@ export function stageOfDecision(decision: DecisionLike): DecisionStage {
   switch (decision.kind) {
     case "confirmed":
     case "rejected":
-      return "idea";
+      return "confirm";
     case "claimed":
     case "claim_released":
       return "open";
@@ -129,6 +138,7 @@ export type StageTallies = Record<DecisionStage, StageTally>;
 export function emptyStageTallies(): StageTallies {
   return {
     idea: { positive: 0, negative: 0 },
+    confirm: { positive: 0, negative: 0 },
     open: { positive: 0, negative: 0 },
     done: { positive: 0, negative: 0 },
     ready: { positive: 0, negative: 0 },
@@ -147,13 +157,15 @@ export function tallyStages(decisions: Iterable<DecisionLike & { count?: number 
 
 /**
  * The stage the issue is in now, which the issue page opens on.
- * `ideaAccepted` is true once reviewers accepted the idea and it has enough votes.
+ * `converted`: a manager agent turned the idea into an issue. `ideaAccepted`:
+ * the issue is confirmed (stage `ready`).
  */
 export function currentDecisionStage(issue: {
   status: string;
   reviewStatus: string | null | undefined;
   pullRequestUrl: string | null | undefined;
   hasClaim: boolean;
+  converted: boolean;
   ideaAccepted: boolean;
 }): DecisionStage {
   if (issue.reviewStatus === "merged") return "live";
@@ -164,14 +176,20 @@ export function currentDecisionStage(issue: {
   if (issue.pullRequestUrl || issue.reviewStatus === "submitted" || issue.reviewStatus === "rejected") return "done";
   if (issue.status === "resolved") return "live";
   if (issue.status === "in_progress" || issue.hasClaim || issue.ideaAccepted) return "open";
-  return "idea";
+  return issue.converted ? "confirm" : "idea";
 }
 
-/** When each stage after Idea began, from its first decision; null when not reached. */
+/**
+ * When each stage after Idea began, from its first decision; null when not
+ * reached. Requires confirmation begins when the idea is converted, if known.
+ */
 export type StageStarts = Record<Exclude<DecisionStage, "idea">, number | null>;
 
-export function stageStarts(decisions: Iterable<DecisionLike & { at: Date | string }>): StageStarts {
-  const starts: StageStarts = { open: null, done: null, ready: null, live: null };
+export function stageStarts(
+  decisions: Iterable<DecisionLike & { at: Date | string }>,
+  convertedAt?: Date | string | null,
+): StageStarts {
+  const starts: StageStarts = { confirm: convertedAt ? new Date(convertedAt).getTime() : null, open: null, done: null, ready: null, live: null };
   for (const decision of decisions) {
     const stage = stageOfDecision(decision);
     if (stage === "idea") continue;
@@ -185,7 +203,7 @@ export function stageStarts(decisions: Iterable<DecisionLike & { at: Date | stri
 export function stageAt(time: Date | string, starts: StageStarts): DecisionStage {
   const at = new Date(time).getTime();
   let stage: DecisionStage = "idea";
-  for (const next of ["open", "done", "ready", "live"] as const) {
+  for (const next of ["confirm", "open", "done", "ready", "live"] as const) {
     const start = starts[next];
     if (start !== null && start <= at) stage = next;
   }
@@ -194,8 +212,9 @@ export function stageAt(time: Date | string, starts: StageStarts): DecisionStage
 
 /**
  * The stage a top-level comment belongs to. Bids, merge requests and
- * deliveries by their type; reviews before the first claim review the idea,
- * later ones the fix; a plain comment goes to the stage it was posted in.
+ * deliveries by their type; reviews before the first claim review the issue
+ * (Idea or Requires confirmation, by when), later ones the fix; a plain
+ * comment goes to the stage it was posted in.
  */
 export function stageOfComment(
   type: CommentType | null | undefined,
@@ -206,7 +225,7 @@ export function stageOfComment(
     case "bid":
       return "open";
     case "review":
-      return starts.open !== null && new Date(createdAt).getTime() >= starts.open ? "done" : "idea";
+      return starts.open !== null && new Date(createdAt).getTime() >= starts.open ? "done" : stageAt(createdAt, starts);
     case "request_to_merge":
       return "ready";
     case "delivery":

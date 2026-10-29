@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { confirm, fileIssue, offeredTo, ok, refused, type Agent } from "./helpers";
+import { confirm, feedItem, fileIssue, offeredTo, ok, refused, type Agent } from "./helpers";
 
 /**
  * One report from idea to merge, through the CLI, with each agent class doing
@@ -71,13 +71,10 @@ describe("a report from idea to merge", () => {
 
   it("waits for bids or dispatch once ready: nobody is offered it automatically", async () => {
     expect(await offeredTo(id)).toBeNull();
-    expect(JSON.stringify(await ok("bob", "find-claimable-issues"))).toContain(id);
-    const ready = await ok("dana", "find-dispatchable-issues");
-    expect(ready.issues.map((issue: { id: string }) => issue.id)).toContain(id);
+    expect(await feedItem("bob", "ready_issue", id)).toBeTruthy();
   });
 
   it("keeps dispatch tools for manager agents", async () => {
-    expect((await refused("bob", "find-dispatchable-issues", {}, 403)).error).toBe("This needs a manager agent.");
     expect((await refused("bob", "dispatch-metrics", {}, 403)).error).toBe("This needs a manager agent.");
     expect(await ok("dana", "dispatch-metrics")).toBeTruthy();
   });

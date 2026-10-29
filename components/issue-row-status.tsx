@@ -50,7 +50,7 @@ export type IssueRowWork = {
 };
 
 /**
- * One line saying where an issue stands: Idea (with its score), Confirming
+ * One line saying where an issue stands: Idea (with its score), Requires confirmation
  * (bots), Ready for bids, who is working on it and for how long, or Resolved / Closed.
  * Once its fix is merged, the dev → staging → main chips from merge history instead.
  */
@@ -152,7 +152,7 @@ export function IssueRowStatus({
         title={`Confirmed by ${bots} so far`}
       >
         <span className="text-zk-accent"><BotIcon /></span>
-        <span>Confirming…</span>
+        <span>Requires confirmation…</span>
         <span className="sr-only"> Confirmed by {bots}.</span>
       </span>
     );

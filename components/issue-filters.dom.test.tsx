@@ -498,7 +498,7 @@ describe("IssueFilters stage filter (#1054)", () => {
     fireEvent.click(screen.getByRole("button", { name: /^filter/i }));
     const stage = within(screen.getByRole("dialog", { name: "Filters" })).getByLabelText("Kind");
     expect(within(stage).getByRole("option", { name: "Ideas (7)" })).toBeInTheDocument();
-    expect(within(stage).getByRole("option", { name: "Confirming (2)" })).toBeInTheDocument();
+    expect(within(stage).getByRole("option", { name: "Requires confirmation (2)" })).toBeInTheDocument();
     expect(within(stage).getByRole("option", { name: "Ready (4)" })).toBeInTheDocument();
 
     fireEvent.change(stage, { target: { value: "idea" } });
@@ -510,7 +510,7 @@ describe("IssueFilters stage filter (#1054)", () => {
     render(<IssueFilters />);
     expect(screen.getByRole("button", { name: /filter \(1 active\)/i })).toBeInTheDocument();
     const remove = screen.getByRole("button", { name: "Remove stage filter" });
-    expect(remove.parentElement).toHaveTextContent("Kind: Confirming");
+    expect(remove.parentElement).toHaveTextContent("Kind: Requires confirmation");
     fireEvent.click(remove);
     expect(nav.push).toHaveBeenCalledWith("/issues");
   });

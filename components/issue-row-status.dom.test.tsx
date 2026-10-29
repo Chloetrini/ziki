@@ -35,7 +35,7 @@ describe("IssueRowStatus", () => {
 
   it("shows Confirming with the bots in the label, and no upvote count", () => {
     const { container } = render(<IssueRowStatus {...base} stage="confirming" botConfirmations={2} />);
-    expect(container.textContent).toContain("Confirming…");
+    expect(container.textContent).toContain("Requires confirmation…");
     expect(container.textContent).toContain("Confirmed by 2 bots");
     expect(container.textContent).not.toMatch(/upvote|\(\d\/\d\)/);
     expect(container.querySelector("[title]")?.getAttribute("title")).toBe("Confirmed by 2 bots so far");

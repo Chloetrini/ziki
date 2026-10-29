@@ -7,7 +7,7 @@ import type { AgentLevel } from "@prisma/client";
 import { findClaimableIssues } from "@/lib/agent-api/contributor";
 import { findReadyToMergeIssues } from "@/lib/agent-api/merger";
 import { findReviewableIssues } from "@/lib/agent-api/reviewer";
-import { findTriageableIssues } from "@/lib/agent-api/triager";
+import { openIssueConfirmations } from "@/lib/issue-stage";
 import { REVIEW_OFFER_TTL_MS } from "@/lib/agent-api/review-offer";
 import { MAX_IDEA_VOTES } from "@/lib/agent-api/idea-verdicts";
 import { listJobs } from "@/lib/jobs/create";
@@ -178,11 +178,12 @@ function neutralCaller(tenantId: string, projectId: string): AgentContext {
 
 async function buildProjectWork(tenantId: string, project: { id: string; slug: string; name: string }): Promise<ProjectWork> {
   const caller = neutralCaller(tenantId, project.id);
-  const [toValidate, toTriage, tests, ready, toAccept, toMerge, ideas, jobs, workflow] = await Promise.all([
-    findReviewableIssues(caller, project.id, "validation", PER_KIND_LIMIT),
-    findTriageableIssues(caller, project.id, PER_KIND_LIMIT),
+  // One read decides every converted issue's stage: which still require
+  // confirmation, and for what, and which are ready (#714).
+  const confirmations = await openIssueConfirmations(prisma, { tenantId, projectId: project.id, convertedToIssueAt: { not: null } });
+  const [tests, ready, toAccept, toMerge, ideas, jobs, workflow] = await Promise.all([
     findReviewableIssues(caller, project.id, "test", PER_KIND_LIMIT),
-    findClaimableIssues(caller, project.id, PER_KIND_LIMIT),
+    findClaimableIssues(caller, project.id, PER_KIND_LIMIT, confirmations),
     findReadyToMergeIssues(caller, project.id, PER_KIND_LIMIT, "submitted"),
     findReadyToMergeIssues(caller, project.id, PER_KIND_LIMIT, "ready_to_merge"),
     openIdeas(tenantId, project.id),
@@ -190,25 +191,32 @@ async function buildProjectWork(tenantId: string, project: { id: string; slug: s
     workflowFor(project.id),
   ]);
 
-  // The confirmation queues only list converted issues; a ready one needs nothing more.
-  const toConfirm = new Map<string, IssueRef & { needs: ConfirmNeed[] }>();
-  const addNeed = (issue: IssueRef, need: ConfirmNeed) => {
-    const entry = toConfirm.get(issue.id) ?? { id: issue.id, number: issue.number, title: issue.title, needs: [] };
-    if (!entry.needs.includes(need)) entry.needs.push(need);
-    toConfirm.set(issue.id, entry);
-  };
-  const readyIds = new Set(ready.map((issue) => issue.id));
-  for (const issue of toValidate) addNeed(issue, "validation");
-  for (const issue of toTriage) if (!readyIds.has(issue.id)) addNeed(issue, "duplicate_check");
+  // Issues that require confirmation: the reviews they still lack, oldest first.
+  const confirmingIds = [...confirmations].filter(([, c]) => c.stage === "confirming").map(([id]) => id);
+  const confirmingRows = confirmingIds.length
+    ? await prisma.bug.findMany({
+      where: { id: { in: confirmingIds } },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: PER_KIND_LIMIT,
+      select: { id: true, number: true, title: true },
+    })
+    : [];
+  const toConfirm = confirmingRows.map((bug): IssueRef & { needs: ConfirmNeed[] } => {
+    const confirmation = confirmations.get(bug.id)!;
+    const needs: ConfirmNeed[] = [];
+    if (confirmation.accepts < confirmation.needed) needs.push("validation");
+    if (!confirmation.triageCleared) needs.push("duplicate_check");
+    return { ...bug, needs };
+  });
 
   const toConvert = await convertibleIdeas(tenantId, project.id, workflow.ideaThreshold);
-  const ids = new Set([...ideas.map((i) => i.id), ...toConvert.map((i) => i.id), ...toConfirm.keys(), ...tests.map((t) => t.id), ...toAccept.map((t) => t.id), ...toMerge.map((t) => t.id)]);
+  const ids = new Set([...ideas.map((i) => i.id), ...toConvert.map((i) => i.id), ...toConfirm.map((i) => i.id), ...tests.map((t) => t.id), ...toAccept.map((t) => t.id), ...toMerge.map((t) => t.id)]);
   return {
     tenantId,
     project,
     ideas,
     toConvert,
-    toConfirm: [...toConfirm.values()].slice(0, PER_KIND_LIMIT),
+    toConfirm,
     ideaThreshold: workflow.ideaThreshold,
     tests: tests.map((t) => ({ id: t.id, number: t.number, title: t.title, pullRequestUrl: t.pullRequestUrl ?? null })),
     ready: ready.map((r) => ({ id: r.id, number: r.number, title: r.title, voteCount: r.voteCount, severity: r.severity })),
