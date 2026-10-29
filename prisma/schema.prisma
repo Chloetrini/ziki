@@ -1434,8 +1434,8 @@ model GoalAllocation {
   label    String?
   /// Credits carved out of the pool. Always positive; release unallocates.
   amount   Int
-  /// Idempotency key: a retried split creates each row at most once.
-  sourceKey String              @unique
+  /// Idempotency key: a retried split creates each row at most once per goal (#505).
+  sourceKey String
   /// Set when the slice is returned to the pool; the row itself stays.
   releasedAt DateTime?
   createdAt DateTime            @default(now())
@@ -1444,6 +1444,7 @@ model GoalAllocation {
   targetGoal Goal?   @relation("GoalAllocationNested", fields: [targetGoalId], references: [id], onDelete: SetNull)
   agent    Agent?    @relation(fields: [targetAgentId], references: [id], onDelete: SetNull)
 
+  @@unique([goalId, sourceKey])
   @@index([goalId, createdAt])
   @@index([targetBugId])
   @@index([targetGoalId])
