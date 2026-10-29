@@ -108,8 +108,6 @@ async function loadAssignedIssues(
       severity: true,
       status: true,
       voteCount: true,
-      convertedToIssueAt: true,
-      ideaScore: true,
       createdAt: true,
       type: { select: { name: true } },
       _count: { select: { comments: true } },
@@ -139,8 +137,6 @@ async function loadAssignedIssues(
     severity: bug.severity,
     status: bug.status,
     voteCount: bug.voteCount,
-    // #idea-verdicts: an idea shows its verdict score, not upvotes.
-    ideaScore: bug.convertedToIssueAt === null ? bug.ideaScore : null,
     userVoted: voteDirection(bug.votes[0]?.value) === 1,
     typeName: bug.type?.name ?? null,
     commentCount: bug._count.comments,

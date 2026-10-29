@@ -67,7 +67,6 @@ describe("canAssignTicket", () => {
         actorRole: "user",
         currentAssigneeId: null,
         targetAssigneeId: "user-1",
-        converted: true,
         claimed: true,
       }),
     ).toBe(true);
@@ -126,85 +125,5 @@ describe("canAssignTicket", () => {
         targetAssigneeId: null,
       }),
     ).toBe(false);
-  });
-
-  describe("work readiness gate (#764)", () => {
-    it("allows organization admins to assign tickets even on an idea", () => {
-      expect(
-        canAssignTicket({
-          actorId: "admin-1",
-          membershipRole: "admin",
-          currentAssigneeId: null,
-          targetAssigneeId: "user-1",
-          converted: false,
-        }),
-      ).toBe(true);
-
-      expect(
-        canAssignTicket({
-          actorId: "super-1",
-          actorRole: "super_admin",
-          currentAssigneeId: null,
-          targetAssigneeId: "user-1",
-          converted: false,
-        }),
-      ).toBe(true);
-    });
-
-    it("blocks assigning work on an idea that is not yet converted to an issue", () => {
-      expect(
-        canAssignTicket({
-          actorId: "admin-1",
-          actorRole: "admin",
-          currentAssigneeId: null,
-          targetAssigneeId: "user-1",
-          converted: false,
-        }),
-      ).toBe(false);
-
-      expect(
-        canAssignTicket({
-          actorId: "user-1",
-          actorRole: "user",
-          currentAssigneeId: null,
-          targetAssigneeId: "user-1",
-          converted: false,
-        }),
-      ).toBe(false);
-    });
-
-    it("lets an organization admin assign a converted issue, and still refuses a member taking it", () => {
-      expect(
-        canAssignTicket({
-          actorId: "admin-1",
-          membershipRole: "admin",
-          currentAssigneeId: null,
-          targetAssigneeId: "user-1",
-          converted: true,
-        }),
-      ).toBe(true);
-
-      expect(
-        canAssignTicket({
-          actorId: "user-1",
-          actorRole: "user",
-          currentAssigneeId: null,
-          targetAssigneeId: "user-1",
-          converted: true,
-        }),
-      ).toBe(false);
-    });
-
-    it("allows unassigning even on an idea", () => {
-      expect(
-        canAssignTicket({
-          actorId: "user-1",
-          actorRole: "user",
-          currentAssigneeId: "user-1",
-          targetAssigneeId: null,
-          converted: false,
-        }),
-      ).toBe(true);
-    });
   });
 });

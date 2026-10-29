@@ -2,8 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildExtractionPrompt,
   fetchIssue,
-  flagTooThin,
-  isTooThinToStructure,
+    isTooThinToStructure,
   listDrafts,
   parseExtraction,
   run,
@@ -124,7 +123,7 @@ describe("listDrafts", () => {
       items: [draft({ id: "d", number: 4, description: "Second page raw idea." })],
       nextCursor: null,
     };
-    const { fetchImpl, calls } = fakeApi({ "GET /api/v1/issues": [page1, page2] });
+    const { fetchImpl, calls } = fakeApi({ "GET /api/v1/ideas": [page1, page2] });
 
     const result = await listDrafts(baseDeps(fetchImpl));
 
@@ -135,79 +134,45 @@ describe("listDrafts", () => {
 });
 
 describe("fetchIssue", () => {
-  it("fetches a single issue by id", async () => {
-    const { fetchImpl, calls } = fakeApi({ "GET /api/v1/issues/bug-1": [draft()] });
+  it("fetches a single idea by id", async () => {
+    const { fetchImpl, calls } = fakeApi({ "GET /api/v1/ideas/bug-1": [{ idea: draft() }] });
 
     const result = await fetchIssue(baseDeps(fetchImpl), "bug-1");
 
     expect(result.id).toBe("bug-1");
-    expect(calls[0].path).toBe("/api/v1/issues/bug-1");
+    expect(calls[0].path).toBe("/api/v1/ideas/bug-1");
   });
 });
 
 describe("structureDraft", () => {
   const fields = { summary: "S", problem: "P", proposedSolution: "Sol", acceptanceCriteria: ["A", "B"] };
 
-  it("re-checks the draft, then posts the extracted fields to /structure, then a transparency comment", async () => {
+  it("re-checks the draft, then posts the extracted fields to /structure; ideas take no comments", async () => {
     const { fetchImpl, calls } = fakeApi({
-      "GET /api/v1/issues/bug-1": [draft()], // still unstructured as of the re-check
-      "POST /api/v1/ideas/bug-1/structure": [{ ok: true, issue: { id: "bug-1" } }],
-      "POST /api/v1/issues/bug-1/comments": [{ comment: { id: "c1" } }],
+      "GET /api/v1/ideas/bug-1": [{ idea: draft() }], // still unstructured as of the re-check
+      "POST /api/v1/ideas/bug-1/structure": [{ ok: true, idea: { id: "bug-1" } }],
     });
 
     const outcome = await structureDraft(baseDeps(fetchImpl), draft(), fields);
 
     expect(outcome).toBe("structured");
-    expect(calls[0].path).toBe("/api/v1/issues/bug-1");
+    expect(calls[0].path).toBe("/api/v1/ideas/bug-1");
     expect(calls[1].path).toBe("/api/v1/ideas/bug-1/structure");
     expect(calls[1].body).toMatchObject({ summary: "S" });
-    expect(calls[2].path).toBe("/api/v1/issues/bug-1/comments");
-    expect(calls[2].body).toMatchObject({ type: "comment" });
+    expect(calls).toHaveLength(2);
   });
 
   it("skips without writing when the draft was already structured since it was listed", async () => {
     const { fetchImpl, calls } = fakeApi({
-      "GET /api/v1/issues/bug-1": [draft({ description: STRUCTURED_DESCRIPTION })],
+      "GET /api/v1/ideas/bug-1": [{ idea: draft({ description: STRUCTURED_DESCRIPTION }) }],
     });
 
     const outcome = await structureDraft(baseDeps(fetchImpl), draft(), fields);
 
     expect(outcome).toBe("skipped_already_structured");
-    expect(calls).toHaveLength(1); // only the re-check — no /structure, no comment
+    expect(calls).toHaveLength(1); // only the re-check — no /structure
   });
 
-  it("reports structured_comment_failed, not an error, when /structure succeeds but the comment fails", async () => {
-    const fetchImpl = vi.fn(async (input: unknown, init?: RequestInit) => {
-      const url = new URL(String(input));
-      const method = init?.method ?? "GET";
-      if (method === "GET" && url.pathname === "/api/v1/issues/bug-1") {
-        return new Response(JSON.stringify(draft()), { status: 200 });
-      }
-      if (method === "POST" && url.pathname === "/api/v1/ideas/bug-1/structure") {
-        return new Response(JSON.stringify({ ok: true }), { status: 200 });
-      }
-      if (method === "POST" && url.pathname === "/api/v1/issues/bug-1/comments") {
-        return new Response(JSON.stringify({ error: "rate limited" }), { status: 429 });
-      }
-      throw new Error(`unexpected request: ${method} ${url.pathname}`);
-    }) as unknown as typeof fetch;
-
-    const outcome = await structureDraft(baseDeps(fetchImpl), draft(), fields);
-
-    expect(outcome).toBe("structured_comment_failed");
-  });
-});
-
-describe("flagTooThin", () => {
-  it("posts a comment asking the reporter for more detail", async () => {
-    const { fetchImpl, calls } = fakeApi({ "POST /api/v1/issues/bug-1/comments": [{ comment: { id: "c1" } }] });
-
-    await flagTooThin(baseDeps(fetchImpl), draft());
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0].body).toMatchObject({ type: "comment" });
-    expect((calls[0].body as { body: string }).body).toMatch(/more detail|add what you'd expect/i);
-  });
 });
 
 describe("run", () => {
@@ -217,11 +182,9 @@ describe("run", () => {
     const broken = draft({ id: "broken-1", number: 12, description: "Another substantive draft that will fail to structure." });
 
     const { fetchImpl } = fakeApi({
-      "GET /api/v1/issues": [{ items: [real, thin, broken], nextCursor: null }],
-      "GET /api/v1/issues/real-1": [real], // structureDraft's re-check — still unstructured
-      "POST /api/v1/issues/thin-1/comments": [{ comment: { id: "c1" } }],
+      "GET /api/v1/ideas": [{ items: [real, thin, broken], nextCursor: null }],
+      "GET /api/v1/ideas/real-1": [{ idea: real }], // structureDraft's re-check — still unstructured
       "POST /api/v1/ideas/real-1/structure": [{ ok: true }],
-      "POST /api/v1/issues/real-1/comments": [{ comment: { id: "c2" } }],
     });
 
     // Anthropic calls go through the same fetchImpl; stub them separately.
@@ -249,8 +212,8 @@ describe("run", () => {
     const real = draft({ id: "real-1", number: 10, description: "A real, substantive draft idea with enough detail." });
 
     const { fetchImpl } = fakeApi({
-      "GET /api/v1/issues": [{ items: [real], nextCursor: null }],
-      "GET /api/v1/issues/real-1": [draft({ id: "real-1", description: STRUCTURED_DESCRIPTION })], // structured out from under us
+      "GET /api/v1/ideas": [{ items: [real], nextCursor: null }],
+      "GET /api/v1/ideas/real-1": [{ idea: draft({ id: "real-1", description: STRUCTURED_DESCRIPTION }) }], // structured out from under us
     });
     const wrappedFetch = vi.fn(async (input: unknown, init?: RequestInit) => {
       const url = String(input);
@@ -268,9 +231,9 @@ describe("run", () => {
     expect(result).toEqual({ total: 1, structured: 0, flagged: 0, skipped: 1, failed: 0 });
   });
 
-  it("dry run never calls structure, re-check, or comment endpoints", async () => {
+  it("dry run never calls structure or re-check endpoints", async () => {
     const real = draft({ id: "real-1", number: 10, description: "A real, substantive draft idea with enough detail." });
-    const { fetchImpl, calls } = fakeApi({ "GET /api/v1/issues": [{ items: [real], nextCursor: null }] });
+    const { fetchImpl, calls } = fakeApi({ "GET /api/v1/ideas": [{ items: [real], nextCursor: null }] });
     const wrappedFetch = vi.fn(async (input: unknown, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("api.anthropic.com")) {
@@ -285,6 +248,6 @@ describe("run", () => {
     const result = await run(baseDeps(wrappedFetch), { dryRun: true });
 
     expect(result).toEqual({ total: 1, structured: 1, flagged: 0, skipped: 0, failed: 0 });
-    expect(calls.every((c) => c.path === "/api/v1/issues")).toBe(true);
+    expect(calls.every((c) => c.path === "/api/v1/ideas")).toBe(true);
   });
 });

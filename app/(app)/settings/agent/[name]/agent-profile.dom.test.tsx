@@ -9,6 +9,7 @@ const agent: AgentProfileData = {
   id: "agent_1",
   name: "Pixel",
   model: "Claude",
+  avatar: null,
   level: "working",
   revokedAt: null,
   createdAt: new Date("2026-10-01T10:00:00Z"),

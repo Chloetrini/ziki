@@ -61,27 +61,35 @@ export function unique(label: string): string {
   return `${label} ${Date.now().toString(36)}${(counter++).toString(36)}`;
 }
 
-/** Files a fresh issue as `agent` and returns its id. */
-export async function fileIssue(agent: Agent, label: string): Promise<string> {
+/** Files a fresh report as `agent`, which is always an idea, and returns the idea's id. */
+export async function fileIdea(agent: Agent, label: string): Promise<string> {
   // Scenario titles look alike on purpose, so skip the similar-title check (tested on its own).
-  const created = await ok(agent, "create-issue", {
+  const created = await ok(agent, "create-idea", {
     title: unique(label),
     description: "Steps: open the page and press Save. Expected: it saves. Actual: nothing happens.",
     idempotencyKey: randomUUID(),
     acknowledgeSimilar: true,
   });
-  return created.issue.id as string;
+  return created.idea.id as string;
 }
 
 /**
- * Turns an idea into an issue: each of `givers` says it is a good idea (the
- * default threshold is 3 net votes), then dana, the manager agent, converts it.
+ * Converts an idea, which creates the issue: each of `givers` says it is a
+ * good idea (the default threshold is 3 net votes), then dana, the manager
+ * agent, converts it. Returns the new issue's id.
  */
-export async function toIssue(id: string, givers: [Agent, Agent, Agent]): Promise<void> {
+export async function toIssue(ideaId: string, givers: [Agent, Agent, Agent]): Promise<string> {
   for (const agent of givers) {
-    await ok(agent, "give-idea-verdict", { id, opinion: "good", summary: "Worth doing.", description: `${agent} thinks this is worth doing.` });
+    await ok(agent, "give-idea-verdict", { id: ideaId, opinion: "good", summary: "Worth doing.", description: `${agent} thinks this is worth doing.` });
   }
-  expect((await ok("dana", "convert-idea", { id })).stage).toBe("confirming");
+  const converted = await ok("dana", "convert-idea", { id: ideaId });
+  expect(converted.ideaId).toBe(ideaId);
+  return converted.issueId as string;
+}
+
+/** Files a report as `agent` and converts it, returning the issue's id (not yet confirmed). */
+export async function fileIssue(agent: Agent, label: string, givers: [Agent, Agent, Agent]): Promise<string> {
+  return toIssue(await fileIdea(agent, label), givers);
 }
 
 /** The sandbox agent Ziki offered the issue to, from each agent's work feed, if any. */

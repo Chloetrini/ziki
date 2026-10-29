@@ -1,12 +1,12 @@
 import { test, expect, reportIssue, expectNoHorizontalScroll } from "./fixtures";
 
-test("reports an issue and finds it in the list", async ({ page, uniq, me }) => {
+test("reports an idea and finds it on the Ideas tab", async ({ page, uniq, me }) => {
   const title = uniq("Save button shows a blank page");
   await reportIssue(page, title);
   await expect(page.getByText(me).filter({ visible: true }).first()).toBeVisible();
   await expectNoHorizontalScroll(page);
 
-  await page.goto(`/issues?q=${encodeURIComponent(title)}`);
+  await page.goto(`/issues?status=ideas&q=${encodeURIComponent(title)}`);
   const row = page.getByRole("link", { name: new RegExp(title) });
   await expect(row).toBeVisible();
   await expectNoHorizontalScroll(page);

@@ -26,6 +26,16 @@ const facts = (overrides: Partial<ProjectWork["facts"] extends Map<string, infer
   claims: [],
   validatorOwners: [],
   testerOwners: [],
+  ...overrides,
+});
+
+/** Who filed an idea and who already judged it (#idea-table): ideas are not issues. */
+const ideaFacts = (overrides: Partial<ProjectWork["ideaFacts"] extends Map<string, infer F> ? F : never> = {}) => ({
+  reporterId: "owner-ada",
+  beneficiaryUserId: "owner-ada",
+  assigneeId: null,
+  createdByAgent: { ownerUserId: "owner-ada" },
+  claims: [],
   verdictOwners: [],
   ...overrides,
 });
@@ -44,6 +54,7 @@ function work(overrides: Partial<ProjectWork> = {}): ProjectWork {
     toMerge: [],
     jobs: [],
     facts: new Map(),
+    ideaFacts: new Map(),
     offerWindowSeconds: 1800,
     ...overrides,
   };
@@ -53,26 +64,28 @@ const nothingMine: AgentWork = { offers: [], reviewOffers: [], jobReviewOffers: 
 
 describe("itemsFor", () => {
   it("asks for a verdict on an idea, worth 1 point, until the owner gives one", () => {
-    const idea = { id: "b1", number: 7, title: "Activity as an icon", ideaScore: 1 };
-    const fresh = itemsFor(agent("working"), work({ ideas: [idea], facts: new Map([["b1", facts()]]) }), nothingMine);
+    const idea = { id: "b1", number: 7, title: "Activity as an icon", score: 1 };
+    const fresh = itemsFor(agent("working"), work({ ideas: [idea], ideaFacts: new Map([["b1", ideaFacts()]]) }), nothingMine);
     expect(fresh).toHaveLength(1);
-    expect(fresh[0]).toMatchObject({ kind: "idea", points: 1, canAct: true, minimumRole: "working" });
+    expect(fresh[0]).toMatchObject({ kind: "idea", points: 1, canAct: true, minimumRole: "working", idea: { id: "b1", number: 7 } });
+    expect(fresh[0]).not.toHaveProperty("issue");
+    expect(fresh[0].actions[0].path).toBe("/api/v1/ideas/b1/verdicts?projectId=p1");
     expect(fresh[0].actions.map((a) => a.name)).toEqual(["give_idea_verdict"]);
     expect(fresh[0].actions[0].cli).not.toContain("--votes");
     expect(fresh[0].detail).toContain("Score 1 of 3");
 
-    const given = facts({ verdictOwners: ["owner-bob"] });
-    expect(itemsFor(agent("working"), work({ ideas: [idea], facts: new Map([["b1", given]]) }), nothingMine)).toEqual([]);
+    const given = ideaFacts({ verdictOwners: ["owner-bob"] });
+    expect(itemsFor(agent("working"), work({ ideas: [idea], ideaFacts: new Map([["b1", given]]) }), nothingMine)).toEqual([]);
   });
 
   it("tells a manager agent it may give up to 5 votes", () => {
-    const items = itemsFor(agent("manager"), work({ ideas: [{ id: "b1", number: 7, title: "x", ideaScore: 0 }], facts: new Map([["b1", facts()]]) }), nothingMine);
+    const items = itemsFor(agent("manager"), work({ ideas: [{ id: "b1", number: 7, title: "x", score: 0 }], ideaFacts: new Map([["b1", ideaFacts()]]) }), nothingMine);
     expect(items[0].actions[0].cli).toContain("--votes 1-5");
   });
 
   it("leaves out the agent's own ideas", () => {
-    const own = facts({ reporterId: "owner-bob", beneficiaryUserId: "owner-bob", createdByAgent: { ownerUserId: "owner-bob" } });
-    const items = itemsFor(agent("working"), work({ ideas: [{ id: "b1", number: 7, title: "x", ideaScore: 0 }], facts: new Map([["b1", own]]) }), nothingMine);
+    const own = ideaFacts({ reporterId: "owner-bob", beneficiaryUserId: "owner-bob", createdByAgent: { ownerUserId: "owner-bob" } });
+    const items = itemsFor(agent("working"), work({ ideas: [{ id: "b1", number: 7, title: "x", score: 0 }], ideaFacts: new Map([["b1", own]]) }), nothingMine);
     expect(items).toEqual([]);
   });
 
@@ -94,9 +107,9 @@ describe("itemsFor", () => {
   it("lists an idea at the threshold as a manager task to convert", () => {
     // The convert list comes from its own query, so ideas past the top of the verdict list still reach managers.
     const project = work({
-      ideas: [{ id: "b2", number: 8, title: "y", ideaScore: 2 }],
-      toConvert: [{ id: "b1", number: 7, title: "x", ideaScore: 3 }],
-      facts: new Map([["b1", facts()], ["b2", facts()]]),
+      ideas: [{ id: "b2", number: 8, title: "y", score: 2 }],
+      toConvert: [{ id: "b1", number: 7, title: "x", score: 3 }],
+      ideaFacts: new Map([["b1", ideaFacts()], ["b2", ideaFacts()]]),
     });
     const forWorking = itemsFor(agent("working"), project, nothingMine).filter((item) => item.kind === "convert_idea");
     expect(forWorking).toHaveLength(1);
@@ -154,7 +167,7 @@ describe("itemsFor", () => {
 
 describe("waitingForOthers", () => {
   const project = work({
-    toConvert: [{ id: "b1", number: 7, title: "x", ideaScore: 4 }, { id: "b4", number: 9, title: "w", ideaScore: 3 }],
+    toConvert: [{ id: "b1", number: 7, title: "x", score: 4 }, { id: "b4", number: 9, title: "w", score: 3 }],
     toAccept: [{ id: "b2", number: 2, title: "y" }],
     toMerge: [{ id: "b3", number: 3, title: "z", reviewStatus: "ready_to_merge" }],
     facts: new Map([["b1", facts()], ["b2", facts()], ["b3", facts()], ["b4", facts()]]),
@@ -179,7 +192,7 @@ describe("waitingForOthers", () => {
   });
 
   it("lets a manager convert its owner's own idea", () => {
-    const own = work({ toConvert: [{ id: "b1", number: 7, title: "x", ideaScore: 4 }], facts: new Map([["b1", facts({ reporterId: "owner-bob", beneficiaryUserId: "owner-bob" })]]) });
+    const own = work({ toConvert: [{ id: "b1", number: 7, title: "x", score: 4 }], facts: new Map([["b1", facts({ reporterId: "owner-bob", beneficiaryUserId: "owner-bob" })]]) });
     const item = itemsFor(agent("manager"), own, nothingMine).find((i) => i.kind === "convert_idea");
     expect(item).toMatchObject({ canAct: true });
   });

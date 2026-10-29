@@ -1,4 +1,3 @@
-import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -29,6 +28,7 @@ vi.mock("@/lib/tenant-access", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     bug: { findUnique: vi.fn(), create: vi.fn() },
+    idea: { create: vi.fn() },
     projectArea: { findFirst: vi.fn() },
     user: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn().mockResolvedValue([]) },
     $transaction: vi.fn(),
@@ -43,6 +43,8 @@ import { createBugAction, updateBugAction } from "./issues";
 
 const db = prisma as unknown as {
   bug: { findUnique: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn> };
+  idea: { create: ReturnType<typeof vi.fn> };
+  $transaction: ReturnType<typeof vi.fn>;
   projectArea: { findFirst: ReturnType<typeof vi.fn> };
   $executeRaw: ReturnType<typeof vi.fn>;
 };
@@ -64,20 +66,21 @@ describe("issue actions are tenant-scoped (#425)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (requireUser as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "user-1", role: "user" });
+    db.$transaction.mockImplementation(async (run: (tx: unknown) => unknown) => run(prisma));
   });
 
-  it("refuses to file an issue for someone with no membership", async () => {
+  it("refuses to file a report for someone with no membership", async () => {
     tenantOf.mockResolvedValue(null);
     expect(await createBugAction(report)).toEqual({ error: NO_TENANT_MESSAGE });
-    expect(db.bug.create).not.toHaveBeenCalled();
+    expect(db.idea.create).not.toHaveBeenCalled();
   });
 
-  it("files the issue into the reporter's tenant and project", async () => {
+  it("files the report, as an idea, into the reporter's tenant and project", async () => {
     tenantOf.mockResolvedValue("tenant-zedu");
-    db.bug.create.mockRejectedValue(new Error("stop after create"));
+    db.idea.create.mockRejectedValue(new Error("stop after create"));
     await createBugAction(report).catch(() => undefined);
-    expect(db.bug.create).toHaveBeenCalledTimes(1);
-    expect(db.bug.create.mock.calls[0][0].data).toMatchObject({
+    expect(db.idea.create).toHaveBeenCalledTimes(1);
+    expect(db.idea.create.mock.calls[0][0].data).toMatchObject({
       tenantId: "tenant-zedu",
       projectId: "project-zedu",
       beneficiaryUserId: "user-1",
@@ -87,7 +90,7 @@ describe("issue actions are tenant-scoped (#425)", () => {
   it("accepts an area only when it belongs to the default project", async () => {
     tenantOf.mockResolvedValue("tenant-zedu");
     db.projectArea.findFirst.mockResolvedValue({ id: "area-web" });
-    db.bug.create.mockRejectedValue(new Error("stop after create"));
+    db.idea.create.mockRejectedValue(new Error("stop after create"));
     await createBugAction(form({
       title: "Login button does nothing",
       description: "Clicking Login on the sign-in page does nothing at all, on Chrome and Firefox.",
@@ -98,7 +101,7 @@ describe("issue actions are tenant-scoped (#425)", () => {
       where: { id: "area-web", projectId: "project-zedu" },
       select: { id: true },
     });
-    expect(db.bug.create.mock.calls[0][0].data.areaId).toBe("area-web");
+    expect(db.idea.create.mock.calls[0][0].data.areaId).toBe("area-web");
   });
 
   it("rejects an area from another project before saving", async () => {
@@ -111,39 +114,7 @@ describe("issue actions are tenant-scoped (#425)", () => {
       areaId: "foreign-area",
     }));
     expect(result).toMatchObject({ error: "Area not found in this project.", field: "areaId" });
-    expect(db.bug.create).not.toHaveBeenCalled();
-  });
-
-  it("repairs the issue-number sequence and saves on the retry", async () => {
-    tenantOf.mockResolvedValue("tenant-zedu");
-    db.$executeRaw.mockResolvedValue(0);
-    db.bug.create
-      .mockRejectedValueOnce(
-        new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
-          code: "P2002",
-          clientVersion: "6",
-          meta: { target: ["number"] },
-        }),
-      )
-      .mockResolvedValueOnce({ id: "bug-new", title: "Login button does nothing" });
-    await createBugAction(report);
-    expect(db.$executeRaw).toHaveBeenCalledTimes(1);
-    expect(db.bug.create).toHaveBeenCalledTimes(2);
-  });
-
-  it("returns a readable error for a unique violation that is not the issue number", async () => {
-    tenantOf.mockResolvedValue("tenant-zedu");
-    db.bug.create.mockRejectedValueOnce(
-      new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
-        code: "P2002",
-        clientVersion: "6",
-        meta: { target: ["title"] },
-      }),
-    );
-    expect(await createBugAction(report)).toEqual({
-      error: "That issue could not be saved because it conflicts with an existing one. Try again.",
-    });
-    expect(db.$executeRaw).not.toHaveBeenCalled();
+    expect(db.idea.create).not.toHaveBeenCalled();
   });
 
   it("treats an issue in another tenant as not found", async () => {

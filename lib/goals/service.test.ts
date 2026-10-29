@@ -199,7 +199,60 @@ describe("splitGoalPool (#616)", () => {
         targets: [{ targetType: "issue", targetBugId: "bug1" }],
       }),
     ).rejects.toMatchObject({ status: 409, message: expect.stringContaining("already applied") });
+    expect(db.goalAllocation.findMany).toHaveBeenCalledWith({
+      where: {
+        goalId: "goal1",
+        sourceKey: { in: ["dup:0"] },
+      },
+      select: { sourceKey: true },
+    });
     expect(db.goal.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("allows the same sourceKey across two different goals or tenants (#505)", async () => {
+    db.goal.findFirst.mockResolvedValue({ ...goalRow, id: "goal2" });
+    db.goalAllocation.findMany.mockResolvedValue([]);
+    db.goal.updateMany.mockResolvedValue({ count: 1 });
+    db.goal.findUniqueOrThrow.mockResolvedValue({ ...goalRow, id: "goal2" });
+
+    const result = await splitGoalPool(agent, "goal2", {
+      method: "even",
+      amount: 100,
+      sourceKey: "payout-2026-11",
+      targets: [{ targetType: "issue", targetBugId: "bug1" }],
+    });
+
+    expect(db.goalAllocation.findMany).toHaveBeenCalledWith({
+      where: {
+        goalId: "goal2",
+        sourceKey: { in: ["payout-2026-11:0"] },
+      },
+      select: { sourceKey: true },
+    });
+    expect(db.goalAllocation.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          goalId: "goal2",
+          sourceKey: "payout-2026-11:0",
+          amount: 100,
+        }),
+      ],
+    });
+    expect(result.goal.id).toBe("goal2");
+  });
+
+  it("maps P2002 unique constraint violation to 409 during concurrent split (#506)", async () => {
+    db.goalAllocation.findMany.mockResolvedValue([]);
+    db.goal.updateMany.mockResolvedValue({ count: 1 });
+    db.goalAllocation.createMany.mockRejectedValue({ code: "P2002" });
+    await expect(
+      splitGoalPool(agent, "goal1", {
+        method: "even",
+        amount: 100,
+        sourceKey: "race-key",
+        targets: [{ targetType: "issue", targetBugId: "bug1" }],
+      }),
+    ).rejects.toMatchObject({ status: 409, message: expect.stringContaining("already applied") });
   });
 
   it("409s a split on a goal that is not active", async () => {

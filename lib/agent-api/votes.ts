@@ -23,11 +23,11 @@ export type AgentVoteResult = {
   weight: number;
 };
 
-type LockedIssue = { id: string; reporterId?: string | null; beneficiaryUserId?: string | null; convertedToIssueAt?: Date | null };
+type LockedIssue = { id: string; reporterId?: string | null; beneficiaryUserId?: string | null };
 
 async function lockedIssue(tx: Tx, caller: AgentContext, projectId: string, bugId: string): Promise<LockedIssue> {
   const locked = await tx.$queryRaw<LockedIssue[]>`
-    SELECT "id", "reporterId", "beneficiaryUserId", "convertedToIssueAt" FROM "Bug"
+    SELECT "id", "reporterId", "beneficiaryUserId" FROM "Bug"
     WHERE "id" = ${bugId}
       AND "tenantId" = ${caller.tenantId}
       AND "projectId" = ${projectId}
@@ -74,10 +74,6 @@ export async function upvoteIssue(
 ): Promise<AgentVoteResult> {
   return prisma.$transaction(async (tx) => {
     const issue = await lockedIssue(tx, caller, projectId, bugId);
-    // #idea-verdicts: ideas take good, bad or neutral verdicts instead of upvotes.
-    if (!issue.convertedToIssueAt) {
-      throw new IssueApiError(409, "Ideas take verdicts, not upvotes. Give it a good, bad or neutral verdict.", { error: "use_idea_verdict", message: "Ideas take verdicts, not upvotes. Give it a good, bad or neutral verdict." });
-    }
     const weight = upvoteWeight(caller, issue);
     const existing = await tx.vote.findUnique({
       where: { userId_bugId: { userId: caller.ownerId, bugId } },

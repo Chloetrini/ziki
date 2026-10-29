@@ -19,6 +19,8 @@ export type PointAward = {
   tenantId: string;
   userId: string;
   bugId: string | null;
+  /** Set for an `idea` entry (#idea-table). */
+  ideaId?: string | null;
   role: PointRole;
   points: number;
   sourceKey: string;

@@ -21,6 +21,7 @@ function agent(overrides: Partial<ManageAgentItem>): ManageAgentItem {
     createdAt: "2026-10-01T10:00:00.000Z",
     revokedAt: null,
     personal: false,
+    avatar: null,
     currentProjectId: "proj_1",
     recent: true,
     apiKeys: [{ id: "key_1", prefix: "zk_ab", apiKey: "zk_secret", projectId: "proj_1", projectName: "Alpha", lastUsedAt: null }],

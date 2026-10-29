@@ -27,7 +27,7 @@ describe("the CLI itself", () => {
     const result = await ziki("commands");
     expect(result.code).toBe(0);
     expect(result.out.split("\n")).toHaveLength(CLI_TOOLS.length);
-    for (const command of ["create-issue", "vote", "dispatch", "save-notes", "admin-merge"]) expect(result.out).toContain(command);
+    for (const command of ["create-idea", "vote", "dispatch", "save-notes", "admin-merge"]) expect(result.out).toContain(command);
   });
 
   it("shows a command's flags with types and which are required", async () => {
@@ -42,7 +42,7 @@ describe("the CLI itself", () => {
     const unknownFlag = await ziki("whoami", "--colour", "blue", "--as", "ada");
     expect(unknownFlag.code).toBe(2);
     expect(unknownFlag.err).toMatch(/Unknown flag --colour/);
-    const missing = await ziki("create-issue", "--title", "Only a title", "--as", "ada");
+    const missing = await ziki("create-idea", "--title", "Only a title", "--as", "ada");
     expect(missing.code).toBe(2);
     expect(missing.err).toMatch(/--description/);
   });

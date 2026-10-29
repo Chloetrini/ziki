@@ -201,6 +201,8 @@ export type AgentStatus = "waiting" | "working" | "idle" | "offline";
 export type DashboardAgent = {
   id: string;
   name: string;
+  /** The owner's avatar pick; null wears the automatic robot. */
+  avatar: string | null;
   model: string | null;
   level: string;
   status: AgentStatus;
@@ -263,6 +265,7 @@ export async function loadOwnAgents({
     select: {
       id: true,
       name: true,
+      avatar: true,
       model: true,
       level: true,
       apiKeys: { where: { revokedAt: null }, select: { lastUsedAt: true } },
@@ -338,6 +341,7 @@ export async function loadOwnAgents({
     return {
       id: agent.id,
       name: agent.name,
+      avatar: agent.avatar,
       model: agent.model,
       level: agent.level,
       status,

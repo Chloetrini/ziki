@@ -33,6 +33,8 @@ const linkFocus =
 export type ShellAgent = {
   id: string;
   name: string;
+  /** The owner's avatar pick; null wears the automatic robot. */
+  avatar?: string | null;
   level: string;
 };
 
@@ -325,7 +327,7 @@ function AgentsMenu({ pathname, agents }: { pathname: string | null; agents: She
               onClick={() => setOpen(false)}
               className="flex min-h-11 items-center gap-2.5 rounded-[10px] px-2.5 text-left text-zk-text"
             >
-              <AgentAvatar agentId={agent.id} size={30} />
+              <AgentAvatar agentId={agent.id} avatar={agent.avatar} size={30} />
               <span className="min-w-0 flex-1 truncate font-semibold">{agent.name}</span>
               <span className="rounded-full bg-zk-info-bg px-2 py-0.5 text-[11px] font-bold text-zk-info-fg">
                 {levelLabel(agent.level)}

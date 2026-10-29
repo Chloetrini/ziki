@@ -1,9 +1,9 @@
-import { test, expect, reportIssue } from "./fixtures";
+import { test, expect, fileIssue } from "./fixtures";
 
 test.use({ as: "admin" });
 
 test("triage changes stick after saving and reloading", async ({ page, uniq, me }) => {
-  await reportIssue(page, uniq("Triage check"));
+  await fileIssue(page, uniq("Triage check"));
 
   // Ziki #713: the status moves on its own as agents work; nobody sets it here.
   await expect(page.locator("#status")).toBeDisabled();

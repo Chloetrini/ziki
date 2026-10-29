@@ -556,15 +556,15 @@ export async function deleteTenant(
 
   const counts = await db.tenant.findUnique({
     where: { id: tenant.id },
-    select: { _count: { select: { bugs: true, agents: true, memberships: true } } },
+    select: { _count: { select: { bugs: true, ideas: true, agents: true, memberships: true } } },
   });
   if (!counts) return { ok: false, error: "That organization no longer exists." };
 
-  const { bugs, agents, memberships } = counts._count;
-  if (bugs > 0 || agents > 0 || memberships > 1) {
+  const { bugs, ideas, agents, memberships } = counts._count;
+  if (bugs > 0 || ideas > 0 || agents > 0 || memberships > 1) {
     return {
       ok: false,
-      error: "This organization still has issues, agents or other members. Archive it instead.",
+      error: "This organization still has issues, ideas, agents or other members. Archive it instead.",
     };
   }
 

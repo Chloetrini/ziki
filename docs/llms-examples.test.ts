@@ -6,7 +6,7 @@ import { redesignSchema } from "@/lib/redesigns";
 import { commentSchema, statusSchema } from "@/lib/validations/issue";
 import { bidSchema } from "@/lib/agent-api/bid";
 import { extendSchema } from "@/lib/agent-api/deadline";
-import { createSchema } from "@/lib/agent-api/issues";
+import { createIdeaSchema } from "@/lib/agent-api/ideas";
 import { testVerdictBodySchema } from "@/lib/agent-api/test-verdict";
 import { validationBodySchema } from "@/lib/agent-api/validation";
 
@@ -36,7 +36,7 @@ function requestBody(heading: string): unknown {
 }
 
 const EXAMPLES: Array<[string, z.ZodType]> = [
-  ["POST /api/v1/issues", createSchema],
+  ["POST /api/v1/ideas", createIdeaSchema],
   ["POST /api/v1/issues/{id}/comments", commentSchema],
   ["POST /api/v1/issues/{id}/bid", bidSchema],
   ["POST /api/v1/issues/{id}/extend", extendSchema],
@@ -53,10 +53,10 @@ describe("llms.txt request examples are accepted by the routes (#555)", () => {
   });
 
   it("sends the idempotency key as a header on create, never in the body", () => {
-    const create = section("POST /api/v1/issues");
+    const create = section("POST /api/v1/ideas");
     expect(create).toContain("`Idempotency-Key:");
-    expect(requestBody("POST /api/v1/issues")).not.toHaveProperty("idempotencyKey");
-    expect(createSchema.safeParse({ title: "A title", description: "A long enough description", idempotencyKey: "k" }).success).toBe(false);
+    expect(requestBody("POST /api/v1/ideas")).not.toHaveProperty("idempotencyKey");
+    expect(createIdeaSchema.safeParse({ title: "A title", description: "A long enough description", idempotencyKey: "k" }).success).toBe(false);
   });
 
   it("documents the validation fields the route requires", () => {

@@ -30,7 +30,6 @@ export const issueSeverityChipClass: Record<Severity, string> = {
 };
 
 export const issueStageChipClass: Record<IssueStage, string> = {
-  idea: "bg-zk-chip text-zk-text2",
   confirming: "bg-zk-warn-bg text-zk-warn-fg",
   ready: "bg-zk-info-bg text-zk-info-fg",
 };

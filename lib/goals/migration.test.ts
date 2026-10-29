@@ -39,12 +39,26 @@ describe("goal budgets migration is additive-only (#616)", () => {
     expect(migration).toContain('"GoalAllocation_goalId_fkey"');
   });
 
-  it("keeps allocations idempotent through a unique sourceKey", () => {
-    expect(schema).toMatch(/model GoalAllocation \{[\s\S]*sourceKey\s+String\s+@unique/);
+  it("keeps allocations idempotent through a goal-scoped unique sourceKey (#505)", () => {
+    expect(schema).toMatch(/model GoalAllocation \{[\s\S]*@@unique\(\[goalId, sourceKey\]\)/);
   });
 
   it("tracks the pool and what has been split off it", () => {
     expect(schema).toMatch(/model Goal \{[\s\S]*budgetPool\s+Int/);
     expect(schema).toMatch(/model Goal \{[\s\S]*allocated\s+Int\s+@default\(0\)/);
+  });
+});
+
+describe("goal allocation goal-scoped sourceKey migration (#505)", () => {
+  const scopedMigration = readFileSync(
+    "prisma/migrations/20261130000000_goal_allocation_goal_scoped_source_key/migration.sql",
+    "utf8",
+  );
+
+  it("drops global unique index and adds goalId-scoped unique index without data loss", () => {
+    expect(scopedMigration).toContain('DROP INDEX IF EXISTS "GoalAllocation_sourceKey_key"');
+    expect(scopedMigration).toContain('CREATE UNIQUE INDEX "GoalAllocation_goalId_sourceKey_key" ON "GoalAllocation"("goalId", "sourceKey")');
+    expect(scopedMigration).not.toMatch(/\bDROP\s+(TABLE|COLUMN|TYPE)\b/i);
+    expect(scopedMigration).not.toMatch(/\bDELETE\b/i);
   });
 });

@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { reportIssue, test } from "./fixtures";
+import { fileIssue, test } from "./fixtures";
 
 /**
  * #1070: at tablet widths the header's project, key, nav and account menu
@@ -44,7 +44,7 @@ test.describe("no sideways scroll", () => {
       await page.goto("/issues");
       await expectNoSidewaysScroll(page);
 
-      await reportIssue(page, uniq("Layout target"));
+      await fileIssue(page, uniq("Layout target"));
       await expectNoSidewaysScroll(page);
 
       await page.goto("/escalations");

@@ -246,7 +246,7 @@ export default async function SettingsPage(props: {
                     See how others see you
                   </Link>
                 </div>
-                <DisplayNameForm initialName={displayName} />
+                <DisplayNameForm initialName={displayName} initialImage={user.image} />
                 <p className="text-sm">
                   <Link href="/settings/profile" className="font-semibold text-zk-accent hover:underline">
                     Open profile page

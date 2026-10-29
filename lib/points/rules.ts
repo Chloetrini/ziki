@@ -125,8 +125,8 @@ export type PointRole = "solver" | "reporter" | "reviewer" | "triager" | "submis
 export const IDEA_CONTRIBUTION_POINTS = 1;
 
 /** Idempotency key for an idea contribution, so each person earns once per idea. */
-export function ideaContributionSourceKey(bugId: string, userId: string): string {
-  return `idea:${bugId}:${userId}`;
+export function ideaContributionSourceKey(ideaId: string, userId: string): string {
+  return `idea:${ideaId}:${userId}`;
 }
 
 /** Idempotency key for paying the triager who cleared an issue as not a duplicate. */

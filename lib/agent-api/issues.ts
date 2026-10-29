@@ -8,16 +8,15 @@ import { reviewerConflict, ReviewerNotIndependentError, type ReviewedBug } from 
 import { audit } from "@/lib/agents/audit";
 import { consumeAgentBudget, agentBudgetExceededResponse } from "@/lib/agents/rate-budget";
 import { withAgentBudgetHeaders, type AgentBudgetQuota } from "@/lib/agents/rate-budget-headers";
-import { createBugSchema, commentSchema, statusSchema, severitySchema } from "@/lib/validations/issue";
+import { commentSchema, statusSchema, severitySchema } from "@/lib/validations/issue";
 import { parsePlatformFilter, platformFilterWhere } from "@/lib/platform-filter";
 import { boundSearchTerm, escapeSearchQuery } from "@/lib/search";
 import { parseProjectAreaFilter, projectAreaFilterWhere } from "@/lib/project-area-filter";
-import { intakeKind, issueStage, openIssueStages, parseIssueStageView, type IssueStage } from "@/lib/issue-stage";
+import { issueStage, openIssueStages, parseIssueStageView, type IssueStage } from "@/lib/issue-stage";
 import { eventStreamBus, TENANT_WRITE } from "@/lib/events/stream-bus";
-import { workflowFor } from "@/lib/workflow";
 import { parseIssueRef } from "@/lib/issue-ref";
-import { createIssueWithPolicy, cursorOrderBy, cursorWhere, decodeCursor, hashCreateRequest, LIMIT_RANGE_ERROR, pageSize, toPage, type IssueCursor } from "@/lib/agent-api/create-policy";
-import { createdSummary, commentedSummary, commentPreview } from "@/lib/activity-log";
+import { cursorOrderBy, cursorWhere, decodeCursor, LIMIT_RANGE_ERROR, pageSize, toPage, type IssueCursor } from "@/lib/agent-api/create-policy";
+import { commentedSummary, commentPreview } from "@/lib/activity-log";
 import { extractMentionedUserIds, normalizeMentions } from "@/lib/mentions";
 import { commentDepth, MAX_COMMENT_DEPTH } from "@/lib/comments";
 import { attachmentIdsInMarkdown, linkAttachments } from "@/lib/attachment-link";
@@ -34,8 +33,8 @@ import { IssueApiError } from "@/lib/agent-api/errors";
 export { IssueApiError };
 
 const idSchema = z.string().trim().min(1).max(191);
-// `reported` and `confirmed` were the stage names before ideas took verdicts (#idea-verdicts).
-const stageSchema = z.enum(["idea", "confirming", "ready", "reported", "confirmed"]);
+// Ideas are not issues and have no stage here (#idea-table): see /api/v1/ideas.
+const stageSchema = z.enum(["confirming", "ready"]);
 
 /** #406: name the bad query parameter instead of returning a pathless Zod dump. */
 function enumFilter<T extends string>(name: string, raw: string | null, allowed: readonly T[]): T | null {
@@ -48,14 +47,6 @@ function enumFilter<T extends string>(name: string, raw: string | null, allowed:
 
 /** Files uploaded with POST /api/v1/attachments, linked on save (#645). */
 const attachmentIdsSchema = z.array(idSchema).max(MAX_ATTACHMENTS_PER_ITEM).optional();
-export const createSchema = createBugSchema.pick({ title: true, description: true, categoryId: true, areaId: true, proofLinks: true })
-  .extend({
-    // #494: no beneficiaryUserId — an agent can't file issues in someone
-    // else's name. The reporter is always the agent's owner.
-    projectId: idSchema.optional(),
-    typeId: z.unknown().optional(), severity: z.unknown().optional(), acknowledgeSimilar: z.unknown().optional(),
-    attachmentIds: attachmentIdsSchema,
-  }).strict();
 const agentCommentSchema = commentSchema.extend({ projectId: idSchema.optional(), attachmentIds: attachmentIdsSchema }).strict();
 
 /**
@@ -153,11 +144,9 @@ export const issueSelect = {
   id: true, number: true, title: true, description: true, status: true, severity: true,
   categoryId: true, typeId: true, reporterId: true, assigneeId: true, beneficiaryUserId: true,
   createdByAgentId: true, projectId: true, areaId: true, createdAt: true, updatedAt: true, proofLinks: true,
-  // #463: agents can see how close an idea is to the upvote gate.
   voteCount: true,
-  // #idea-verdicts: the idea's score, and whether a manager agent converted it to an issue.
-  ideaScore: true,
-  convertedToIssueAt: true,
+  // #idea-table: the idea this issue was converted from.
+  idea: { select: { id: true, number: true, score: true, convertedAt: true } },
   // #544: whether a fix is linked, and at which commit. Without these a
   // reviewer cannot tell a linked fix from an unlinked one, and `proofLinks`
   // is misleading because it is free text set at create/edit, not the field
@@ -269,14 +258,11 @@ export async function readAgentIssue(scope: Scope, id: string) {
     }, _count: { select: { comments: { where: { deletedAt: null } } } } },
   });
   if (!issue) throw new IssueApiError(404, "Issue not found.");
-  const [confirmed, { ideaThreshold }] = await Promise.all([isConfirmed(issue.id), workflowFor(issue.projectId)]);
-  const converted = issue.convertedToIssueAt !== null;
+  const confirmed = await isConfirmed(issue.id);
   return {
     ...issue,
-    ideaThreshold,
     confirmed,
-    intake: intakeKind({ converted }),
-    stage: issueStage({ status: issue.status, converted, confirmed }),
+    stage: issueStage({ status: issue.status, confirmed }),
   };
 }
 
@@ -340,97 +326,6 @@ async function normalizeTenantMentions(db: Prisma.TransactionClient, tenantId: s
   return normalizeMentions(body, new Map(users.map((user) => [user.id, user.name])));
 }
 
-export async function createAgentIssue(agent: AgentContext, request: NextRequest) {
-  const input = createSchema.parse(await issueJson(request));
-  const scope = await issueProject(agent, request.nextUrl.searchParams, input.projectId);
-  // #494: always the agent's owner. The create schema no longer accepts a
-  // beneficiary, so no request can put words in another person's mouth.
-  const beneficiaryUserId = agent.ownerId;
-  const requestHash = hashCreateRequest({
-    projectId: scope.projectId,
-    beneficiaryUserId,
-    title: input.title,
-    description: input.description,
-    categoryId: input.categoryId || null,
-    proofLinks: input.proofLinks,
-    typeId: input.typeId ?? null,
-    severity: input.severity ?? null,
-    acknowledgeSimilar: input.acknowledgeSimilar ?? null,
-    // Only when sent, so keys stored before #645 still replay.
-    ...(input.attachmentIds?.length ? { attachmentIds: [...new Set(input.attachmentIds)].sort() } : {}),
-    ...(input.areaId ? { areaId: input.areaId } : {}),
-  });
-  const result = await createIssueWithPolicy({
-    agent, projectId: scope.projectId, idempotencyKey: request.headers.get("Idempotency-Key"),
-    requestHash,
-    title: input.title, typeId: input.typeId, severity: input.severity, acknowledgeSimilar: input.acknowledgeSimilar,
-    insert: async (tx, policy) => {
-      const member = await tx.membership.findUnique({
-        where: { tenantId_userId: { tenantId: scope.tenantId, userId: beneficiaryUserId } }, select: { userId: true },
-      });
-      if (!member) throw new IssueApiError(422, "The beneficiary must be a member of the tenant.");
-      const categoryId = input.categoryId || null;
-      if (categoryId) {
-        const category = await tx.category.findFirst({
-          where: { id: categoryId, tenantId: scope.tenantId, isActive: true },
-          select: { id: true },
-        });
-        if (!category) throw new IssueApiError(422, "Platform not found or inactive.");
-      }
-      const areaId = input.areaId || null;
-      if (areaId) {
-        const area = await tx.projectArea.findFirst({
-          where: { id: areaId, projectId: scope.projectId },
-          select: { id: true },
-        });
-        if (!area) throw new IssueApiError(422, "Area not found in this project.");
-      }
-      const description = await normalizeTenantMentions(tx, scope.tenantId, input.description);
-      const issue = await tx.bug.create({
-        data: {
-          ...scope, ...policy, title: input.title, description, status: "open", categoryId, areaId,
-          reporterId: beneficiaryUserId, beneficiaryUserId, createdByAgentId: agent.agentId,
-          proofLinks: input.proofLinks,
-          watches: { create: { userId: beneficiaryUserId } },
-          activities: { create: { actorId: beneficiaryUserId, type: "created", summary: createdSummary(input.title) } },
-        }, select: { id: true },
-      });
-      // #645: files this agent's owner uploaded through the API (or that the
-      // description links) become the issue's attachments.
-      await linkAgentAttachments(tx, agent, { requested: input.attachmentIds, text: description, bugId: issue.id });
-      await audit(agent, "issue.created", issue.id, { beneficiaryUserId }, { db: tx, bugId: issue.id });
-      await publish(tx, {
-        tenantId: scope.tenantId,
-        type: "issue.created",
-        payload: { issueId: issue.id, projectId: scope.projectId, beneficiaryUserId },
-        actorAgentId: agent.agentId,
-        bugId: issue.id,
-      });
-      return issue;
-    },
-  });
-  if (result.status !== 200 && result.status !== 201) return NextResponse.json(result, { status: result.status });
-  // A reused key can refer to another project; never return an out-of-scope issue.
-  const issue = await readAgentIssue(scope, result.bugId);
-  // #533: people mentioned in an agent's report hear about it, as they would
-  // from a person's. A replayed create was already announced.
-  if (!result.replayed) {
-    const mentioned = extractMentionedUserIds(issue.description ?? "");
-    if (mentioned.length > 0) {
-      notifyLater({
-        kind: "mentioned",
-        place: "description",
-        actorId: agent.ownerId,
-        actorName: agent.name,
-        bugId: issue.id,
-        bugTitle: issue.title,
-        recipientIds: mentioned,
-      });
-    }
-  }
-  return NextResponse.json({ issue, replayed: result.replayed }, { status: result.status });
-}
-
 export async function commentOnAgentIssue(agent: AgentContext, request: NextRequest, bugId: string) {
   const input = agentCommentSchema.parse(await issueJson(request));
   const scope = await issueProject(agent, request.nextUrl.searchParams, input.projectId);
@@ -441,7 +336,6 @@ export async function commentOnAgentIssue(agent: AgentContext, request: NextRequ
     assigneeId: string | null;
     pullRequestUrl: string | null;
     proofLinks: string[];
-    convertedToIssueAt: Date | null;
   } & ReviewedBug) | null = null;
   let parentAuthorId: string | null = null;
   const comment = await prisma.$transaction(async (tx) => {
@@ -449,16 +343,12 @@ export async function commentOnAgentIssue(agent: AgentContext, request: NextRequ
       where: { ...scope, id: bugId, isDeleted: false },
       select: {
         id: true, title: true, reporterId: true, assigneeId: true, beneficiaryUserId: true,
-        pullRequestUrl: true, proofLinks: true, convertedToIssueAt: true,
+        pullRequestUrl: true, proofLinks: true,
         createdByAgent: { select: { ownerUserId: true } },
         claims: { where: { status: "active", releasedAt: null }, select: { status: true, releasedAt: true, beneficiaryUserId: true, dispatcherUserId: true, agent: { select: { ownerUserId: true } } } },
       },
     });
     if (!bug) throw new IssueApiError(404, "Issue not found.");
-    // #idea-verdicts: an idea takes only verdicts, so there is nothing to comment on until it is an issue.
-    if (!bug.convertedToIssueAt) {
-      throw new IssueApiError(409, "Ideas take verdicts, not comments. Give it a verdict: good, bad or neutral, with a summary and a description.", { error: "use_idea_verdict", message: "Ideas take verdicts, not comments. Give it a verdict: good, bad or neutral, with a summary and a description." });
-    }
     if (input.type === "review") {
       const conflict = reviewerConflict({ id: agent.agentId, ownerUserId: agent.ownerId }, bug);
       if (conflict) throw new IssueApiError(403, "not_independent", { message: new ReviewerNotIndependentError(conflict).message });

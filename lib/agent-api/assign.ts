@@ -48,10 +48,9 @@ export async function assignIssue(manager: AgentContext, projectId: string, issu
       const bugId = resolved.id;
       const locked = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Bug" WHERE "id" = ${bugId} AND "tenantId" = ${manager.tenantId} AND "projectId" = ${projectId} AND "isDeleted" = false FOR UPDATE`;
       if (!locked.length) throw new IssueApiError(404, "Issue not found in this project.");
-      const bug = await tx.bug.findFirst({ where: { id: bugId }, select: { id: true, title: true, status: true, assigneeId: true, convertedToIssueAt: true } });
+      const bug = await tx.bug.findFirst({ where: { id: bugId }, select: { id: true, title: true, status: true, assigneeId: true } });
       if (!bug) throw new IssueApiError(404, "Issue not found in this project.");
       if (bug.status !== "open") throw new IssueApiError(409, "Only open issues can be assigned.");
-      if (!bug.convertedToIssueAt) throw new IssueApiError(409, "This is still an idea. Convert it to an issue before assigning it.");
       if (!await isConfirmed(bugId, tx)) throw new IssueApiError(409, "The issue must be confirmed before it can be assigned.");
       await assertRedesignOpen(bugId, tx);
       await assertApprovalOpen(bugId, "before_offer", { db: tx, tenantId: manager.tenantId, agent: manager });

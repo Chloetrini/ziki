@@ -71,7 +71,6 @@ export async function findReadyIssues(
         projectId,
         isDeleted: false,
         status: "open",
-        convertedToIssueAt: { not: null },
         claims: {
           none: {
             releasedAt: null,

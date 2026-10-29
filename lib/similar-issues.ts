@@ -41,6 +41,8 @@ export type SimilarIssue = {
   title: string;
   status: Status;
   voteCount: number;
+  /** Set when the match is an open idea rather than an issue (#idea-table); its number is an idea number. */
+  kind?: "issue" | "idea";
 };
 
 export type ScoredIssue = SimilarIssue & { score: number };
@@ -51,7 +53,7 @@ export function pickSimilar(rows: ScoredIssue[], limit = SIMILAR_LIMIT): Similar
     .filter((r) => Number(r.score) >= MIN_SCORE)
     .sort((a, b) => Number(b.score) - Number(a.score) || b.voteCount - a.voteCount)
     .slice(0, limit)
-    .map(({ id, number, title, status, voteCount }) => ({ id, number, title, status, voteCount }));
+    .map(({ id, number, title, status, voteCount, kind }) => ({ id, number, title, status, voteCount, ...(kind ? { kind } : {}) }));
 }
 
 /** Words the fallback (no pg_trgm) search requires, all of them. */

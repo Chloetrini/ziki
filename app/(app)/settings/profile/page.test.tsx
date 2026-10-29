@@ -11,7 +11,7 @@ import ProfilePage, { metadata } from "./page";
 
 beforeEach(() => {
   vi.resetAllMocks();
-  requireUser.mockResolvedValue({ id: "user-1", name: "Ada Lovelace", email: "ada@example.com" });
+  requireUser.mockResolvedValue({ id: "user-1", name: "Ada Lovelace", email: "ada@example.com", image: null });
 });
 
 describe("Profile settings (#576)", () => {
@@ -24,10 +24,24 @@ describe("Profile settings (#576)", () => {
     expect(markup).not.toMatch(/<input[^>]*(?:type="email"|name="email")/);
     expect(markup).toContain('href="/settings?section=account"');
     expect(markup).toContain('href="/users/user-1"');
+    expect(markup).toContain("Profile picture");
+    expect(markup).toContain("Upload photo");
+  });
+
+  it("renders Change photo and Remove options when user already has an image", async () => {
+    requireUser.mockResolvedValue({
+      id: "user-1",
+      name: "Ada Lovelace",
+      email: "ada@example.com",
+      image: "https://example.com/ada.png",
+    });
+    const markup = renderToStaticMarkup(await ProfilePage());
+    expect(markup).toContain("Change photo");
+    expect(markup).toContain("Remove");
   });
 
   it("allows a missing display name to be edited", async () => {
-    requireUser.mockResolvedValue({ id: "user-1", name: null, email: "ada@example.com" });
+    requireUser.mockResolvedValue({ id: "user-1", name: null, email: "ada@example.com", image: null });
     const markup = renderToStaticMarkup(await ProfilePage());
     expect(markup).toContain('aria-label="Display name" value=""');
   });

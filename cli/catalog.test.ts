@@ -32,8 +32,8 @@ describe("the CLI catalogue", () => {
   it("gives every tool a unique command name", () => {
     const names = CLI_TOOLS.map(commandName);
     expect(new Set(names).size).toBe(names.length);
-    expect(commandName({ name: "ziki_create_issue" })).toBe("create-issue");
-    expect(findTool("create-issue")?.name).toBe("ziki_create_issue");
+    expect(commandName({ name: "ziki_create_idea" })).toBe("create-idea");
+    expect(findTool("create-idea")?.name).toBe("ziki_create_idea");
     expect(findTool("nothing-like-this")).toBeUndefined();
   });
 

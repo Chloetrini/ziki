@@ -9,6 +9,9 @@ import type { ReactElement } from "react";
 
 const count = vi.hoisted(() => vi.fn());
 const findMany = vi.hoisted(() => vi.fn());
+// #idea-table: ideas come from their own table, on the Ideas tab.
+const ideaCount = vi.hoisted(() => vi.fn());
+const ideaFindMany = vi.hoisted(() => vi.fn());
 const groupBy = vi.hoisted(() => vi.fn(async (_args: { by: string[]; where?: Record<string, unknown> }) => {
   void _args;
   return [];
@@ -38,7 +41,7 @@ vi.mock("@/lib/tenant-context", async (importOriginal) => ({
 }));
 vi.mock("@/lib/issue-stage", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/issue-stage")>()),
-  openIssueStages: vi.fn(async () => new Map([["bug-1", "idea"]])),
+  openIssueStages: vi.fn(async () => new Map([["bug-1", "confirming"]])),
 }));
 vi.mock("@/lib/voter-summaries", () => ({
   fetchVoterSummaries: vi.fn(async () =>
@@ -68,6 +71,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     project: { findFirst: vi.fn(async () => ({ slug: "acme-web", name: "Acme Web", goal: null })) },
     bug: { count, findMany, groupBy },
+    idea: { count: ideaCount, findMany: ideaFindMany },
     milestone: { findMany: vi.fn(async () => []) },
     projectArea: { findMany: vi.fn(async () => []) },
     user: { findUnique: vi.fn(async () => ({ keyboardShortcuts: true })) },
@@ -100,6 +104,18 @@ const BUG = {
   _count: { comments: 3, attachments: 1 },
 };
 
+const IDEA = {
+  id: "idea-1",
+  number: 12,
+  title: "Export activity as CSV",
+  score: 2,
+  projectId: "project-acme",
+  createdAt: new Date("2026-10-02T10:00:00Z"),
+  reporter: { name: "Rita Reporter" },
+  category: { name: "Web" },
+  _count: { verdicts: 3 },
+};
+
 async function renderList(params: Record<string, string> = {}) {
   const page = (await BugsPage({ searchParams: Promise.resolve(params) })) as ReactElement;
   return renderToStaticMarkup(page);
@@ -109,6 +125,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   count.mockResolvedValue(1);
   findMany.mockResolvedValue([BUG]);
+  ideaCount.mockResolvedValue(4);
+  ideaFindMany.mockResolvedValue([IDEA]);
 });
 
 describe("issue list layout", () => {
@@ -173,17 +191,22 @@ describe("issue list layout", () => {
     expect(html).not.toContain("No issues yet");
   });
 
-  it("shows an idea's verdict score in place of the upvote button (#idea-verdicts)", async () => {
-    findMany.mockResolvedValue([{ ...BUG, projectId: "project-acme", convertedToIssueAt: null, ideaScore: 2 }]);
-    const html = await renderList();
-    expect(html).toContain('data-testid="idea-score-badge"');
+  it("lists ideas on their own tab, from the Idea table, with their score and no upvote button (#idea-table)", async () => {
+    const html = await renderList({ status: "ideas" });
+    expect(ideaFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ tenantId: "tenant-acme", projectId: "project-acme", status: "open", isDeleted: false }),
+    }));
+    expect(html).toContain('href="/ideas/12"');
+    expect(html).toContain("Idea #12");
     expect(html).toContain('aria-label="Idea score 2 of 4"');
-    expect(html).toContain(">score<");
+    expect(html).toContain("3 verdicts");
     expect(html).not.toMatch(/click to upvote/);
+    // No issue row matches the Ideas tab.
+    expect(findMany.mock.calls.at(-1)![0].where.id).toEqual({ in: [] });
   });
 
-  it("keeps the upvote button on a converted issue", async () => {
-    findMany.mockResolvedValue([{ ...BUG, projectId: "project-acme", convertedToIssueAt: new Date(), ideaScore: 5 }]);
+  it("keeps the upvote button on an issue", async () => {
+    findMany.mockResolvedValue([{ ...BUG, projectId: "project-acme" }]);
     const html = await renderList();
     expect(html).not.toContain('data-testid="idea-score-badge"');
     expect(html).toMatch(/click to upvote/);
@@ -196,13 +219,13 @@ describe("issue list layout", () => {
   });
 
   it("still filters by ?stage= from old links (#1054)", async () => {
-    await renderList({ stage: "reported" });
+    await renderList({ stage: "confirming" });
     const listQuery = findMany.mock.calls.at(-1)![0];
     expect(listQuery.where.id).toEqual({ in: ["bug-1"] });
   });
 
   it("counts platform-tab badges and the Show-N-resolved link inside the stage filter (#626)", async () => {
-    await renderList({ stage: "reported" });
+    await renderList({ stage: "confirming" });
 
     // The platform tabs group off the post-stage snapshot: their where-clause
     // must carry the stage's row ids. (The status-tabs groupBy drops them on
@@ -326,7 +349,7 @@ describe("issue list layout", () => {
     const row = html.match(/<div class="issues-tabs-row[\s\S]*?<\/nav>/)?.[0] ?? "";
     const status = row.slice(row.indexOf('<nav aria-label="Issue status"'));
     const labels = [...status.matchAll(/<\/span>([A-Za-z ]+)<span class="issues-status-count">/g)].map((m) => m[1]);
-    expect(labels).toEqual(["Open", "In progress", "Done", "Ready to Merge", "Live", "All"]);
+    expect(labels).toEqual(["Ideas", "Open", "In progress", "Done", "Ready to Merge", "Live", "All"]);
     expect(row).toMatch(/class="issues-status-nav ml-auto/);
     const inbox = row.slice(0, row.indexOf('<nav aria-label="Issue status"'));
     expect(inbox).toMatch(/<a [^>]*href="\/issues"/);
@@ -337,16 +360,14 @@ describe("issue list layout", () => {
     expect(findMany.mock.calls.at(-1)![0].where.agentQuestions).toEqual({ some: { answeredAt: null } });
   });
 
-  it("opens the Inbox with how it works, then its lists: Need your input, Design feedback needed, New ideas, Drafted ideas", async () => {
+  it("opens the Inbox with how it works, then its lists: Need your input, Design feedback needed", async () => {
     const html = await renderList({ status: "escalated" });
     expect(html).toContain('aria-label="How the Inbox works"');
     const tabs = html.match(/<nav aria-label="Inbox lists"[\s\S]*?<\/nav>/)?.[0] ?? "";
     const labels = [...tabs.matchAll(/<a [^>]*>([A-Za-z ]+)<span/g)].map((m) => m[1]);
-    expect(labels).toEqual(["Need your input", "Design feedback needed", "New ideas", "Drafted ideas"]);
+    expect(labels).toEqual(["Need your input", "Design feedback needed"]);
     expect(tabs).toMatch(/aria-current="page"[^>]*>Need your input/);
     expect(tabs).toContain('href="/issues?inbox=design"');
-    expect(tabs).toContain('href="/issues?inbox=ideas"');
-    expect(tabs).toContain('href="/issues?inbox=drafts"');
     expect(html.indexOf('aria-label="How the Inbox works"')).toBeLessThan(html.indexOf('aria-label="Inbox lists"'));
     expect(html).not.toContain('aria-label="Filter all issues"');
   });
@@ -377,22 +398,12 @@ describe("issue list layout", () => {
     expect(html).toContain('href="/settings/agents"');
   });
 
-  it("lists issues with an open redesign under Design feedback needed, reported issues under New ideas, and drafts under Drafted ideas", async () => {
+  it("lists issues with an open redesign under Design feedback needed", async () => {
     await renderList({ status: "escalated", inbox: "design" });
-    let where = findMany.mock.calls.at(-1)![0].where;
+    const where = findMany.mock.calls.at(-1)![0].where;
     expect(where.redesigns).toEqual({ some: { status: "proposed" } });
     expect(where).not.toHaveProperty("agentQuestions");
     expect(where.status).toEqual({ in: ["open", "in_progress"] });
-
-    await renderList({ status: "escalated", inbox: "ideas" });
-    where = findMany.mock.calls.at(-1)![0].where;
-    expect(where.id).toEqual({ in: ["bug-1"] });
-    expect(where).not.toHaveProperty("agentQuestions");
-
-    await renderList({ status: "escalated", inbox: "drafts" });
-    where = findMany.mock.calls.at(-1)![0].where;
-    expect(where).not.toHaveProperty("agentQuestions");
-    expect(where.createdByAgentId).toBeNull();
   });
 
   it("drops the Inbox list choice when moving to another tab", async () => {
@@ -526,8 +537,9 @@ describe("issue list layout", () => {
     const counts = Object.fromEntries(
       [...nav.matchAll(/<\/span>([A-Za-z ]+)<span class="issues-status-count">(\d+)<\/span>/g)].map((m) => [m[1], Number(m[2])]),
     );
-    // In progress = 5 - 1 waiting to merge - 2 tested. Done = the 2 tested fixes.
-    expect(counts).toEqual({ Open: 9, "In progress": 2, Done: 2, "Ready to Merge": 2, Live: 3, All: 24 });
+    // In progress = 5 - 1 waiting to merge - 2 tested. Done = the 2 tested fixes (Ziki #713).
+    // Ideas are not issues, so their tab is outside the All total (#idea-table).
+    expect(counts).toEqual({ Ideas: 4, Open: 9, "In progress": 2, Done: 2, "Ready to Merge": 2, Live: 3, All: 24 });
     // The other 6 are closed (3) or were resolved without a merge (3): they stay under All only.
     expect(counts.All - (counts.Open + counts["In progress"] + counts.Done + counts["Ready to Merge"] + counts.Live)).toBe(6);
   });

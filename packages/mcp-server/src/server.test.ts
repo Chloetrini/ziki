@@ -40,13 +40,13 @@ describe("tools over MCP", () => {
 
   it("lists issues with filters and the bearer key", async () => {
     fetchMock.mockResolvedValueOnce(json({ items: [{ id: "i1" }], nextCursor: null }));
-    const result = await call("ziki_list_issues", { status: "open", area: "none", stage: "reported", limit: 10 });
+    const result = await call("ziki_list_issues", { status: "open", area: "none", stage: "confirming", limit: 10 });
     const { url, init } = sent();
     expect(url.pathname).toBe("/api/v1/issues");
     expect(Object.fromEntries(url.searchParams)).toEqual({
       status: "open",
       area: "none",
-      stage: "reported",
+      stage: "confirming",
       limit: "10",
       projectId: "proj_1",
     });
@@ -83,8 +83,8 @@ describe("tools over MCP", () => {
     }
   });
 
-  it("creates an issue without sending fields the route rejects", async () => {
-    await call("ziki_create_issue", { title: "Bug title", description: "Steps to reproduce it" });
+  it("files an idea without sending fields the route rejects", async () => {
+    await call("ziki_create_idea", { title: "Bug title", description: "Steps to reproduce it" });
     expect(JSON.parse(sent().init.body as string)).toEqual({ title: "Bug title", description: "Steps to reproduce it" });
     expect((sent().init.headers as Record<string, string>)["Idempotency-Key"]).toBeTruthy();
   });

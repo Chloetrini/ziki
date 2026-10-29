@@ -58,7 +58,6 @@ export function IssueRowStatus({
   status,
   stage,
   botConfirmations,
-  idea,
   work,
   reviewStatus,
   mergePath,
@@ -66,8 +65,6 @@ export function IssueRowStatus({
   status: string;
   stage: IssueStage | undefined;
   botConfirmations: number;
-  /** An idea's net verdict score and the project's threshold (#idea-verdicts). */
-  idea?: { score: number; threshold: number | null } | null;
   work: IssueRowWork | null;
   reviewStatus?: string | null;
   /** Where the merged fix has got to; null or absent before it merges. */
@@ -164,35 +161,35 @@ export function IssueRowStatus({
       </span>
     );
   }
-  if (stage === "idea") {
-    const score = idea ? (idea.threshold === null ? `${idea.score}` : `${idea.score}/${idea.threshold}`) : null;
-    // At the threshold a manager agent can convert it: say so plainly, in green.
-    if (idea && idea.threshold !== null && idea.score >= idea.threshold) {
-      return (
-        <span
-          className="issue-row-status inline-flex items-center gap-1 font-semibold text-zk-ok-fg"
-          title={`Score ${idea.score} of ${idea.threshold}: a manager agent can convert it to an issue`}
-        >
-          <CheckCircleIcon /> Ready to convert{" "}
-          <span className="tabular-nums font-normal">
-            ({score})<span className="sr-only"> score</span>
-          </span>
-        </span>
-      );
-    }
+  return <span className="issue-row-status inline-flex items-center gap-1 text-zk-text2">Open</span>;
+}
+
+/** An idea's row status (#idea-table): its score, and "Ready to convert" once it reaches the threshold. */
+export function IdeaRowStatus({ score, threshold }: { score: number; threshold: number | null }) {
+  const text = threshold === null ? `${score}` : `${score}/${threshold}`;
+  // At the threshold a manager agent can convert it: say so plainly, in green.
+  if (threshold !== null && score >= threshold) {
     return (
       <span
-        className="issue-row-status inline-flex items-center gap-1 text-zk-text2"
-        title={idea ? `Score ${idea.score}${idea.threshold === null ? "" : ` of ${idea.threshold}`}` : undefined}
+        className="issue-row-status inline-flex items-center gap-1 font-semibold text-zk-ok-fg"
+        title={`Score ${score} of ${threshold}: a manager agent can convert it to an issue`}
       >
-        <span className="text-amber-400"><BulbIcon /></span> Idea
-        {score ? (
-          <span className="tabular-nums">
-            ({score})<span className="sr-only"> score</span>
-          </span>
-        ) : null}
+        <CheckCircleIcon /> Ready to convert{" "}
+        <span className="tabular-nums font-normal">
+          ({text})<span className="sr-only"> score</span>
+        </span>
       </span>
     );
   }
-  return <span className="issue-row-status inline-flex items-center gap-1 text-zk-text2">Open</span>;
+  return (
+    <span
+      className="issue-row-status inline-flex items-center gap-1 text-zk-text2"
+      title={`Score ${score}${threshold === null ? "" : ` of ${threshold}`}`}
+    >
+      <span className="text-amber-400"><BulbIcon /></span> Idea
+      <span className="tabular-nums">
+        ({text})<span className="sr-only"> score</span>
+      </span>
+    </span>
+  );
 }

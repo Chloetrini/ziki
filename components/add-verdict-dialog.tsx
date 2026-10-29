@@ -11,11 +11,11 @@ type Opinion = "good" | "bad" | "neutral";
  * verdict" and opens with your verdict filled in. It closes itself on save.
  */
 export function AddVerdictDialog({
-  bugId,
+  ideaId,
   summaryMaxChars,
   mine,
 }: {
-  bugId: string;
+  ideaId: string;
   summaryMaxChars: number;
   /** The viewer's current verdict, when they have given one. */
   mine: { opinion: Opinion; summary: string; description: string } | null;
@@ -62,7 +62,7 @@ export function AddVerdictDialog({
           <h2 className="m-0 mb-4 text-base font-bold text-zk-text">{label}</h2>
           {open ? (
             <IdeaVerdictForm
-              bugId={bugId}
+              ideaId={ideaId}
               summaryMaxChars={summaryMaxChars}
               initialOpinion={mine?.opinion ?? null}
               initialSummary={mine?.summary ?? ""}

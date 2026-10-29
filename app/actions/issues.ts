@@ -12,7 +12,6 @@ import {
   categoryChangedSummary,
   commentedSummary,
   commentPreview,
-  createdSummary,
   deletedSummary,
   restoredSummary,
   severityChangedSummary,
@@ -70,7 +69,6 @@ import {
   TICKET_EDIT_ERRORS,
 } from "@/lib/ticket-editing";
 import { Prisma, type ActivityType } from "@prisma/client";
-import { isBugNumberConflict, repairBugNumberSequence } from "@/lib/bug-number";
 import { notifyLater } from "@/lib/notify";
 import { ensureWatching } from "@/lib/watch";
 import { parseResolutionNote } from "@/lib/resolution-note";
@@ -106,7 +104,7 @@ import {
   mentionedAgents,
   type MentionedAgent,
 } from "@/lib/agent-mentions";
-import { issuePath } from "@/lib/issue-ref";
+import { ideaPath } from "@/lib/issue-ref";
 
 export type ActionResult = {
   error?: string;
@@ -185,14 +183,16 @@ async function requireUserId() {
   return resolved.userId;
 }
 
-/** Creates a bug as the signed-in user; only admins may set severity/assignee. */
+/**
+ * Files a report as the signed-in user. Every report is an idea
+ * (#idea-table): it takes verdicts until a manager agent converts it, which
+ * creates the issue. Ideas have no severity and no assignee.
+ */
 export async function createBugAction(
   formData: FormData,
 ): Promise<ActionResult> {
   const user = await requireUser();
   const userId = user.id;
-  const access = await currentTenantAccess(userId, user.role);
-  const admin = access.admin;
 
   const limit = await consumeRateLimit(
     `create-bug:${userId}`,
@@ -200,28 +200,6 @@ export async function createBugAction(
   );
   if (!limit.allowed) {
     return { error: RATE_LIMIT_MESSAGE };
-  }
-
-  const rawAssignee = formData.get("assigneeId");
-  const targetAssigneeId =
-    rawAssignee === "" || rawAssignee === "unassigned" || rawAssignee === null || rawAssignee === undefined
-      ? null
-      : typeof rawAssignee === "string"
-        ? rawAssignee.trim()
-        : null;
-
-  if (targetAssigneeId) {
-    if (
-      !canAssignTicket({
-        actorId: userId,
-        actorRole: user.role,
-        membershipRole: access.membershipRole,
-        currentAssigneeId: null,
-        targetAssigneeId,
-      })
-    ) {
-      return { error: TICKET_ASSIGN_ERRORS.unauthorized };
-    }
   }
 
   // Auto-generate title from description if omitted or blank (for simplified report intake)
@@ -238,13 +216,12 @@ export async function createBugAction(
     }
   }
 
-  // Non-admins cannot set severity at creation; assignee validated above.
   const parsed = createBugSchema.safeParse({
     title: titleStr,
     description: formData.get("description"),
-    severity: admin ? formData.get("severity") || "medium" : "medium",
+    severity: "medium",
     typeId: formData.get("typeId") || "",
-    assigneeId: targetAssigneeId || "",
+    assigneeId: "",
     categoryId: formData.get("categoryId") || "",
     areaId: formData.get("areaId") || "",
     proofLinks: formData.get("proofLinks") || "",
@@ -254,31 +231,16 @@ export async function createBugAction(
     return fromZodError(parsed.error);
   }
 
-  const assigneeId =
-    parsed.data.assigneeId && parsed.data.assigneeId.length > 0
-      ? parsed.data.assigneeId
-      : null;
-
   const typeId =
     parsed.data.typeId && parsed.data.typeId.length > 0
       ? parsed.data.typeId
       : null;
 
-  // #425: the issue goes into the reporter's tenant. No membership, no issue.
+  // #425: the idea goes into the reporter's tenant. No membership, no idea.
   const tenantId = await currentTenantIdFor(userId);
   const projectId = tenantId ? await defaultProjectIdFor(prisma, tenantId) : null;
   if (!tenantId || !projectId) {
     return { error: NO_TENANT_MESSAGE };
-  }
-
-  if (assigneeId) {
-    const assignee = await prisma.user.findFirst({
-      where: { id: assigneeId, memberships: { some: { tenantId } } },
-      select: { id: true },
-    });
-    if (!assignee) {
-      return fieldError("assigneeId", "Assignee not found in this workspace");
-    }
   }
 
   if (typeId) {
@@ -299,7 +261,7 @@ export async function createBugAction(
   const areaId = parsed.data.areaId && parsed.data.areaId.length > 0
     ? parsed.data.areaId
     : null;
-  // #502: mentions resolve only to members of the issue's tenant.
+  // #502: mentions resolve only to members of the idea's tenant.
   const description = await resolveTenantMentions(prisma, tenantId, parsed.data.description);
 
   if (categoryId) {
@@ -320,114 +282,61 @@ export async function createBugAction(
     if (!area) return fieldError("areaId", "Area not found in this project.");
   }
 
-  // Always open at creation — createBugSchema rejects client status.
-  const issueData = {
-    tenantId,
-    projectId,
-    beneficiaryUserId: userId,
-    title: parsed.data.title,
-    description,
-    severity: admin ? parsed.data.severity : "medium",
-    status: "open" as const,
-    voteCount: 0,
-    typeId,
-    proofLinks: parsed.data.proofLinks,
-    reporterId: userId,
-    assigneeId,
-    categoryId,
-    areaId,
-    // Reporter and assignee watch the issue from the start (#216).
-    watches: {
-      create: [...new Set([userId, assigneeId].filter((id): id is string => Boolean(id)))].map(
-        (watcherId) => ({ userId: watcherId }),
-      ),
-    },
-    activities: {
-      create: {
-        actorId: userId,
-        type: "created" as const,
-        summary: createdSummary(parsed.data.title),
-        metadata: {
-          field: "title",
-          to: parsed.data.title,
-        } as Prisma.InputJsonValue,
-      },
-    },
-  };
-
-  let bug;
+  let idea: { id: string; number: number };
   try {
-    bug = await prisma.bug.create({ data: issueData });
+    idea = await prisma.$transaction(async (tx) => {
+      const created = await tx.idea.create({
+        data: {
+          tenantId,
+          projectId,
+          beneficiaryUserId: userId,
+          reporterId: userId,
+          title: parsed.data.title,
+          description,
+          typeId,
+          proofLinks: parsed.data.proofLinks,
+          categoryId,
+          areaId,
+        },
+        select: { id: true, number: true },
+      });
+      // Files uploaded while writing the report (#215), and images pasted
+      // or dropped into the description (#305).
+      await linkAttachments(tx, {
+        ids: [
+          ...new Set([
+            ...parseAttachmentIds(formData.get("attachmentIds")),
+            ...attachmentIdsInMarkdown(description),
+          ]),
+        ],
+        uploaderId: userId,
+        ideaId: created.id,
+      });
+      // #600 / #534: agents hear about ideas people file.
+      await publish(tx, {
+        tenantId,
+        type: "idea.created",
+        projectId,
+        payload: {
+          ideaId: created.id,
+          ideaNumber: created.number,
+          projectId,
+          reporterId: userId,
+          beneficiaryUserId: userId,
+          isReport,
+          actor: { kind: "user", id: userId, name: user.name ?? null },
+        },
+      });
+      return created;
+    });
   } catch (error) {
     const foreignKey = foreignKeyError(error);
     if (foreignKey) return { error: foreignKey };
-    // The issue-number sequence can sit behind MAX(number) and then every
-    // create hits a unique violation, which the form shows as a 500.
-    if (isBugNumberConflict(error)) {
-      try {
-        await repairBugNumberSequence(prisma);
-        bug = await prisma.bug.create({ data: issueData });
-      } catch (retryError) {
-        const retryForeignKey = foreignKeyError(retryError);
-        if (retryForeignKey) return { error: retryForeignKey };
-        console.error("[issues] create failed after repairing the issue number", retryError);
-        return { error: "Could not save the issue. Try again." };
-      }
-    } else if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
-      return { error: "That issue could not be saved because it conflicts with an existing one. Try again." };
-    } else {
-      throw error;
-    }
+    throw error;
   }
-
-  // Files uploaded while writing the report (#215).
-  // …and images pasted or dropped into the description (#305).
-  await linkAttachments(prisma, {
-    ids: [
-      ...new Set([
-        ...parseAttachmentIds(formData.get("attachmentIds")),
-        ...attachmentIdsInMarkdown(description),
-      ]),
-    ],
-    uploaderId: userId,
-    bugId: bug.id,
-  });
-
-  // #600 / #534: agents hear about issues people file, published once with complete payload.
-  // The issue already exists, so a failed event mustn't fail the report.
-  try {
-    await publishWebEvent(prisma, {
-      bugId: bug.id,
-      type: "issue.created",
-      actorUserId: userId,
-      payload: {
-        reporterId: userId,
-        projectId,
-        beneficiaryUserId: userId,
-        isReport,
-      },
-    });
-  } catch (error) {
-    console.error("[issues] issue.created event failed", error);
-  }
-
-  const events: NotificationEvent[] = [];
-  const actor = { actorId: userId, actorName: user.name ?? "Someone", bugId: bug.id, bugTitle: bug.title };
-  const mentioned = extractMentionedUserIds(description);
-  if (mentioned.length > 0) {
-    events.push({ ...actor, kind: "mentioned", place: "description", recipientIds: mentioned });
-  }
-  if (assigneeId) {
-    events.push({ ...actor, kind: "assignee_changed", fromUserId: null, toUserId: assigneeId });
-  }
-  if (events.length > 0) notifyLater(...events);
 
   revalidatePath("/issues");
-  revalidatePath("/bugs");
-  redirect(issuePath(bug.number));
+  redirect(ideaPath(idea.number));
 }
 
 /** Updates status (assignee/admin) and severity/assignee (admin) and logs activity. */
@@ -506,12 +415,8 @@ export async function updateBugAction(
         membershipRole: access.membershipRole,
         currentAssigneeId: existing.assigneeId,
         targetAssigneeId,
-        converted: existing.convertedToIssueAt !== null,
       })
     ) {
-      if (targetAssigneeId && existing.convertedToIssueAt === null) {
-        return { error: TICKET_ASSIGN_ERRORS.needsVotes };
-      }
       return { error: TICKET_ASSIGN_ERRORS.unauthorized };
     }
   }
@@ -1427,15 +1332,10 @@ export async function addCommentAction(
       tenantId: true,
       pullRequestUrl: true,
       proofLinks: true,
-      convertedToIssueAt: true,
     },
   });
   if (!bug || bug.isDeleted) {
     return { error: "Issue not found" };
-  }
-  // #idea-verdicts: an idea takes only verdicts. Comments start once it is an issue.
-  if (!bug.convertedToIssueAt) {
-    return { error: "Ideas take verdicts, not comments. Give it a verdict: good, bad or neutral, with a summary and a description." };
   }
 
   const parentId = parsed.data.parentId;
@@ -1593,9 +1493,6 @@ export async function addCommentAction(
   return { ok: true, commentId, ...(attachedPrUrl ? { linkedPullRequestUrl: attachedPrUrl } : {}) };
 }
 
-/** Upvotes are for issues. An idea takes a verdict instead (#idea-verdicts). */
-const IDEA_UPVOTE_MESSAGE = "This is an idea, so it takes verdicts, not upvotes. Give it a verdict: good, bad or neutral.";
-
 export type ToggleVoteResult = ActionResult & {
   voted?: boolean;
   userVote?: number;
@@ -1635,14 +1532,10 @@ export async function toggleVoteAction(
 
   const bug = await prisma.bug.findUnique({
     where: { id: bugId, ...bugInTenant(await currentTenantIdFor(userId)) },
-    select: { id: true, isDeleted: true, convertedToIssueAt: true },
+    select: { id: true, isDeleted: true },
   });
   if (!bug || bug.isDeleted) {
     return { error: "Issue not found" };
-  }
-  // #idea-verdicts: an idea takes good, bad or neutral verdicts, not upvotes.
-  if (bug.convertedToIssueAt === null) {
-    return { error: IDEA_UPVOTE_MESSAGE };
   }
 
   const result = await prisma.$transaction(async (tx) => {
@@ -1953,7 +1846,6 @@ export async function selfAssignBugAction(
       title: true,
       assigneeId: true,
       isDeleted: true,
-      convertedToIssueAt: true,
       assignee: { select: { name: true } },
     },
   });
@@ -1975,12 +1867,8 @@ export async function selfAssignBugAction(
       membershipRole: (await currentTenantAccess(userId, user.role)).membershipRole,
       currentAssigneeId: existing.assigneeId,
       targetAssigneeId,
-      converted: existing.convertedToIssueAt !== null,
     })
   ) {
-    if (assign && existing.convertedToIssueAt === null) {
-      return { error: TICKET_ASSIGN_ERRORS.needsVotes };
-    }
     return { error: TICKET_ASSIGN_ERRORS.unauthorized };
   }
 

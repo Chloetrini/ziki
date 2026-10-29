@@ -8,6 +8,8 @@ import type { AgentStatus } from "@/lib/dashboard-overview";
 export type InboxAgent = {
   id: string;
   name: string;
+  /** The owner's avatar pick; null wears the automatic robot. */
+  avatar?: string | null;
   status: AgentStatus;
   activity: string;
   /** "Last 30 days: …", already worded. */
@@ -51,7 +53,7 @@ export function InboxAgents({ agents }: { agents: InboxAgent[] }) {
     <div className="flex flex-col gap-2">
       <div className="flex items-start gap-2.5" aria-live="polite">
         <span className="relative shrink-0">
-          <AgentAvatar agentId={agent.id} size={36} />
+          <AgentAvatar agentId={agent.id} avatar={agent.avatar} size={36} />
           <span
             className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-zk-surface ${STATUS_LIGHT[agent.status]} ${
               agent.status === "working" ? "motion-safe:animate-pulse" : ""

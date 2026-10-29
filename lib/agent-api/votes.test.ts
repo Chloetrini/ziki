@@ -40,12 +40,6 @@ describe("agent upvotes", () => {
     db.vote.groupBy.mockResolvedValue([{ value: 1, _count: { _all: 1 } }]);
   });
 
-  it("refuses an upvote on an idea, which takes verdicts instead", async () => {
-    db.$queryRaw.mockResolvedValue([{ id: bugId, convertedToIssueAt: null }]);
-    await expect(upvoteIssue(agent, projectId, bugId)).rejects.toMatchObject({ status: 409, body: { error: "use_idea_verdict" } });
-    expect(db.vote.create).not.toHaveBeenCalled();
-  });
-
   it("records the owner upvote once and publishes it", async () => {
     db.vote.findUnique.mockResolvedValue(null);
     db.vote.create.mockResolvedValue({ id: "vote-1" });

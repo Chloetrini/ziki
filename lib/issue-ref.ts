@@ -33,6 +33,11 @@ export function issuePath(number: number, suffix = ""): string {
   return `/issues/${number}${suffix}`;
 }
 
+/** The readable path for an idea, e.g. `/ideas/12`. Ideas are numbered apart from issues (#idea-table). */
+export function ideaPath(number: number): string {
+  return `/ideas/${number}`;
+}
+
 type Scope = { tenantId?: Prisma.BugWhereInput["tenantId"] };
 type Db = Pick<PrismaClient, "bug"> | Prisma.TransactionClient;
 

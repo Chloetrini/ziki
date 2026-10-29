@@ -29,7 +29,7 @@ export async function findClaimableIssues(
   requireLevel(agent, "working");
   const workflow = await workflowFor(projectId);
   const offerCutoff = new Date(Date.now() - workflow.offerWindowSeconds * 1000);
-  const stages = confirmations ?? await openIssueConfirmations(prisma, { tenantId: agent.tenantId, projectId, convertedToIssueAt: { not: null } });
+  const stages = confirmations ?? await openIssueConfirmations(prisma, { tenantId: agent.tenantId, projectId });
   const readyIds = [...stages].filter(([, confirmation]) => confirmation.stage === "ready").map(([id]) => id);
   if (readyIds.length === 0) return [];
 

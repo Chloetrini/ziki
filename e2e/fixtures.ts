@@ -1,5 +1,6 @@
 import { test as base, expect, type Page } from "@playwright/test";
 import { authFile, nameFor, widthOf, type Role, type Width } from "./users";
+import { e2eDb } from "./db";
 
 type Options = { as: Role | null };
 type Fixtures = { width: Width; me: string; uniq: (label: string) => string };
@@ -33,6 +34,42 @@ export async function reportIssue(page: Page, title: string, description = "Step
   // The description is the Markdown editor's textarea.
   await page.locator("#description").fill(description);
   await page.getByRole("button", { name: "Create issue" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: new RegExp(escapeRe(title)) })).toBeVisible();
+  return page.url();
+}
+
+/**
+ * Reports an idea and converts it to an issue straight in the database, as a
+ * manager agent would once its verdicts reach the threshold (#idea-table),
+ * then opens the issue. Returns the issue's URL.
+ */
+export async function fileIssue(page: Page, title: string) {
+  const ideaUrl = await reportIssue(page, title);
+  const ideaNumber = Number(new URL(ideaUrl).pathname.split("/").pop());
+  const prisma = e2eDb();
+  let issueNumber: number;
+  try {
+    issueNumber = await prisma.$transaction(async (tx) => {
+      const idea = await tx.idea.findFirstOrThrow({ where: { number: ideaNumber, title } });
+      const issue = await tx.bug.create({
+        data: {
+          tenantId: idea.tenantId,
+          projectId: idea.projectId,
+          title: idea.title,
+          description: idea.description,
+          reporterId: idea.reporterId,
+          beneficiaryUserId: idea.beneficiaryUserId,
+          watches: { create: { userId: idea.reporterId } },
+        },
+        select: { id: true, number: true },
+      });
+      await tx.idea.update({ where: { id: idea.id }, data: { status: "converted", convertedAt: new Date(), issueId: issue.id } });
+      return issue.number;
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+  await page.goto(`/issues/${issueNumber}`);
   await expect(page.getByRole("heading", { level: 1, name: new RegExp(escapeRe(title)) })).toBeVisible();
   return page.url();
 }

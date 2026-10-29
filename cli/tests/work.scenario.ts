@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { readKeyring } from "../keyring";
-import { confirm, fileIssue, offeredTo, ok, refused, toIssue, ziki, type Agent } from "./helpers";
+import { confirm, fileIdea, fileIssue, offeredTo, ok, refused, ziki, type Agent } from "./helpers";
 
-type Item = { kind: string; key: string; minimumRole: string; canAct: boolean; blockedReason?: string; points?: number; issue?: { id: string }; actions: { name: string; cli: string }[] };
+type Item = { kind: string; key: string; minimumRole: string; canAct: boolean; blockedReason?: string; points?: number; issue?: { id: string }; idea?: { id: string }; actions: { name: string; cli: string }[] };
 
 /** The one work list every agent watches: `/<project-slug>/work`, or `pnpm ziki work`. */
 describe("the work feed", () => {
@@ -15,10 +15,10 @@ describe("the work feed", () => {
   });
 
   const work = async (agent: Agent) => (await ok(agent, "work")) as { items: Item[]; ask: string[]; workUrl: string; pollAfterSeconds: number; agent: { level: string } };
-  const itemFor = (items: Item[], kind: string, issueId: string) => items.find((item) => item.kind === kind && item.issue?.id === issueId);
-  const ideaPoints = async (agent: Agent, issueId: string) =>
-    ((await ok(agent, "list-point-entries", { limit: 100 })).items as { role: string; points: number; issue: { id: string } | null }[])
-      .filter((entry) => entry.role === "idea" && entry.issue?.id === issueId)
+  const itemFor = (items: Item[], kind: string, id: string) => items.find((item) => item.kind === kind && (item.issue?.id ?? item.idea?.id) === id);
+  const ideaPoints = async (agent: Agent, ideaId: string) =>
+    ((await ok(agent, "list-point-entries", { limit: 100 })).items as { role: string; points: number; idea: { id: string } | null }[])
+      .filter((entry) => entry.role === "idea" && entry.idea?.id === ideaId)
       .reduce((sum, entry) => sum + entry.points, 0);
 
   it("is what a connecting agent is told to watch", async () => {
@@ -44,7 +44,7 @@ describe("the work feed", () => {
   });
 
   it("shows a new idea at once, asks for a verdict, and leaves it out of the reporter's own list", async () => {
-    const idea = await fileIssue("ada", "Work feed: an idea for verdicts");
+    const idea = await fileIdea("ada", "Work feed: an idea for verdicts");
     const bobs = await work("bob");
     const item = itemFor(bobs.items, "idea", idea);
     expect(item, "the new idea is in bob's list straight away").toBeTruthy();
@@ -54,10 +54,10 @@ describe("the work feed", () => {
     expect(itemFor((await work("ada")).items, "idea", idea)).toBeUndefined();
   });
 
-  it("pays 1 point for the first verdict on an idea, once per person; plain comments are refused", async () => {
-    const idea = await fileIssue("ada", "Work feed: an idea worth one point");
-    // An idea takes only verdicts: a plain comment is refused.
-    expect((await refused("bob", "comment", { id: idea, body: "A plain comment on an idea." }, 409)).error).toBe("use_idea_verdict");
+  it("pays 1 point for the first verdict on an idea, once per person; an idea is not an issue to comment on", async () => {
+    const idea = await fileIdea("ada", "Work feed: an idea worth one point");
+    // An idea takes only verdicts: there is no issue to comment on.
+    await refused("bob", "comment", { id: idea, body: "A plain comment on an idea." }, 404);
     expect(await ideaPoints("bob", idea)).toBe(0);
     await ok("bob", "give-idea-verdict", { id: idea, opinion: "good", summary: "It keeps the draft.", description: "The current flow loses the draft on reload." });
     expect(await ideaPoints("bob", idea)).toBe(1);
@@ -67,7 +67,7 @@ describe("the work feed", () => {
   });
 
   it("asks managers to convert an idea at the threshold, then lists it to confirm", async () => {
-    const idea = await fileIssue("ada", "Work feed: an idea to convert");
+    const idea = await fileIdea("ada", "Work feed: an idea to convert");
     await ok("bob", "give-idea-verdict", { id: idea, opinion: "good", summary: "Yes.", description: "Good idea." });
     expect(itemFor((await work("dana")).items, "convert_idea", idea), "below the threshold, nothing to convert").toBeUndefined();
     await ok("eli", "give-idea-verdict", { id: idea, opinion: "good", votes: 2, summary: "Yes. Clear win.", description: "A merger agent may give up to 5." });
@@ -76,15 +76,14 @@ describe("the work feed", () => {
     const forDana = itemFor((await work("dana")).items, "convert_idea", idea);
     expect(forDana).toMatchObject({ canAct: true });
     expect((await work("dana")).ask.join(" ")).toMatch(/convert/);
-    await ok("dana", "convert-idea", { id: idea });
-    const confirmItem = itemFor((await work("cara")).items, "confirm_issue", idea);
+    const { issueId } = await ok("dana", "convert-idea", { id: idea });
+    const confirmItem = itemFor((await work("cara")).items, "confirm_issue", issueId);
     expect(confirmItem?.actions.map((action) => action.name)).toEqual(["validate_issue", "check_duplicate"]);
     expect(itemFor((await work("cara")).items, "idea", idea)).toBeUndefined();
   });
 
   it("lists offers to the agent and then its claim, with what to do next", async () => {
-    const issue = await fileIssue("ada", "Work feed: an issue to offer");
-    await toIssue(issue, ["bob", "cara", "eli"]);
+    const issue = await fileIssue("ada", "Work feed: an issue to offer", ["bob", "cara", "eli"]);
     await confirm(issue, ["bob", "cara"], "dana");
 
     // A confirmed issue is listed to take; it is offered once an agent asks.

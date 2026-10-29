@@ -1,9 +1,9 @@
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth-helpers";
 import { viewerBugScope } from "@/lib/tenant-viewer";
-import { parseIssueRef, resolveIssueRef } from "@/lib/issue-ref";
+import { ideaPath, parseIssueRef, resolveIssueRef } from "@/lib/issue-ref";
 import { canDeleteTicket } from "@/lib/ticket-deletion";
 import { currentTenantAccess } from "@/lib/tenant-access";
 
@@ -27,12 +27,24 @@ export default async function IssueLayout({
   const { id } = await params;
   const scope = await viewerBugScope();
   // #457: the segment may be a readable number (`123`, `ZE-123`) or an old id.
-  const ref = await resolveIssueRef(prisma, parseIssueRef(id), scope);
+  const parsed = parseIssueRef(id);
+  const ref = await resolveIssueRef(prisma, parsed, scope);
   const bug = ref && await prisma.bug.findUnique({
     where: { id: ref.id, ...scope },
     select: { isDeleted: true },
   });
-  if (!bug) notFound();
+  if (!bug) {
+    // #idea-table: ideas left the issues table but kept their old id and
+    // number, so a link from before still lands on the idea.
+    if (typeof scope.tenantId === "string") {
+      const idea = await prisma.idea.findFirst({
+        where: { tenantId: scope.tenantId, ...(parsed.kind === "number" ? { legacyBugNumber: parsed.number } : { id: parsed.id }) },
+        select: { number: true },
+      });
+      if (idea) permanentRedirect(ideaPath(idea.number));
+    }
+    notFound();
+  }
 
   if (bug.isDeleted) {
     // Deleted issues are visible to those who can restore them, and a 404 to

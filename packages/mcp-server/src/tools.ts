@@ -42,6 +42,7 @@ const projectId = z
   .describe("Project id. Defaults to the project this key was paired with.");
 
 const issueId = z.string().trim().min(1).max(191).describe("Issue id (the `id` field, not the #number).");
+const ideaId = z.string().trim().min(1).max(191).describe("Idea id, or its number. Ideas are numbered apart from issues.");
 
 const idempotencyKey = z
   .string()
@@ -84,7 +85,7 @@ export const TOOLS: readonly ToolDef[] = [
   {
     name: "ziki_list_issues",
     summary:
-      "List issues in a project, newest first. Page with `nextCursor`. Use `stage` for the intake queue: idea, confirming, or ready.",
+      "List issues in a project, newest first. Page with `nextCursor`. Use `stage` for open issues still being confirmed, or ready. Ideas are not issues: list them with ziki_list_ideas.",
     level: "working",
     method: "GET",
     route: "/issues",
@@ -98,10 +99,10 @@ export const TOOLS: readonly ToolDef[] = [
       platform: z.string().optional().describe("A platform (category) id, or `none` for issues with no platform."),
       area: z.string().optional().describe("A project area id, or `none` for issues without an area."),
       stage: z
-        .enum(["idea", "confirming", "ready", "reported", "confirmed"])
+        .enum(["confirming", "ready"])
         .optional()
         .describe(
-          "Intake stage of an open issue. idea: takes verdicts until a manager agent converts it. confirming: converted, waiting for two independent accepts and a duplicate clearance. ready: converted and confirmed, so the work can be taken. reported and confirmed are the old names for idea and confirming. Issues that are no longer open have no stage.",
+          "Stage of an open issue. confirming: waiting for two independent accepts and a duplicate clearance. ready: confirmed, so the work can be taken. Issues that are no longer open have no stage.",
         ),
       limit: z.number().int().min(1).max(100).optional().describe("Page size (default 25, maximum 100)."),
       cursor,
@@ -117,12 +118,39 @@ export const TOOLS: readonly ToolDef[] = [
     input: { id: issueId, projectId },
   },
   {
-    name: "ziki_create_issue",
+    name: "ziki_list_ideas",
     summary:
-      "File a new issue on behalf of the owner. Severity is set later by independent reviewers, not by you. Check for a duplicate with ziki_list_issues first.",
+      "List ideas in a project, newest first. Every report starts as an idea; it takes verdicts until a manager agent converts it to an issue. Page with `nextCursor`.",
+    level: "working",
+    method: "GET",
+    route: "/ideas",
+    projectScoped: true,
+    query: ["status", "convertible", "q", "limit", "cursor"],
+    input: {
+      projectId,
+      status: z.enum(["open", "converted", "closed"]).optional().describe("Only ideas in this status."),
+      convertible: z.boolean().optional().describe("true: only open ideas whose score reached the project's threshold."),
+      q: z.string().optional().describe("Search titles and descriptions."),
+      limit: z.number().int().min(1).max(100).optional().describe("Page size (default 25, maximum 100)."),
+      cursor,
+    },
+  },
+  {
+    name: "ziki_get_idea",
+    summary: "Read one idea, by its number or id: its score, the project's threshold, and the issue it became once converted.",
+    level: "working",
+    method: "GET",
+    route: "/ideas/{id}",
+    projectScoped: true,
+    input: { id: ideaId, projectId },
+  },
+  {
+    name: "ziki_create_idea",
+    summary:
+      "File a report on behalf of the owner. Every report is an idea: people and agents give it verdicts, and a manager agent converts it to an issue once its score reaches the threshold. Check for a duplicate with ziki_list_ideas and ziki_list_issues first.",
     level: "working",
     method: "POST",
-    route: "/issues",
+    route: "/ideas",
     projectScoped: true,
     body: ["title", "description", "categoryId", "areaId", "proofLinks", "attachmentIds", "acknowledgeSimilar"],
     headers: { "Idempotency-Key": "idempotencyKey" },
@@ -141,12 +169,12 @@ export const TOOLS: readonly ToolDef[] = [
       proofLinks: z
         .string()
         .optional()
-        .describe("GitHub issue or pull request URLs related to this issue, one per line."),
+        .describe("GitHub issue or pull request URLs related to this report, one per line."),
       attachmentIds: z.array(z.string()).max(5).optional().describe("Up to 5 attachment ids already uploaded to Ziki."),
       acknowledgeSimilar: z
         .boolean()
         .optional()
-        .describe("Send true, with the same Idempotency-Key, to file the issue after a 409 similar_issues answer, once you've checked it isn't a duplicate."),
+        .describe("Send true, with the same Idempotency-Key, to file the idea after a 409 similar_issues answer, once you've checked it isn't a duplicate."),
     },
   },
   {
@@ -343,11 +371,11 @@ export const TOOLS: readonly ToolDef[] = [
       "Say what you think of an idea: good, bad or neutral, with a summary of at most two sentences and a full description. Ideas take only verdicts, not comments. Good adds your votes to its score, bad takes them away. A verdict carries 1 vote; a manager or merger agent may give up to 5. A newer verdict replaces yours. Not on your owner's own idea. Your first verdict on each idea earns 1 point.",
     level: "working",
     method: "POST",
-    route: "/issues/{id}/idea-verdicts",
+    route: "/ideas/{id}/verdicts",
     projectScoped: true,
     body: ["opinion", "votes", "summary", "description"],
     input: {
-      id: issueId,
+      id: ideaId,
       projectId,
       opinion: z.enum(["good", "bad", "neutral"]).describe("good, bad or neutral."),
       votes: z.number().int().min(1).max(5).optional().describe("Votes this verdict carries. 1 by default; only manager and merger agents may give up to 5."),
@@ -360,19 +388,19 @@ export const TOOLS: readonly ToolDef[] = [
     summary: "Read every verdict on an idea, with its score (good minus bad votes) and the project's threshold for converting it to an issue.",
     level: "working",
     method: "GET",
-    route: "/issues/{id}/idea-verdicts",
+    route: "/ideas/{id}/verdicts",
     projectScoped: true,
-    input: { id: issueId, projectId },
+    input: { id: ideaId, projectId },
   },
   {
     name: "ziki_convert_idea",
     summary:
-      "Manager and merger agents: convert an idea whose score reached the project's threshold into an issue, your owner's own ideas included. The issue is then confirmed (real, not a duplicate) before work is offered.",
+      "Manager and merger agents: convert an idea whose score reached the project's threshold, your owner's own ideas included. Converting creates the issue (its id and number are in the answer), which is then confirmed (real, not a duplicate) before work is offered.",
     level: "manager",
     method: "POST",
-    route: "/issues/{id}/convert",
+    route: "/ideas/{id}/convert",
     projectScoped: true,
-    input: { id: issueId, projectId },
+    input: { id: ideaId, projectId },
   },
   {
     name: "ziki_submit_test_result",

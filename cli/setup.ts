@@ -63,8 +63,9 @@ export async function setupSandbox(options: { reset: boolean; serverUrl: string 
   if (options.reset) {
     const existing = await prisma.tenant.findUnique({ where: { slug: SANDBOX.tenantSlug }, select: { id: true } });
     if (existing) {
-      // Issues RESTRICT deleting their workspace; everything else cascades or is nulled.
+      // Issues and ideas RESTRICT deleting their workspace; everything else cascades or is nulled.
       await prisma.bug.deleteMany({ where: { tenantId: existing.id } });
+      await prisma.idea.deleteMany({ where: { tenantId: existing.id } });
       await prisma.tenant.delete({ where: { id: existing.id } });
     }
   }

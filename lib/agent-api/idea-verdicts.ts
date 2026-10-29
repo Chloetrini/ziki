@@ -9,18 +9,21 @@ import { publish } from "@/lib/agent-api/events";
 import { award } from "@/lib/points/award";
 import { IDEA_CONTRIBUTION_POINTS, ideaContributionSourceKey } from "@/lib/points/rules";
 import { workflowFor } from "@/lib/workflow";
+import { parseIssueRef } from "@/lib/issue-ref";
+import { createdSummary } from "@/lib/activity-log";
 
 /**
- * The idea stage (#idea-verdicts). Each person gives an idea one verdict —
- * good, bad or neutral — with a summary of at most two sentences and a full
- * description. A verdict is all an idea takes: there are no comments on
- * ideas. Good adds its votes to the idea's score, bad takes them away,
- * neutral adds nothing. A verdict carries 1 vote; a manager or merger agent
- * may ask for up to 5. A newer verdict from the same person replaces theirs.
+ * Idea verdicts and conversion (#idea-verdicts, #idea-table). Each person
+ * gives an idea one verdict — good, bad or neutral — with a summary of at
+ * most two sentences and a full description. A verdict is all an idea takes:
+ * there are no comments on ideas. Good adds its votes to the idea's score,
+ * bad takes them away, neutral adds nothing. A verdict carries 1 vote; a
+ * manager or merger agent may ask for up to 5. A newer verdict from the same
+ * person replaces theirs.
  *
  * When the score reaches the project's `ideaThreshold`, a manager agent may
- * convert the idea to an issue. The verdicts stay with the idea: the issue is
- * then confirmed on its own.
+ * convert the idea, which creates an issue. The verdicts stay with the idea:
+ * the issue is then confirmed on its own.
  */
 
 export const IDEA_SUMMARY_MAX_CHARS = 300;
@@ -74,51 +77,60 @@ export function verdictScore(verdicts: readonly { opinion: IdeaOpinion; votes: n
 }
 
 type Tx = Prisma.TransactionClient;
+type Scope = { tenantId: string; projectId: string };
 
 type LockedIdea = {
   id: string;
+  number: number;
   tenantId: string;
   projectId: string;
   status: string;
+  score: number;
   reporterId: string;
-  beneficiaryUserId: string | null;
-  convertedToIssueAt: Date | null;
+  beneficiaryUserId: string;
   createdByOwnerId: string | null;
 };
 
-async function lockedIdea(tx: Tx, tenantId: string, projectId: string, bugId: string): Promise<LockedIdea> {
+const IDEA_NOT_FOUND = "Idea not found in this project.";
+
+/** `ref` is the idea's number or id. Locks the row for the rest of the transaction. */
+async function lockedIdea(tx: Tx, scope: Scope, ref: string): Promise<LockedIdea> {
+  const parsed = parseIssueRef(ref);
+  const byNumber = parsed.kind === "number" ? parsed.number : null;
+  const byId = parsed.kind === "id" ? parsed.id : null;
   const rows = await tx.$queryRaw<LockedIdea[]>`
-    SELECT b."id", b."tenantId", b."projectId", b."status"::text AS "status", b."reporterId",
-           b."beneficiaryUserId", b."convertedToIssueAt", a."ownerUserId" AS "createdByOwnerId"
-    FROM "Bug" b
-    LEFT JOIN "Agent" a ON a."id" = b."createdByAgentId"
-    WHERE b."id" = ${bugId}
-      AND b."tenantId" = ${tenantId}
-      AND b."projectId" = ${projectId}
-      AND b."isDeleted" = false
-    FOR NO KEY UPDATE OF b
+    SELECT i."id", i."number", i."tenantId", i."projectId", i."status"::text AS "status", i."score",
+           i."reporterId", i."beneficiaryUserId", a."ownerUserId" AS "createdByOwnerId"
+    FROM "Idea" i
+    LEFT JOIN "Agent" a ON a."id" = i."createdByAgentId"
+    WHERE i."tenantId" = ${scope.tenantId}
+      AND i."projectId" = ${scope.projectId}
+      AND i."isDeleted" = false
+      AND (i."id" = ${byId} OR i."number" = ${byNumber})
+    FOR NO KEY UPDATE OF i
   `;
-  if (!rows.length) throw new IssueApiError(404, "Issue not found in this project.");
+  if (!rows.length) throw new IssueApiError(404, IDEA_NOT_FOUND);
   return rows[0];
 }
 
-/** The idea's owner can't give it a verdict or convert it: independence is by owner. */
+/** The idea's owner can't give it a verdict: independence is by owner. */
 function ownsIdea(idea: LockedIdea, userId: string): boolean {
   return idea.reporterId === userId || idea.beneficiaryUserId === userId || idea.createdByOwnerId === userId;
 }
 
 function assertOpenIdea(idea: LockedIdea): void {
-  if (idea.convertedToIssueAt) {
-    throw new IssueApiError(409, "This is an issue now. Idea verdicts only apply to ideas.", { error: "not_an_idea", message: "This is an issue now. Idea verdicts only apply to ideas." });
+  if (idea.status === "converted") {
+    const message = "This idea is an issue now. Verdicts only apply to open ideas.";
+    throw new IssueApiError(409, message, { error: "idea_converted", message });
   }
   if (idea.status !== "open") throw new IssueApiError(409, "This idea is closed.", { error: "idea_closed", message: "This idea is closed." });
 }
 
-async function rescore(tx: Tx, bugId: string): Promise<number> {
-  const verdicts = await tx.ideaVerdict.findMany({ where: { bugId }, select: { opinion: true, votes: true } });
-  const ideaScore = verdictScore(verdicts);
-  await tx.bug.update({ where: { id: bugId }, data: { ideaScore } });
-  return ideaScore;
+async function rescore(tx: Tx, ideaId: string): Promise<number> {
+  const verdicts = await tx.ideaVerdict.findMany({ where: { ideaId }, select: { opinion: true, votes: true } });
+  const score = verdictScore(verdicts);
+  await tx.idea.update({ where: { id: ideaId }, data: { score } });
+  return score;
 }
 
 export type GivenVerdict = {
@@ -132,11 +144,11 @@ export type GivenVerdict = {
   pointsAwarded: number;
 };
 
-/** Records `giver`'s verdict on an idea, replacing any earlier one of theirs. */
+/** Records `giver`'s verdict on an idea (by number or id), replacing any earlier one of theirs. */
 export async function giveIdeaVerdict(
   giver: VerdictGiver,
   projectId: string,
-  bugId: string,
+  ideaRef: string,
   input: IdeaVerdictInput,
 ): Promise<GivenVerdict> {
   const votes = input.votes ?? 1;
@@ -151,14 +163,14 @@ export async function giveIdeaVerdict(
   const { ideaThreshold } = await workflowFor(projectId);
 
   return prisma.$transaction(async (tx) => {
-    const idea = await lockedIdea(tx, giver.tenantId, projectId, bugId);
+    const idea = await lockedIdea(tx, { tenantId: giver.tenantId, projectId }, ideaRef);
     assertOpenIdea(idea);
     if (ownsIdea(idea, giver.userId)) {
       throw new IssueApiError(403, "You can't give a verdict on your own idea.", { error: "own_idea", message: "You can't give a verdict on your own idea." });
     }
-
+    const ideaId = idea.id;
     const existing = await tx.ideaVerdict.findUnique({
-      where: { bugId_onBehalfOfUserId: { bugId, onBehalfOfUserId: giver.userId } },
+      where: { ideaId_onBehalfOfUserId: { ideaId, onBehalfOfUserId: giver.userId } },
       select: { id: true },
     });
     const data = {
@@ -169,22 +181,22 @@ export async function giveIdeaVerdict(
       description: input.description,
     };
     const verdict = await tx.ideaVerdict.upsert({
-      where: { bugId_onBehalfOfUserId: { bugId, onBehalfOfUserId: giver.userId } },
-      create: { bugId, onBehalfOfUserId: giver.userId, ...data },
+      where: { ideaId_onBehalfOfUserId: { ideaId, onBehalfOfUserId: giver.userId } },
+      create: { ideaId, onBehalfOfUserId: giver.userId, ...data },
       update: data,
       select: { id: true, opinion: true, votes: true, summary: true, description: true },
     });
-    const ideaScore = await rescore(tx, bugId);
-    await tx.bug.update({ where: { id: bugId }, data: { updatedAt: new Date() } });
+    const ideaScore = await rescore(tx, ideaId);
 
     // The first verdict on each idea earns the person a point; the key makes a replacement free.
     const paid = await award(tx, {
       tenantId: giver.tenantId,
       userId: giver.userId,
-      bugId,
+      bugId: null,
+      ideaId,
       role: "idea",
       points: IDEA_CONTRIBUTION_POINTS,
-      sourceKey: ideaContributionSourceKey(bugId, giver.userId),
+      sourceKey: ideaContributionSourceKey(ideaId, giver.userId),
     });
 
     const convertible = ideaScore >= ideaThreshold;
@@ -192,9 +204,10 @@ export async function giveIdeaVerdict(
       tenantId: giver.tenantId,
       type: "idea.verdict",
       actorAgentId: giver.agent?.id ?? null,
-      bugId,
+      projectId,
       payload: {
-        issueId: bugId,
+        ideaId,
+        ideaNumber: idea.number,
         projectId,
         userId: giver.userId,
         opinion: input.opinion,
@@ -210,17 +223,18 @@ export async function giveIdeaVerdict(
   });
 }
 
-/** Every verdict on an idea, newest first, with the score and threshold. */
-export async function listIdeaVerdicts(scope: { tenantId: string; projectId: string }, bugId: string) {
-  const bug = await prisma.bug.findFirst({
-    where: { id: bugId, tenantId: scope.tenantId, projectId: scope.projectId, isDeleted: false },
-    select: { id: true, ideaScore: true, convertedToIssueAt: true, status: true },
+/** Every verdict on an idea (by number or id), newest first, with the score and threshold. */
+export async function listIdeaVerdicts(scope: Scope, ideaRef: string) {
+  const parsed = parseIssueRef(ideaRef);
+  const idea = await prisma.idea.findFirst({
+    where: { ...scope, isDeleted: false, ...(parsed.kind === "number" ? { number: parsed.number } : { id: parsed.id }) },
+    select: { id: true, number: true, score: true, status: true },
   });
-  if (!bug) throw new IssueApiError(404, "Issue not found in this project.");
+  if (!idea) throw new IssueApiError(404, IDEA_NOT_FOUND);
   const [{ ideaThreshold }, verdicts] = await Promise.all([
     workflowFor(scope.projectId),
     prisma.ideaVerdict.findMany({
-      where: { bugId },
+      where: { ideaId: idea.id },
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
       select: {
         id: true,
@@ -240,44 +254,99 @@ export async function listIdeaVerdicts(scope: { tenantId: string; projectId: str
   const counts = { good: 0, bad: 0, neutral: 0 };
   for (const verdict of verdicts) counts[verdict.opinion] += verdict.votes;
   return {
-    idea: bug.convertedToIssueAt === null,
-    ideaScore: bug.ideaScore,
+    ideaId: idea.id,
+    ideaNumber: idea.number,
+    status: idea.status,
+    ideaScore: idea.score,
     ideaThreshold,
-    convertible: bug.status === "open" && bug.convertedToIssueAt === null && bug.ideaScore >= ideaThreshold,
+    convertible: idea.status === "open" && idea.score >= ideaThreshold,
     votes: counts,
     verdicts: verdicts.map(({ onBehalfOf, agent, ...verdict }) => ({ ...verdict, by: onBehalfOf.name, agentName: agent?.name ?? null })),
   };
 }
 
 /**
- * A manager agent turns an idea whose score reached the threshold into an
- * issue, its owner's own ideas included: the verdicts already came from
- * other people. The issue then needs confirming.
+ * A manager agent converts an idea whose score reached the threshold, its
+ * owner's own ideas included: the verdicts already came from other people.
+ * Converting creates the issue from the idea's report and files; the issue
+ * then needs confirming.
  */
-export async function convertIdea(agent: AgentContext, projectId: string, bugId: string) {
+export async function convertIdea(agent: AgentContext, projectId: string, ideaRef: string) {
   requireLevel(agent, "manager");
   const { ideaThreshold } = await workflowFor(projectId);
   const converted = await prisma.$transaction(async (tx) => {
-    const idea = await lockedIdea(tx, agent.tenantId, projectId, bugId);
-    assertOpenIdea(idea);
-    const { ideaScore } = await tx.bug.findUniqueOrThrow({ where: { id: bugId }, select: { ideaScore: true } });
-    if (ideaScore < ideaThreshold) {
-      throw new IssueApiError(409, `This idea has a score of ${ideaScore}; it needs ${ideaThreshold} before it can be converted.`, { error: "below_threshold", message: `This idea has a score of ${ideaScore}; it needs ${ideaThreshold} before it can be converted.`,
-        ideaScore,
-        ideaThreshold,
-      });
+    const locked = await lockedIdea(tx, { tenantId: agent.tenantId, projectId }, ideaRef);
+    assertOpenIdea(locked);
+    if (locked.score < ideaThreshold) {
+      const message = `This idea has a score of ${locked.score}; it needs ${ideaThreshold} before it can be converted.`;
+      throw new IssueApiError(409, message, { error: "below_threshold", message, ideaScore: locked.score, ideaThreshold });
     }
+    const idea = await tx.idea.findUniqueOrThrow({
+      where: { id: locked.id },
+      select: {
+        title: true, description: true, typeId: true, categoryId: true, areaId: true, proofLinks: true,
+        reporterId: true, beneficiaryUserId: true, createdByAgentId: true,
+      },
+    });
     const at = new Date();
-    await tx.bug.update({ where: { id: bugId }, data: { convertedToIssueAt: at, convertedByAgentId: agent.agentId, updatedAt: at } });
+    const issue = await tx.bug.create({
+      data: {
+        tenantId: agent.tenantId,
+        projectId,
+        title: idea.title,
+        description: idea.description,
+        typeId: idea.typeId,
+        categoryId: idea.categoryId,
+        areaId: idea.areaId,
+        proofLinks: idea.proofLinks,
+        reporterId: idea.reporterId,
+        beneficiaryUserId: idea.beneficiaryUserId,
+        createdByAgentId: idea.createdByAgentId,
+        status: "open",
+        watches: { create: { userId: idea.reporterId } },
+        activities: {
+          create: { actorId: idea.reporterId, type: "created", summary: createdSummary(idea.title), metadata: { fromIdea: locked.number } },
+        },
+      },
+      select: { id: true, number: true },
+    });
+    // The report's files come with it; they stay readable from the idea too.
+    await tx.attachment.updateMany({ where: { ideaId: locked.id }, data: { bugId: issue.id } });
+    await tx.idea.update({
+      where: { id: locked.id },
+      data: { status: "converted", convertedAt: at, convertedByAgentId: agent.agentId, issueId: issue.id },
+    });
     await publish(tx, {
       tenantId: agent.tenantId,
       type: "issue.converted",
       actorAgentId: agent.agentId,
-      bugId,
-      payload: { issueId: bugId, projectId, ideaScore, ideaThreshold },
+      bugId: issue.id,
+      payload: {
+        ideaId: locked.id,
+        ideaNumber: locked.number,
+        issueId: issue.id,
+        issueNumber: issue.number,
+        projectId,
+        ideaScore: locked.score,
+        ideaThreshold,
+      },
     });
-    return { issueId: bugId, convertedAt: at.toISOString(), ideaScore, ideaThreshold };
+    return {
+      ideaId: locked.id,
+      ideaNumber: locked.number,
+      issueId: issue.id,
+      issueNumber: issue.number,
+      convertedAt: at.toISOString(),
+      ideaScore: locked.score,
+      ideaThreshold,
+    };
   });
-  await audit(agent, "idea.converted", bugId, { ideaScore: converted.ideaScore, ideaThreshold: converted.ideaThreshold }, { bugId });
-  return { ...converted, stage: "confirming" as const };
+  await audit(
+    agent,
+    "idea.converted",
+    `idea:${converted.ideaId}`,
+    { issueId: converted.issueId, ideaScore: converted.ideaScore, ideaThreshold: converted.ideaThreshold },
+    { bugId: converted.issueId },
+  );
+  return converted;
 }
