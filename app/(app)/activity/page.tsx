@@ -41,7 +41,6 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
     <header className="space-y-2">
       <h1 className="text-2xl font-extrabold">Human–Agent Activity &amp; Approvals</h1>
       <p className="text-sm text-zk-text2">{data.isAdmin ? "Workspace work and activity. Private escalations are limited to your own requests." : "Your agents’ work, requests and activity in this workspace."}</p>
-      <Link className={link} href="/settings/agents">Manage agents</Link>
     </header>
     <form method="get" className={`${panel} flex flex-wrap items-end gap-3`}>
       <label className="text-sm">Issue number<input name="issue" defaultValue={filters.issue} placeholder="123" className="mt-1 block rounded-lg border border-zk-border bg-zk-bg px-3 py-2" /></label>

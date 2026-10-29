@@ -40,6 +40,8 @@ it("renders the three sections and explains different decision semantics", async
   const html = renderToStaticMarkup(await ActivityPage({ searchParams: Promise.resolve({}) }));
   for (const text of ["Needs Attention", "Work History", "Recent Activity", "do not grant pipeline approval", "not an assigned agent", "Claim state"]) expect(html).toContain(text);
   expect(html).toContain("Workspace owner or admin access is required");
+  // Agents are managed from the header's Agents menu, not a link on this page.
+  expect(html).not.toContain("Manage agents");
 });
 
 it("handles members without a workspace without showing activity", async () => {
