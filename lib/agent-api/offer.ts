@@ -293,7 +293,7 @@ export async function acceptOffer(agent: AgentContext, claimId: string) {
       await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${fresh.beneficiaryUserId} FOR UPDATE`;
       const activeClaims = await tx.issueClaim.count({ where: {
         beneficiaryUserId: fresh.beneficiaryUserId, status: "active", releasedAt: null,
-        bug: { tenantId: agent.tenantId, projectId: fresh.bug.projectId },
+        bug: { tenantId: agent.tenantId, projectId: fresh.bug.projectId, isDeleted: false },
       } });
       if (activeClaims >= workflow.maxActiveClaims) {
         await tx.issueClaim.update({ where: { id: fresh.id }, data: { status: "released", releasedAt: now, releaseReason: "capacity" } });
