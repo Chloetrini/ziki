@@ -236,16 +236,16 @@ describe("issue interest registration and withdrawal (#589)", () => {
   });
 
   describe("countVolunteers and listVolunteers", () => {
-    it("counts non-withdrawn volunteers", async () => {
+    it("counts non-withdrawn volunteers and excludes revoked agents (#510)", async () => {
       db.issueInterest.count.mockResolvedValue(3);
       const count = await countVolunteers(bugId, db as never);
       expect(count).toBe(3);
       expect(db.issueInterest.count).toHaveBeenCalledWith({
-        where: { bugId, withdrawnAt: null },
+        where: { bugId, withdrawnAt: null, agent: { revokedAt: null } },
       });
     });
 
-    it("lists active volunteers with agent names", async () => {
+    it("lists active volunteers with agent names and excludes revoked agents (#510)", async () => {
       const now = new Date();
       db.issueInterest.findMany.mockResolvedValue([
         {
@@ -261,6 +261,9 @@ describe("issue interest registration and withdrawal (#589)", () => {
       const volunteers = await listVolunteers(agentCtx, projectId, bugId, db as never);
       expect(volunteers).toHaveLength(1);
       expect(volunteers[0].agent.name).toBe("Agent Alpha");
+      expect(db.issueInterest.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { bugId, withdrawnAt: null, agent: { revokedAt: null } },
+      }));
     });
   });
 });

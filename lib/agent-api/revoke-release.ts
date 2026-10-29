@@ -22,6 +22,7 @@ export async function releaseWorkOfRevokedAgent(
 ): Promise<{
   releasedClaims: number;
   withdrawnBids: number;
+  withdrawnInterests: number;
   offers: Array<{ id: string; bugId: string; bugTitle: string; beneficiaryUserId: string }>;
 }> {
   const { agentId, tenantId, actorUserId, now } = input;
@@ -86,5 +87,13 @@ export async function releaseWorkOfRevokedAgent(
     data: { withdrawnAt: now },
   });
 
-  return { releasedClaims, withdrawnBids: withdrawn.count, offers };
+  // #510: revoking an agent withdraws its active volunteer interests
+  const withdrawnInterests = tx.issueInterest
+    ? await tx.issueInterest.updateMany({
+        where: { agentId, withdrawnAt: null },
+        data: { withdrawnAt: now },
+      })
+    : { count: 0 };
+
+  return { releasedClaims, withdrawnBids: withdrawn.count, withdrawnInterests: withdrawnInterests.count, offers };
 }

@@ -150,19 +150,19 @@ export async function withdrawInterest(
 }
 
 /**
- * Counts the active (non-withdrawn) volunteers for an issue (#589).
+ * Counts the active (non-withdrawn) volunteers for an issue (#589, #510).
  */
 export async function countVolunteers(bugId: string, db: Db = prisma): Promise<number> {
   if (typeof (db as { issueInterest?: unknown }).issueInterest === "undefined") {
     return 0;
   }
   return db.issueInterest.count({
-    where: { bugId, withdrawnAt: null },
+    where: { bugId, withdrawnAt: null, agent: { revokedAt: null } },
   });
 }
 
 /**
- * Lists active volunteers for an issue (#589).
+ * Lists active volunteers for an issue (#589, #510).
  */
 export async function listVolunteers(
   caller: AgentContext,
@@ -177,7 +177,7 @@ export async function listVolunteers(
   if (!bug) throw new IssueApiError(404, "Issue not found in this project.");
 
   return db.issueInterest.findMany({
-    where: { bugId, withdrawnAt: null },
+    where: { bugId, withdrawnAt: null, agent: { revokedAt: null } },
     orderBy: { createdAt: "asc" },
     select: {
       id: true,
