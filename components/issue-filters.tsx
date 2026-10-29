@@ -311,12 +311,16 @@ export function IssueFilters({
   const selectedNames = selectedTags.map((t) => t.name);
   const currentQuery = params.get("q") ?? "";
   const [text, setText] = useState(currentQuery);
+  const [isFocused, setIsFocused] = useState(false);
   // Follow the URL when it changes from outside (Back, a link), adjusting
   // state during render rather than in an effect.
   const [lastQuery, setLastQuery] = useState(currentQuery);
   if (currentQuery !== lastQuery) {
     setLastQuery(currentQuery);
-    setText(currentQuery);
+    // Don't overwrite newer text being typed during debounced transitions (#668).
+    if (!isFocused || text === lastQuery) {
+      setText(currentQuery);
+    }
   }
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -545,7 +549,7 @@ export function IssueFilters({
                 placeholder={compact ? "Search issues…" : "Search, or type a tag like Design"}
                 className="min-w-0 flex-1 border-0 bg-transparent text-sm text-zk-text outline-none placeholder:text-zk-muted"
                 onChange={(event) => { setText(event.target.value); setOpen(true); setActive(-1); }}
-                onFocus={() => { queryBeforeEditingRef.current = currentQuery; livePushedRef.current = false; setOpen(true); }}
+                onFocus={() => { setIsFocused(true); queryBeforeEditingRef.current = currentQuery; livePushedRef.current = false; setOpen(true); }}
                 onKeyDown={(event) => {
                   if (event.key === "ArrowDown" && suggestions.length > 0) { event.preventDefault(); setActive((i) => (i + 1) % suggestions.length); }
                   else if (event.key === "ArrowUp" && suggestions.length > 0) { event.preventDefault(); setActive((i) => (i <= 0 ? suggestions.length - 1 : i - 1)); }
@@ -561,7 +565,7 @@ export function IssueFilters({
                     removeTag(selectedNames[selectedNames.length - 1]);
                   }
                 }}
-                onBlur={() => { setOpen(false); setActive(-1); }}
+                onBlur={() => { setIsFocused(false); setOpen(false); setActive(-1); }}
               />
               {!text && shortcutsEnabled ? (
                 <kbd className="hidden shrink-0 select-none rounded-md border border-zk-border px-1.5 py-0.5 text-[11px] font-bold text-zk-muted sm:inline-flex">/</kbd>

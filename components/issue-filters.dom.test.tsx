@@ -261,6 +261,22 @@ describe("IssueFilters live search (#671)", () => {
     fireEvent.click(within(screen.getByRole("listbox")).getByText("Design"));
     expect(nav.replace).toHaveBeenCalledWith("/issues?q=crash&tags=design");
   });
+
+  it("does not overwrite in-progress typed text when an earlier query lands in the URL (#668)", () => {
+    const { rerender } = render(<IssueFilters tagTypes={tagTypes} />);
+    const input = screen.getByRole("combobox", { name: "Search" });
+    input.focus();
+
+    fireEvent.change(input, { target: { value: "login" } });
+    expect(input).toHaveValue("login");
+
+    // Simulate URL updating with an earlier in-flight query "log"
+    nav.params = new URLSearchParams("q=log");
+    rerender(<IssueFilters tagTypes={tagTypes} />);
+
+    // Since input is focused and user typed "login", it must NOT be reverted to "log"
+    expect(input).toHaveValue("login");
+  });
 });
 
 describe("IssueFilters unified Filter button popover (#762)", () => {

@@ -867,8 +867,8 @@ export default async function BugsPage({
     !selectedArea &&
     !stageView;
 
-  const page = (
-    <div className="issues-page mx-auto w-full max-w-6xl space-y-5">
+  const headerContent = (
+    <>
       {gettingStarted ? <GettingStarted {...gettingStarted} /> : null}
       {activeProject?.goal ? (
         <section aria-labelledby="project-goal-heading" className="rounded-[20px] border border-zk-border bg-zk-surface px-5 py-4">
@@ -939,8 +939,11 @@ export default async function BugsPage({
           {!isDeletedView ? <NewIssueButton className={isFirstRun ? "" : "md:hidden"} /> : null}
         </div>
       </div>
+    </>
+  );
 
-      <div className="space-y-4">
+  const listContent = (
+    <div className="space-y-4">
         {/* Inbox on the left (the escalated issues, formerly the Escalated tab);
             the status tabs sit at the right of the same row. */}
         <div className="issues-tabs-row flex items-center gap-2.5">
@@ -1297,21 +1300,25 @@ export default async function BugsPage({
           </section>
         )}
       </div>
-    </div>
   );
 
-  if (!canDelete || isDeletedView) return page;
-
   return (
-    <BulkSelectionProvider
-      key={selectionKey}
-      pageIds={bugIds}
-      types={bulkTypes}
-      platforms={bulkPlatforms}
-      users={bulkUsers}
-    >
-      {page}
-    </BulkSelectionProvider>
+    <div className="issues-page mx-auto w-full max-w-6xl space-y-5">
+      {headerContent}
+      {canDelete && !isDeletedView ? (
+        <BulkSelectionProvider
+          key={selectionKey}
+          pageIds={bugIds}
+          types={bulkTypes}
+          platforms={bulkPlatforms}
+          users={bulkUsers}
+        >
+          {listContent}
+        </BulkSelectionProvider>
+      ) : (
+        listContent
+      )}
+    </div>
   );
 }
 
