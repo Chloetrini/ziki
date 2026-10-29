@@ -23,8 +23,6 @@ import {
   checksBlock,
   hasMergeConflicts,
   isPullRequestClosedUnmerged,
-  MERGE_CONFLICT_MESSAGE,
-  MERGE_CONFLICT_TODO,
   parseGitHubRepoUrl,
   parsePullRequestUrl,
   sameRepo,
@@ -33,6 +31,7 @@ import {
   type PullRequest,
 } from "@/lib/github/merge-pr";
 import { recordMistake, type RecordMistakeInput } from "@/lib/agent-api/mistakes";
+import { conflictComment, MERGE_CONFLICT_MESSAGE } from "@/lib/agent-api/merge-conflict";
 import { notifyMergeFailed } from "@/lib/agent-notifications";
 import {
   MERGE_BLOCKED,
@@ -78,7 +77,7 @@ const mergeBugSelect = {
       agentId: true,
       beneficiaryUserId: true,
       dispatcherUserId: true,
-      agent: { select: { ownerUserId: true } },
+      agent: { select: { ownerUserId: true, name: true } },
     },
   },
 } satisfies Prisma.BugSelect;
@@ -117,7 +116,8 @@ export type AcceptFixResult =
         | "deployment_verification"
         | "github_merge_failed"
         | "github_app"
-        | "review_threads";
+        | "review_threads"
+        | "merge_conflict";
       message: string;
     };
 
@@ -355,10 +355,9 @@ export async function acceptFix(
   if (!isAdminMerge) {
     // Before a manager says yes, GitHub has to say the fix won't break the
     // code: checks green on the commit the testers approved. Nothing is
-    // accepted otherwise; a comment says why. A merge conflict does not stop
-    // the accept: the merger resolves it before merging, and the accept
-    // comment says so.
-    const { block, conflicts } = await acceptCheck(githubClientFor(bug, deps), ref, acceptedHeadSha);
+    // accepted otherwise; a comment says why. A merge conflict is not the
+    // manager's business: the merger escalates it to its owner at merge time.
+    const block = await acceptCheck(githubClientFor(bug, deps), ref, acceptedHeadSha);
     if (block) {
       await recordAcceptBlocked(prisma, { agent, bug, reason: block.message, todo: block.todo });
       return { status: 409 as const, error: "not_ready" as const, missing: block.missing, message: block.message };
@@ -369,9 +368,7 @@ export async function acceptFix(
         where: { id: bug.id },
         data: { reviewStatus: "ready_to_merge" },
       });
-      const acceptCommentBody = conflicts
-        ? `Fix accepted by merger agent. Status changed to ready to merge. ${MERGE_CONFLICT_MESSAGE} It does not block the accept: the merger resolves it before merging. What to do: ${MERGE_CONFLICT_TODO}`
-        : "Fix accepted by merger agent. Status changed to ready to merge.";
+      const acceptCommentBody = "Fix accepted by merger agent. Status changed to ready to merge.";
       await tx.comment.create({
         data: {
           bugId: bug.id,
@@ -448,7 +445,7 @@ export async function acceptFix(
   // issue says exactly where it is. None of them resolves it or pays points.
   const stop = async (
     status: MergeOutcomeStatus,
-    missing: "pull_request" | "deployment_verification" | "github_merge_failed" | "github_app" | "review_threads",
+    missing: "pull_request" | "deployment_verification" | "github_merge_failed" | "github_app" | "review_threads" | "merge_conflict",
     message: string,
     todo?: string,
   ) => {
@@ -495,11 +492,23 @@ export async function acceptFix(
     );
   }
 
-  // 2. A conflict with the base branch is the merger's job to resolve, not a
-  // reason to turn the fix away: the merge waits as merge_blocked and the
-  // comment says how to resolve it.
+  // 2. A conflict with the base branch is for the fix's author to resolve. The
+  // merger neither resolves it nor merges around it: it says so on the issue
+  // and tells the author, and the merge waits for a new commit.
   if (hasMergeConflicts(pullRequest)) {
-    return stop(MERGE_BLOCKED, "pull_request", MERGE_CONFLICT_MESSAGE, MERGE_CONFLICT_TODO);
+    const author = claim?.agent.name ?? "the agent that delivered this fix";
+    const recipient = claim?.beneficiaryUserId ?? bug.assigneeId ?? null;
+    if (recipient) {
+      notifyMergeFailed({
+        bugId: bug.id,
+        bugTitle: bug.title,
+        recipientId: recipient,
+        reason: MERGE_CONFLICT_MESSAGE,
+        agent: { name: agent.name },
+      });
+    }
+    const note = conflictComment(author);
+    return stop(MERGE_BLOCKED, "merge_conflict", note.reason, note.todo);
   }
 
   // 3. The fix must not break the code: every check on the head commit green.
@@ -710,53 +719,44 @@ function githubClientFor(bug: LoadedBug, deps: AcceptFixDeps): GitHubClient | nu
 /**
  * What stops a manager from accepting a fix: GitHub can't be asked, the pull
  * request moved after the testers approved it, or its checks are not green.
- * `block` is null when the fix is safe to accept. `conflicts` says the pull
- * request conflicts with its base branch, which the merger resolves later.
+ * Null when the fix is safe to accept. The manager only judges the code; a
+ * merge conflict is the merger's to escalate.
  */
 async function acceptCheck(
   client: GitHubClient | null,
   ref: ReturnType<typeof parsePullRequestUrl>,
   acceptedHeadSha: string | null,
-): Promise<{
-  block: { missing: "pull_request" | "deployment_verification" | "github_app"; message: string; todo: string } | null;
-  conflicts: boolean;
-}> {
-  const blocked = (
-    missing: "pull_request" | "deployment_verification" | "github_app",
-    message: string,
-    todo: string,
-  ) => ({ block: { missing, message, todo }, conflicts: false });
+): Promise<{ missing: "pull_request" | "deployment_verification" | "github_app"; message: string; todo: string } | null> {
   if (!client) {
-    return blocked(
-      "github_app",
-      "The GitHub App is not set up for this project, so Ziki can't check that the fix won't break the code.",
-      GITHUB_APP_TODO,
-    );
+    return {
+      missing: "github_app",
+      message: "The GitHub App is not set up for this project, so Ziki can't check that the fix won't break the code.",
+      todo: GITHUB_APP_TODO,
+    };
   }
   if (!ref) {
-    return blocked(
-      "pull_request",
-      "The linked address is not a GitHub pull request, so Ziki can't check it.",
-      "Link the pull request again with its GitHub address (POST /issues/{id}/github).",
-    );
+    return {
+      missing: "pull_request",
+      message: "The linked address is not a GitHub pull request, so Ziki can't check it.",
+      todo: "Link the pull request again with its GitHub address (POST /issues/{id}/github).",
+    };
   }
   let pullRequest: PullRequest;
   try {
     pullRequest = await client.getPullRequest(ref);
   } catch {
-    return blocked(
-      "deployment_verification",
-      "GitHub could not be reached to check the pull request.",
-      "Nothing is wrong with the fix. Try accepting again in a few minutes.",
-    );
+    return {
+      missing: "deployment_verification",
+      message: "GitHub could not be reached to check the pull request.",
+      todo: "Nothing is wrong with the fix. Try accepting again in a few minutes.",
+    };
   }
   if (pullRequest.headSha && acceptedHeadSha && pullRequest.headSha !== acceptedHeadSha) {
-    return blocked(
-      "pull_request",
-      "The pull request's head commit changed after the testers approved it.",
-      "Testers check the new commit and report again. Then a manager can accept it.",
-    );
+    return {
+      missing: "pull_request",
+      message: "The pull request's head commit changed after the testers approved it.",
+      todo: "Testers check the new commit and report again. Then a manager can accept it.",
+    };
   }
-  const block = await checksBlock(client, ref, acceptedHeadSha || pullRequest.headSha);
-  return { block, conflicts: !block && hasMergeConflicts(pullRequest) };
+  return checksBlock(client, ref, acceptedHeadSha || pullRequest.headSha);
 }
