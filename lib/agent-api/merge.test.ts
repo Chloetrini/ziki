@@ -498,7 +498,7 @@ describe("acceptFix: a successful accept (#434)", () => {
     expect(reviewerAwards[1].points).toBeLessThan(reviewerAwards[0].points);
   });
 
-  it("merger accepts fix and marks ready to merge without resolving or awarding points", async () => {
+  it("merger accepts fix and marks resolved and ready to merge without awarding points", async () => {
     confirmWith("rob", "sam");
     verdict("r1", "rob");
     verdict("r2", "sam");
@@ -510,8 +510,8 @@ describe("acceptFix: a successful accept (#434)", () => {
         bugId: "bug1",
         actorId: "mo",
         type: "status_changed",
-        summary: "Fix accepted by merger agent and marked ready to merge",
-        metadata: { field: "status", readyToMerge: true, headSha: "linked-sha" },
+        summary: "Fix accepted by merger agent and marked resolved and ready to merge",
+        metadata: { field: "status", status: "resolved", readyToMerge: true, headSha: "linked-sha" },
       },
     });
   });
