@@ -23,6 +23,7 @@ test("triage changes stick after saving and reloading", async ({ page, uniq, me 
   await expect(page.locator("#severity")).toHaveValue("high");
   // Saving triage leaves the status where it was.
   await expect(page.locator("#status")).toHaveValue("open");
-  await expect(page.getByRole("region", { name: "Status" }).getByText("Open")).toBeVisible();
+  // "Open" is both the status chip and the stage there, so take the first exact match.
+  await expect(page.getByRole("region", { name: "Status" }).getByText("Open", { exact: true }).first()).toBeVisible();
   await expect(page.getByText(me).filter({ visible: true }).first()).toBeVisible();
 });
