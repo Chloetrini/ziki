@@ -6,7 +6,7 @@ import { ProjectNotesLink } from "@/components/project-notes-link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { severities, statuses } from "@/lib/validations/issue";
 import { severityLabel, statusLabel } from "@/lib/labels";
-import { FINISHED_STATUS_FILTER } from "@/lib/issue-state";
+import { FINISHED_STATUS_FILTER, statusFilterLabel } from "@/lib/issue-state";
 import {
   BUG_SORT_OPTIONS,
   bugSortLabels,
@@ -765,7 +765,7 @@ export function IssueFilters({
           ) : null}
           {params.get("status") ? (
             <span className="inline-flex items-center gap-1 rounded-full border border-transparent bg-zk-ok-bg py-0.5 pl-2.5 pr-1.5 text-xs font-bold text-zk-ok-fg">
-              Status: {params.get("status") === FINISHED_STATUS_FILTER ? "Closed (incl. resolved)" : statusLabel[params.get("status") as keyof typeof statusLabel] ?? params.get("status")}
+              Status: {statusFilterLabel(params.get("status") ?? "")}
               <button type="button" onClick={() => update("status", "")} aria-label="Remove status filter" className="ml-0.5 rounded-full p-0.5 hover:bg-zk-chip">✕</button>
             </span>
           ) : null}

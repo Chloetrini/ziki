@@ -71,6 +71,19 @@ describe("Issues compact toolbar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close filters" }));
     expect(screen.queryByRole("dialog", { name: "Filters" })).not.toBeInTheDocument();
   });
+
+  it.each([
+    ["open", "Open"],
+    ["in_progress", "In progress"],
+    ["resolved", "Done"],
+    ["ready_to_merge", "Ready to Merge"],
+    ["auto_merge", "Live"],
+    ["all", "All"],
+  ])("names the %s status chip like its tab", (status, label) => {
+    nav.params = new URLSearchParams(`status=${status}&severity=high`);
+    render(<IssueFilters compact />);
+    expect(screen.getByText(`Status: ${label}`)).toBeInTheDocument();
+  });
 });
 
 const tagTypes = [
