@@ -100,6 +100,7 @@ beforeEach(() => {
     reporterId: "carol",
     assigneeId: null,
     tenantId: "tenant-zedu",
+    convertedToIssueAt: new Date("2026-10-19T13:00:00Z"),
   });
 });
 
@@ -114,6 +115,13 @@ describe("addCommentAction (#502)", () => {
     const mentioned = events.find((event) => event.kind === "mentioned");
     expect(mentioned).toMatchObject({ recipientIds: [bob] });
     expect(JSON.stringify(events)).not.toContain(dave);
+  });
+
+  it("refuses a comment on an idea, which takes only verdicts (#idea-verdicts)", async () => {
+    db.bug.findUnique.mockResolvedValueOnce({ id: "bug-1", isDeleted: false, title: "An idea", reporterId: "carol", assigneeId: null, tenantId: "tenant-zedu", convertedToIssueAt: null });
+    const result = await addCommentAction("bug-1", form({ body: "A plain comment" }));
+    expect(result).toEqual({ error: expect.stringContaining("Ideas take verdicts") });
+    expect(db.__tx.comment.create).not.toHaveBeenCalled();
   });
 
   it("sends no mention at all when the only tag is outside the tenant", async () => {

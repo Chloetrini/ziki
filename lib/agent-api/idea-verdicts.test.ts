@@ -4,7 +4,6 @@ import type { AgentContext } from "@/lib/agents/require-agent";
 const db = vi.hoisted(() => ({
   $transaction: vi.fn(),
   $queryRaw: vi.fn(),
-  comment: { create: vi.fn() },
   ideaVerdict: { findUnique: vi.fn(), upsert: vi.fn(), findMany: vi.fn() },
   bug: { update: vi.fn(), findUniqueOrThrow: vi.fn() },
   pointEntry: { createMany: vi.fn() },
@@ -30,14 +29,13 @@ const idea = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-const input = { opinion: "good" as const, summary: "Useful. It saves a click.", comment: "The activity list is long; an icon would keep the page short." };
+const input = { opinion: "good" as const, summary: "Useful. It saves a click.", description: "The activity list is long; an icon would keep the page short." };
 const person = { tenantId: "t1", userId: "bob" };
 
 beforeEach(() => {
   vi.clearAllMocks();
   db.$transaction.mockImplementation((run: (tx: unknown) => unknown) => run(db));
   db.$queryRaw.mockResolvedValue([idea()]);
-  db.comment.create.mockResolvedValue({ id: "c1" });
   db.ideaVerdict.findUnique.mockResolvedValue(null);
   db.ideaVerdict.upsert.mockImplementation(async ({ create }: { create: Record<string, unknown> }) => ({ id: "v1", ...create }));
   db.ideaVerdict.findMany.mockResolvedValue([{ opinion: "good", votes: 1 }]);
@@ -51,7 +49,10 @@ describe("the verdict rules", () => {
     expect(sentenceCount("Version 2.5 is fine.")).toBe(1);
     expect(ideaVerdictSchema.safeParse({ ...input, summary: "One. Two. Three." }).success).toBe(false);
     expect(ideaVerdictSchema.safeParse({ ...input, summary: "x".repeat(301) }).success).toBe(false);
-    expect(ideaVerdictSchema.safeParse({ ...input, comment: " " }).success).toBe(false);
+    expect(ideaVerdictSchema.safeParse({ ...input, description: " " }).success).toBe(false);
+    // `comment` was the description's first name; agents that still send it keep working.
+    const { description, ...withoutDescription } = input;
+    expect(ideaVerdictSchema.parse({ ...withoutDescription, comment: description })).toMatchObject({ description });
     expect(ideaVerdictSchema.safeParse({ ...input, opinion: "great" }).success).toBe(false);
   });
 
@@ -68,9 +69,11 @@ describe("the verdict rules", () => {
 });
 
 describe("giveIdeaVerdict", () => {
-  it("posts the comment, records the verdict, rescores and pays the first point", async () => {
+  it("records the verdict with its description, posts no comment, rescores and pays the first point", async () => {
     const result = await giveIdeaVerdict(person, "p1", "b1", input);
-    expect(db.comment.create).toHaveBeenCalledWith({ data: { bugId: "b1", authorId: "bob", agentId: null, body: input.comment }, select: { id: true } });
+    expect(db.ideaVerdict.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ opinion: "good", summary: input.summary, description: input.description }),
+    }));
     expect(db.bug.update).toHaveBeenCalledWith({ where: { id: "b1" }, data: { ideaScore: 1 } });
     expect(db.pointEntry.createMany).toHaveBeenCalledWith({
       data: [expect.objectContaining({ userId: "bob", role: "idea", points: 1, sourceKey: "idea:b1:bob" })],

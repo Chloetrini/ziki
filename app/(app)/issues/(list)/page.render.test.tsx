@@ -501,25 +501,43 @@ describe("issue list layout", () => {
   });
 
   it("splits All across the status tabs: Open + In progress + Done + Ready to Merge + Live = All", async () => {
-    groupBy.mockImplementation((async (args: { by: string[] }) =>
-      args.by[0] === "status"
-        ? [
-            { status: "open", _count: { _all: 9 } },
-            { status: "in_progress", _count: { _all: 5 } },
-            { status: "resolved", _count: { _all: 7 } },
-            { status: "closed", _count: { _all: 3 } },
-          ]
-        : []) as never);
+    groupBy.mockImplementation((async (args: { by: string[]; where?: { reviewStatus?: string } }) =>
+      args.by[0] !== "status"
+        ? []
+        : args.where?.reviewStatus === "ready_to_merge"
+          // Accepted fixes keep their status: one is still in progress, one was resolved.
+          ? [
+              { status: "in_progress", _count: { _all: 1 } },
+              { status: "resolved", _count: { _all: 1 } },
+            ]
+          : [
+              { status: "open", _count: { _all: 9 } },
+              { status: "in_progress", _count: { _all: 5 } },
+              { status: "resolved", _count: { _all: 7 } },
+              { status: "closed", _count: { _all: 3 } },
+            ]) as never);
     count.mockImplementation((async (args: { where?: { reviewStatus?: string } }) =>
-      args?.where?.reviewStatus === "ready_to_merge" ? 2 : args?.where?.reviewStatus === "merged" ? 3 : 0) as never);
+      args?.where?.reviewStatus === "merged" ? 3 : 0) as never);
     const html = await renderList({ status: "all" });
     const nav = html.match(/<nav aria-label="Issue status"[\s\S]*?<\/nav>/)?.[0] ?? "";
     const counts = Object.fromEntries(
       [...nav.matchAll(/<\/span>([A-Za-z ]+)<span class="issues-status-count">(\d+)<\/span>/g)].map((m) => [m[1], Number(m[2])]),
     );
-    // Done = resolved 7 + closed 3 - ready to merge 2 - live 3.
-    expect(counts).toEqual({ Open: 9, "In progress": 5, Done: 5, "Ready to Merge": 2, Live: 3, All: 24 });
+    // In progress = 5 - 1 waiting to merge. Done = resolved 7 + closed 3 - 1 waiting to merge - live 3.
+    expect(counts).toEqual({ Open: 9, "In progress": 4, Done: 6, "Ready to Merge": 2, Live: 3, All: 24 });
     expect(counts.Open + counts["In progress"] + counts.Done + counts["Ready to Merge"] + counts.Live).toBe(counts.All);
+  });
+
+  it("lists an accepted fix on Ready to Merge whatever its status, and keeps it off Open and In progress", async () => {
+    await renderList({ status: "ready_to_merge" });
+    expect(findMany.mock.calls.at(-1)![0].where).toMatchObject({
+      status: { in: ["open", "in_progress", "resolved"] },
+      reviewStatus: "ready_to_merge",
+    });
+    await renderList({ status: "in_progress" });
+    expect(findMany.mock.calls.at(-1)![0].where.AND).toEqual([
+      { OR: [{ reviewStatus: null }, { reviewStatus: { not: "ready_to_merge" } }] },
+    ]);
   });
 
   it("shows the vote count once and no proof-link count in rows (#1060)", async () => {

@@ -126,7 +126,11 @@ const REJECTED_STATUS = "rejected";
 const REJECTED_WHERE = { some: { kind: "real", verdict: "reject" } } satisfies Prisma.IssueValidationListRelationFilter;
 /** `?status=duplicate`: marked as a duplicate of another issue. */
 const DUPLICATE_STATUS = "duplicate";
-/** `?status=ready_to_merge`: resolved issues whose fix is ready for admin merge (#SDLC). */
+/**
+ * `?status=ready_to_merge`: accepted fixes waiting for a merger agent (#SDLC).
+ * Accepting a fix leaves the issue open or in progress, so the tab takes any
+ * status but closed, and Open and In progress leave these out.
+ */
 const READY_TO_MERGE_STATUS = "ready_to_merge";
 /** `?status=auto_merge`: resolved issues whose fix is live — merged to dev, staging, main/production (#SDLC). */
 const AUTO_MERGE_STATUS = "auto_merge";
@@ -137,6 +141,8 @@ const AUTO_MERGE_STATUS = "auto_merge";
  */
 const DONE_STATUS = "resolved";
 const MERGE_STAGES = ["ready_to_merge", "merged"];
+/** Statuses an accepted fix can have while it waits to be merged. */
+const READY_TO_MERGE_STATUSES = ["open", "in_progress", "resolved"] as const;
 const NOT_MERGE_STAGE_WHERE = {
   OR: [{ reviewStatus: null }, { reviewStatus: { notIn: MERGE_STAGES } }],
 } satisfies Prisma.BugWhereInput;
@@ -347,6 +353,10 @@ export default async function BugsPage({
   const hidesResolved = statusParam === ESCALATED_STATUS && !isDeletedView && !showResolved;
   if (statusWhere !== undefined) {
     where.status = statusWhere;
+    // An accepted fix waiting to be merged is on the Ready to Merge tab instead.
+    if ((statusParam === "open" || statusParam === "in_progress") && !isDeletedView) {
+      where.AND = [{ OR: [{ reviewStatus: null }, { reviewStatus: { not: "ready_to_merge" } }] }];
+    }
   } else if (hidesResolved) {
     where.status = defaultStatusWhere(false);
   }
@@ -373,7 +383,7 @@ export default async function BugsPage({
     where.duplicateOfId = { not: null };
   }
   if (statusParam === READY_TO_MERGE_STATUS && !isDeletedView) {
-    where.status = "resolved";
+    where.status = { in: [...READY_TO_MERGE_STATUSES] };
     where.reviewStatus = "ready_to_merge";
   }
   if (statusParam === AUTO_MERGE_STATUS && !isDeletedView) {
@@ -803,7 +813,7 @@ export default async function BugsPage({
   const confirmingCount = [...stages.values()].filter((stage) => stage === "confirming").length;
   const readyCount = [...stages.values()].filter((stage) => stage === "ready").length;
 
-  const [statusCounts, escalatedCount, rejectedCount, duplicateCount, readyToMergeCount, liveCount] = isDeletedView || !tenantId ? [[], 0, 0, 0, 0, 0] : await Promise.all([
+  const [statusCounts, escalatedCount, rejectedCount, duplicateCount, readyToMergeByStatus, liveCount] = isDeletedView || !tenantId ? [[], 0, 0, 0, [], 0] : await Promise.all([
     loadOrEmpty("status tabs", () => prisma.bug.groupBy({
       by: ["status"], where: statusTabWhere, _count: { _all: true },
     }), []),
@@ -816,17 +826,24 @@ export default async function BugsPage({
     loadOrEmpty("duplicate filter", () => prisma.bug.count({
       where: { ...statusTabWhere, duplicateOfId: { not: null } },
     }), 0),
-    loadOrEmpty("ready to merge tab", () => prisma.bug.count({
-      where: { ...statusTabWhere, status: "resolved", reviewStatus: "ready_to_merge" },
-    }), 0),
+    loadOrEmpty("ready to merge tab", () => prisma.bug.groupBy({
+      by: ["status"],
+      where: { ...statusTabWhere, status: { in: [...READY_TO_MERGE_STATUSES] }, reviewStatus: "ready_to_merge" },
+      _count: { _all: true },
+    }), []),
     loadOrEmpty("live tab", () => prisma.bug.count({
       where: { ...statusTabWhere, status: "resolved", reviewStatus: "merged" },
     }), 0),
   ]);
-  const countForStatus = (status: string) => statusCounts.find((row) => row.status === status)?._count._all ?? 0;
+  const readyToMergeFor = (status: string) => readyToMergeByStatus.find((row) => row.status === status)?._count._all ?? 0;
+  const readyToMergeCount = READY_TO_MERGE_STATUSES.reduce((sum, status) => sum + readyToMergeFor(status), 0);
+  // Open and In progress leave out what waits on the Ready to Merge tab, so the tabs never overlap.
+  const countForStatus = (status: string) =>
+    (statusCounts.find((row) => row.status === status)?._count._all ?? 0) -
+    (status === "open" || status === "in_progress" ? readyToMergeFor(status) : 0);
   const allCount = statusCounts.reduce((sum, row) => sum + row._count._all, 0);
-  // Ready to Merge and Live are resolved issues, so Done leaves them out.
-  const doneCount = countForStatus("resolved") + countForStatus("closed") - readyToMergeCount - liveCount;
+  // Done leaves out the resolved issues on Ready to Merge and Live.
+  const doneCount = countForStatus("resolved") + countForStatus("closed") - readyToMergeFor("resolved") - liveCount;
   const tabCount = (value: string) =>
     value === ALL_STATUS ? allCount
       : value === DONE_STATUS ? doneCount

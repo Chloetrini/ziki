@@ -442,6 +442,7 @@ export async function commentOnAgentIssue(agent: AgentContext, request: NextRequ
     assigneeId: string | null;
     pullRequestUrl: string | null;
     proofLinks: string[];
+    convertedToIssueAt: Date | null;
   } & ReviewedBug) | null = null;
   let parentAuthorId: string | null = null;
   const comment = await prisma.$transaction(async (tx) => {
@@ -449,12 +450,16 @@ export async function commentOnAgentIssue(agent: AgentContext, request: NextRequ
       where: { ...scope, id: bugId, isDeleted: false },
       select: {
         id: true, title: true, reporterId: true, assigneeId: true, beneficiaryUserId: true,
-        pullRequestUrl: true, proofLinks: true,
+        pullRequestUrl: true, proofLinks: true, convertedToIssueAt: true,
         createdByAgent: { select: { ownerUserId: true } },
         claims: { where: { status: "active", releasedAt: null }, select: { status: true, releasedAt: true, beneficiaryUserId: true, dispatcherUserId: true, agent: { select: { ownerUserId: true } } } },
       },
     });
     if (!bug) throw new IssueApiError(404, "Issue not found.");
+    // #idea-verdicts: an idea takes only verdicts, so there is nothing to comment on until it is an issue.
+    if (!bug.convertedToIssueAt) {
+      throw new IssueApiError(409, "Ideas take verdicts, not comments. Give it a verdict: good, bad or neutral, with a summary and a description.", { error: "use_idea_verdict", message: "Ideas take verdicts, not comments. Give it a verdict: good, bad or neutral, with a summary and a description." });
+    }
     if (input.type === "review") {
       const conflict = reviewerConflict({ id: agent.agentId, ownerUserId: agent.ownerId }, bug);
       if (conflict) throw new IssueApiError(403, "not_independent", { message: new ReviewerNotIndependentError(conflict).message });

@@ -54,22 +54,23 @@ describe("the work feed", () => {
     expect(itemFor((await work("ada")).items, "idea", idea)).toBeUndefined();
   });
 
-  it("pays 1 point for the first verdict on an idea, once per person, and nothing for comments", async () => {
+  it("pays 1 point for the first verdict on an idea, once per person; plain comments are refused", async () => {
     const idea = await fileIssue("ada", "Work feed: an idea worth one point");
-    await ok("bob", "comment", { id: idea, body: "A plain comment on an idea is welcome but earns no idea point." });
+    // An idea takes only verdicts: a plain comment is refused.
+    expect((await refused("bob", "comment", { id: idea, body: "A plain comment on an idea." }, 409)).error).toBe("use_idea_verdict");
     expect(await ideaPoints("bob", idea)).toBe(0);
-    await ok("bob", "give-idea-verdict", { id: idea, opinion: "good", summary: "It keeps the draft.", comment: "The current flow loses the draft on reload." });
+    await ok("bob", "give-idea-verdict", { id: idea, opinion: "good", summary: "It keeps the draft.", description: "The current flow loses the draft on reload." });
     expect(await ideaPoints("bob", idea)).toBe(1);
-    await ok("bob", "give-idea-verdict", { id: idea, opinion: "neutral", summary: "On second thought, unsure.", comment: "Changing my verdict pays nothing more." });
+    await ok("bob", "give-idea-verdict", { id: idea, opinion: "neutral", summary: "On second thought, unsure.", description: "Changing my verdict pays nothing more." });
     expect(await ideaPoints("bob", idea)).toBe(1);
     expect(itemFor((await work("bob")).items, "idea", idea), "given a verdict, so it leaves bob's list").toBeUndefined();
   });
 
   it("asks managers to convert an idea at the threshold, then lists it to confirm", async () => {
     const idea = await fileIssue("ada", "Work feed: an idea to convert");
-    await ok("bob", "give-idea-verdict", { id: idea, opinion: "good", summary: "Yes.", comment: "Good idea." });
+    await ok("bob", "give-idea-verdict", { id: idea, opinion: "good", summary: "Yes.", description: "Good idea." });
     expect(itemFor((await work("dana")).items, "convert_idea", idea), "below the threshold, nothing to convert").toBeUndefined();
-    await ok("eli", "give-idea-verdict", { id: idea, opinion: "good", votes: 2, summary: "Yes. Clear win.", comment: "A merger agent may give up to 5." });
+    await ok("eli", "give-idea-verdict", { id: idea, opinion: "good", votes: 2, summary: "Yes. Clear win.", description: "A merger agent may give up to 5." });
     const forBob = itemFor((await work("bob")).items, "convert_idea", idea);
     expect(forBob).toMatchObject({ minimumRole: "manager", canAct: false });
     const forDana = itemFor((await work("dana")).items, "convert_idea", idea);

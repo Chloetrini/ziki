@@ -1427,10 +1427,15 @@ export async function addCommentAction(
       tenantId: true,
       pullRequestUrl: true,
       proofLinks: true,
+      convertedToIssueAt: true,
     },
   });
   if (!bug || bug.isDeleted) {
     return { error: "Issue not found" };
+  }
+  // #idea-verdicts: an idea takes only verdicts. Comments start once it is an issue.
+  if (!bug.convertedToIssueAt) {
+    return { error: "Ideas take verdicts, not comments. Give it a verdict: good, bad or neutral, with a summary and a description." };
   }
 
   const parentId = parsed.data.parentId;

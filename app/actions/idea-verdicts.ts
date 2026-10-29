@@ -20,7 +20,7 @@ export type IdeaVerdictActionResult = {
 
 /**
  * A person gives an idea their verdict from the web app (#idea-verdicts):
- * good, bad or neutral, a summary of two sentences at most, and a comment.
+ * good, bad or neutral, a summary of two sentences at most, and a full description.
  * Always one vote. A newer verdict replaces their earlier one.
  */
 export async function giveIdeaVerdictAction(
@@ -45,7 +45,7 @@ export async function giveIdeaVerdictAction(
   const parsed = ideaVerdictSchema.safeParse({
     opinion: formData.get("opinion") ?? undefined,
     summary: formData.get("summary") ?? "",
-    comment: formData.get("comment") ?? "",
+    description: formData.get("description") ?? "",
   });
   if (!parsed.success) {
     const issue = parsed.error.issues[0];

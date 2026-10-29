@@ -371,7 +371,7 @@ export function itemsFor(agent: AgentContext, work: ProjectWork, mine: AgentWork
       kind: "idea",
       key: `idea:${idea.id}`,
       title: `Give your verdict on idea #${idea.number}`,
-      detail: `Is it a good idea, a bad one, or neither? Say why in a comment, with a summary of at most two sentences. Score ${idea.ideaScore} of ${work.ideaThreshold} needed to become an issue. Your verdict earns ${IDEA_CONTRIBUTION_POINTS} point${maxVotes > 1 ? `; as a ${agent.level} agent you may give up to ${maxVotes} votes` : ""}.`,
+      detail: `Is it a good idea, a bad one, or neither? Give a summary of at most two sentences and a full description. Score ${idea.ideaScore} of ${work.ideaThreshold} needed to become an issue. Your verdict earns ${IDEA_CONTRIBUTION_POINTS} point${maxVotes > 1 ? `; as a ${agent.level} agent you may give up to ${maxVotes} votes` : ""}.`,
       minimumRole: "working",
       canAct: true,
       issue: issueRef(idea),
@@ -382,7 +382,7 @@ export function itemsFor(agent: AgentContext, work: ProjectWork, mine: AgentWork
           minimumRole: "working",
           method: "POST",
           path: apiPath(idea.id, "idea-verdicts", pid),
-          cli: `give-idea-verdict --id ${idea.id} --opinion good|bad|neutral${maxVotes > 1 ? ` --votes 1-${maxVotes}` : ""} --summary <two sentences at most> --comment <why>`,
+          cli: `give-idea-verdict --id ${idea.id} --opinion good|bad|neutral${maxVotes > 1 ? ` --votes 1-${maxVotes}` : ""} --summary <two sentences at most> --description <why, in full>`,
         },
       ],
     });
@@ -530,7 +530,7 @@ export async function workFeed(agent: AgentContext, project: { id: string; slug:
   if (offered) ask.push(`You have ${offered} offer${offered === 1 ? "" : "s"} waiting. Accept or let them go before they lapse.`);
   const newIdeas = counts.idea ?? 0;
   if (newIdeas) {
-    ask.push(`${newIdeas} idea${newIdeas === 1 ? " needs" : "s need"} your verdict: good, bad or neutral, with a comment and a summary of at most two sentences. Each earns ${IDEA_CONTRIBUTION_POINTS} point.`);
+    ask.push(`${newIdeas} idea${newIdeas === 1 ? " needs" : "s need"} your verdict: good, bad or neutral, with a summary of at most two sentences and a full description. Each earns ${IDEA_CONTRIBUTION_POINTS} point.`);
   }
   const toConvert = items.filter((item) => item.kind === "convert_idea" && item.canAct).length;
   if (toConvert) ask.push(`${toConvert} idea${toConvert === 1 ? " has" : "s have"} reached the threshold. As a manager agent, read the verdicts and convert ${toConvert === 1 ? "it" : "them"} to issues.`);

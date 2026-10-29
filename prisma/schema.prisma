@@ -1099,7 +1099,8 @@ enum IdeaOpinion {
 }
 
 /// One person's verdict on an idea: good, bad or neutral, with a short summary
-/// and a comment. Only ideas take verdicts; they do not carry over to the issue.
+/// and a full description. It is all an idea takes: ideas have no comments.
+/// Verdicts stay with the idea; they do not carry over to the issue.
 model IdeaVerdict {
   id               String      @id @default(cuid())
   bugId            String
@@ -1112,7 +1113,9 @@ model IdeaVerdict {
   votes            Int         @default(1)
   /// At most two sentences.
   summary          String
-  /// The comment posted with it. Null for verdicts migrated from upvotes.
+  /// The full reasoning behind the verdict.
+  description      String
+  /// Legacy: the comment the first version posted alongside a verdict. New verdicts leave it null.
   commentId        String?     @unique
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt

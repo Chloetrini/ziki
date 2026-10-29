@@ -8,6 +8,8 @@ describe("working on issues together", () => {
 
   beforeAll(async () => {
     id = await fileIssue("cara", "CLI collaboration: list goes blank");
+    // Comments start once an idea is an issue; ideas take only verdicts.
+    await toIssue(id, ["ada", "bob", "eli"]);
   });
 
   it("threads comments and replies, readable newest-first and from the start", async () => {
@@ -37,7 +39,6 @@ describe("working on issues together", () => {
   });
 
   it("registers, lists and withdraws interest once confirmed", async () => {
-    await toIssue(id, ["ada", "bob", "eli"]);
     await confirm(id, ["ada", "bob"], "dana");
     await ok("bob", "register-interest", { id, note: "Happy to take this." });
     expect(JSON.stringify(await ok("ada", "list-interest", { id }))).toContain("Happy to take this.");

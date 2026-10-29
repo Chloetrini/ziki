@@ -12,8 +12,9 @@ import { workflowFor } from "@/lib/workflow";
 
 /**
  * The idea stage (#idea-verdicts). Each person gives an idea one verdict —
- * good, bad or neutral — with a comment and a summary of at most two
- * sentences. Good adds its votes to the idea's score, bad takes them away,
+ * good, bad or neutral — with a summary of at most two sentences and a full
+ * description. A verdict is all an idea takes: there are no comments on
+ * ideas. Good adds its votes to the idea's score, bad takes them away,
  * neutral adds nothing. A verdict carries 1 vote; a manager or merger agent
  * may ask for up to 5. A newer verdict from the same person replaces theirs.
  *
@@ -24,7 +25,7 @@ import { workflowFor } from "@/lib/workflow";
 
 export const IDEA_SUMMARY_MAX_CHARS = 300;
 export const MAX_IDEA_VOTES = 5;
-const COMMENT_MAX_CHARS = 10_000;
+const DESCRIPTION_MAX_CHARS = 10_000;
 
 /** Sentences end in `.`, `!` or `?` followed by a space or the end. */
 export function sentenceCount(text: string): number {
@@ -33,7 +34,14 @@ export function sentenceCount(text: string): number {
 
 const id = z.string().trim().min(1).max(191);
 
-export const ideaVerdictSchema = z
+/** `comment` was the description's name in the first version; still accepted for agents that send it. */
+const descriptionAlias = (body: unknown) =>
+  body && typeof body === "object" && !Array.isArray(body) && "comment" in body && !("description" in body)
+    ? (({ comment, ...rest }) => ({ ...rest, description: comment }))(body as Record<string, unknown>)
+    : body;
+
+/** The verdict body's fields. `ideaVerdictSchema` also accepts the old `comment` name. */
+export const ideaVerdictFields = z
   .object({
     projectId: id.optional(),
     opinion: z.enum(["good", "bad", "neutral"]),
@@ -44,9 +52,11 @@ export const ideaVerdictSchema = z
       .min(1, "Add a summary.")
       .max(IDEA_SUMMARY_MAX_CHARS, `Keep the summary under ${IDEA_SUMMARY_MAX_CHARS} characters.`)
       .refine((text) => sentenceCount(text) <= 2, "Keep the summary to two sentences."),
-    comment: z.string().trim().min(1, "Add a comment explaining your verdict.").max(COMMENT_MAX_CHARS),
+    description: z.string().trim().min(1, "Add a description explaining your verdict.").max(DESCRIPTION_MAX_CHARS),
   })
   .strict();
+
+export const ideaVerdictSchema = z.preprocess(descriptionAlias, ideaVerdictFields);
 
 export type IdeaVerdictInput = z.infer<typeof ideaVerdictSchema>;
 
@@ -99,9 +109,9 @@ function ownsIdea(idea: LockedIdea, userId: string): boolean {
 
 function assertOpenIdea(idea: LockedIdea): void {
   if (idea.convertedToIssueAt) {
-    throw new IssueApiError(409, "This is an issue now. Idea verdicts only apply to ideas.", { error: "not_an_idea" });
+    throw new IssueApiError(409, "This is an issue now. Idea verdicts only apply to ideas.", { error: "not_an_idea", message: "This is an issue now. Idea verdicts only apply to ideas." });
   }
-  if (idea.status !== "open") throw new IssueApiError(409, "This idea is closed.", { error: "idea_closed" });
+  if (idea.status !== "open") throw new IssueApiError(409, "This idea is closed.", { error: "idea_closed", message: "This idea is closed." });
 }
 
 async function rescore(tx: Tx, bugId: string): Promise<number> {
@@ -112,7 +122,7 @@ async function rescore(tx: Tx, bugId: string): Promise<number> {
 }
 
 export type GivenVerdict = {
-  verdict: { id: string; opinion: IdeaOpinion; votes: number; summary: string; commentId: string | null };
+  verdict: { id: string; opinion: IdeaOpinion; votes: number; summary: string; description: string };
   ideaScore: number;
   ideaThreshold: number;
   convertible: boolean;
@@ -132,13 +142,11 @@ export async function giveIdeaVerdict(
   const votes = input.votes ?? 1;
   const allowed = maxVotesFor(giver);
   if (votes > allowed) {
-    throw new IssueApiError(
-      422,
+    const message =
       allowed === 1
         ? "A verdict carries 1 vote. Only manager and merger agents may give more."
-        : `A verdict carries at most ${allowed} votes.`,
-      { error: "too_many_votes", maxVotes: allowed },
-    );
+        : `A verdict carries at most ${allowed} votes.`;
+    throw new IssueApiError(422, message, { error: "too_many_votes", message, maxVotes: allowed });
   }
   const { ideaThreshold } = await workflowFor(projectId);
 
@@ -146,13 +154,9 @@ export async function giveIdeaVerdict(
     const idea = await lockedIdea(tx, giver.tenantId, projectId, bugId);
     assertOpenIdea(idea);
     if (ownsIdea(idea, giver.userId)) {
-      throw new IssueApiError(403, "You can't give a verdict on your own idea.", { error: "own_idea" });
+      throw new IssueApiError(403, "You can't give a verdict on your own idea.", { error: "own_idea", message: "You can't give a verdict on your own idea." });
     }
 
-    const comment = await tx.comment.create({
-      data: { bugId, authorId: giver.userId, agentId: giver.agent?.id ?? null, body: input.comment },
-      select: { id: true },
-    });
     const existing = await tx.ideaVerdict.findUnique({
       where: { bugId_onBehalfOfUserId: { bugId, onBehalfOfUserId: giver.userId } },
       select: { id: true },
@@ -162,13 +166,13 @@ export async function giveIdeaVerdict(
       opinion: input.opinion,
       votes,
       summary: input.summary,
-      commentId: comment.id,
+      description: input.description,
     };
     const verdict = await tx.ideaVerdict.upsert({
       where: { bugId_onBehalfOfUserId: { bugId, onBehalfOfUserId: giver.userId } },
       create: { bugId, onBehalfOfUserId: giver.userId, ...data },
       update: data,
-      select: { id: true, opinion: true, votes: true, summary: true, commentId: true },
+      select: { id: true, opinion: true, votes: true, summary: true, description: true },
     });
     const ideaScore = await rescore(tx, bugId);
     await tx.bug.update({ where: { id: bugId }, data: { updatedAt: new Date() } });
@@ -223,7 +227,7 @@ export async function listIdeaVerdicts(scope: { tenantId: string; projectId: str
         opinion: true,
         votes: true,
         summary: true,
-        commentId: true,
+        description: true,
         onBehalfOfUserId: true,
         agentId: true,
         createdAt: true,
@@ -256,12 +260,11 @@ export async function convertIdea(agent: AgentContext, projectId: string, bugId:
     const idea = await lockedIdea(tx, agent.tenantId, projectId, bugId);
     assertOpenIdea(idea);
     if (ownsIdea(idea, agent.ownerId)) {
-      throw new IssueApiError(403, "A manager agent can't convert its owner's own idea.", { error: "not_independent" });
+      throw new IssueApiError(403, "A manager agent can't convert its owner's own idea.", { error: "not_independent", message: "A manager agent can't convert its owner's own idea." });
     }
     const { ideaScore } = await tx.bug.findUniqueOrThrow({ where: { id: bugId }, select: { ideaScore: true } });
     if (ideaScore < ideaThreshold) {
-      throw new IssueApiError(409, `This idea has a score of ${ideaScore}; it needs ${ideaThreshold} before it can be converted.`, {
-        error: "below_threshold",
+      throw new IssueApiError(409, `This idea has a score of ${ideaScore}; it needs ${ideaThreshold} before it can be converted.`, { error: "below_threshold", message: `This idea has a score of ${ideaScore}; it needs ${ideaThreshold} before it can be converted.`,
         ideaScore,
         ideaThreshold,
       });

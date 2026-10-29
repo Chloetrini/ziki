@@ -344,12 +344,12 @@ export async function acceptFix(
 
   if (!isAdminMerge) {
     return prisma.$transaction(async (tx) => {
-      // Merger role: Accepts fix, marks resolved and ready to merge without awarding points
+      // Merger role: Accepts fix, marks ready to merge without resolving or awarding points
       await tx.bug.update({
         where: { id: bug.id },
-        data: { status: "resolved", reviewStatus: "ready_to_merge" },
+        data: { reviewStatus: "ready_to_merge" },
       });
-      const acceptCommentBody = "Fix accepted by merger agent. Status changed to resolved and ready to merge.";
+      const acceptCommentBody = "Fix accepted by merger agent. Status changed to ready to merge.";
       await tx.comment.create({
         data: {
           bugId: bug.id,
@@ -365,8 +365,8 @@ export async function acceptFix(
           bugId: bug.id,
           actorId: agent.ownerId,
           type: "status_changed",
-          summary: "Fix accepted by merger agent and marked resolved and ready to merge",
-          metadata: { field: "status", status: "resolved", readyToMerge: true, headSha: acceptedHeadSha },
+          summary: "Fix accepted by merger agent and marked ready to merge",
+          metadata: { field: "status", readyToMerge: true, headSha: acceptedHeadSha },
         },
       });
       await audit(
@@ -379,7 +379,6 @@ export async function acceptFix(
           pullRequestUrl: bug.pullRequestUrl,
           headSha: acceptedHeadSha,
           readyToMerge: true,
-          status: "resolved",
           reviewStatus: "ready_to_merge",
         },
         { bugId: bug.id, db: tx },
@@ -394,7 +393,6 @@ export async function acceptFix(
           pullRequestUrl: bug.pullRequestUrl,
           headSha: acceptedHeadSha,
           readyToMerge: true,
-          status: "resolved",
           reviewStatus: "ready_to_merge",
         },
         actorAgentId: agent.agentId,

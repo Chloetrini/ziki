@@ -25,7 +25,7 @@ import { giveIdeaVerdictAction } from "./idea-verdicts";
 
 function form(values: Record<string, string> = {}) {
   const data = new FormData();
-  const merged = { opinion: "good", summary: "Useful for new users.", comment: "I hit this every week.", ...values };
+  const merged = { opinion: "good", summary: "Useful for new users.", description: "I hit this every week.", ...values };
   for (const [key, value] of Object.entries(merged)) data.set(key, value);
   return data;
 }
@@ -43,7 +43,7 @@ describe("giveIdeaVerdictAction (#idea-verdicts)", () => {
     expect(giveIdeaVerdict).toHaveBeenCalledWith({ tenantId: "tenant-1", userId: "ada" }, "project-1", "bug-1", {
       opinion: "good",
       summary: "Useful for new users.",
-      comment: "I hit this every week.",
+      description: "I hit this every week.",
     });
     expect(revalidatePath).toHaveBeenCalledWith("/issues");
   });
@@ -56,13 +56,13 @@ describe("giveIdeaVerdictAction (#idea-verdicts)", () => {
     expect(giveIdeaVerdict).not.toHaveBeenCalled();
   });
 
-  it("asks for an opinion, a short summary and a comment", async () => {
+  it("asks for an opinion, a short summary and a description", async () => {
     expect(await giveIdeaVerdictAction("bug-1", form({ opinion: "great" }))).toEqual({ error: "Pick good, bad or neutral." });
     expect(await giveIdeaVerdictAction("bug-1", form({ summary: "One. Two. Three." }))).toEqual({
       error: "Keep the summary to two sentences.",
     });
-    expect(await giveIdeaVerdictAction("bug-1", form({ comment: "  " }))).toEqual({
-      error: "Add a comment explaining your verdict.",
+    expect(await giveIdeaVerdictAction("bug-1", form({ description: "  " }))).toEqual({
+      error: "Add a description explaining your verdict.",
     });
     expect(giveIdeaVerdict).not.toHaveBeenCalled();
   });

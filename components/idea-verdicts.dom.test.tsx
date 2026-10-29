@@ -20,7 +20,7 @@ const data: IdeaVerdictsData = {
       opinion: "good",
       votes: 3,
       summary: "New users get stuck here.",
-      commentId: "c1",
+      description: "The full reasoning behind it.",
       onBehalfOfUserId: "ann",
       by: "Ann",
       agentName: "Scout",
@@ -31,7 +31,7 @@ const data: IdeaVerdictsData = {
       opinion: "bad",
       votes: 1,
       summary: "Out of scope.",
-      commentId: null,
+      description: "The full reasoning behind it.",
       onBehalfOfUserId: "ben",
       by: "Ben",
       agentName: null,
@@ -48,7 +48,6 @@ const panel = (props: Partial<React.ComponentProps<typeof IdeaVerdictsPanel>> = 
       viewerId="cy"
       block={null}
       summaryMaxChars={300}
-      issueHref="/issues/7"
       {...props}
     />,
   );
@@ -65,7 +64,7 @@ describe("IdeaVerdictsPanel (#idea-verdicts)", () => {
     expect(totals.getByTitle("1 neutral vote")).toHaveTextContent("1 neutral");
   });
 
-  it("lists each verdict with who, the opinion, the votes, the summary and the comment link", () => {
+  it("lists each verdict with who, the opinion, the votes, the summary and its description", () => {
     panel();
     const items = screen.getAllByRole("listitem");
     expect(items[0]).toHaveTextContent("Good");
@@ -73,12 +72,10 @@ describe("IdeaVerdictsPanel (#idea-verdicts)", () => {
     expect(items[0]).toHaveTextContent("via Scout");
     expect(items[0]).toHaveTextContent("3 votes");
     expect(items[0]).toHaveTextContent("New users get stuck here.");
-    expect(within(items[0]).getByRole("link", { name: "Read the comment" })).toHaveAttribute(
-      "href",
-      "/issues/7?comment=c1#comment-c1",
-    );
+    expect(items[0]).toHaveTextContent("The full reasoning behind it.");
+    // A verdict is the whole entry: there is no comment to link to.
+    expect(within(items[0]).queryByRole("link")).toBeNull();
     expect(items[1]).toHaveTextContent("Bad");
-    expect(within(items[1]).queryByRole("link")).toBeNull();
   });
 
   it("says so when the threshold is reached", () => {
@@ -116,7 +113,7 @@ describe("IdeaVerdictsPanel (#idea-verdicts)", () => {
 
     fireEvent.click(screen.getByRole("radio", { name: "Good" }));
     fireEvent.change(screen.getByLabelText("Summary"), { target: { value: "One. Two. Three." } });
-    fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Because." } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Because." } });
     fireEvent.click(screen.getByRole("button", { name: "Give verdict" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Keep the summary to two sentences.");
     expect(giveIdeaVerdictAction).not.toHaveBeenCalled();
@@ -126,8 +123,8 @@ describe("IdeaVerdictsPanel (#idea-verdicts)", () => {
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Your verdict was saved."));
     const [bugId, sent] = giveIdeaVerdictAction.mock.calls[0] as [string, FormData];
     expect(bugId).toBe("bug-1");
-    expect(Object.fromEntries(sent)).toEqual({ opinion: "good", summary: "Worth doing.", comment: "Because." });
-    expect(screen.getByLabelText("Comment")).toHaveValue("");
+    expect(Object.fromEntries(sent)).toEqual({ opinion: "good", summary: "Worth doing.", description: "Because." });
+    expect(screen.getByLabelText("Description")).toHaveValue("");
   });
 
   it("shows the server's error", async () => {
@@ -135,7 +132,7 @@ describe("IdeaVerdictsPanel (#idea-verdicts)", () => {
     panel();
     fireEvent.click(screen.getByRole("radio", { name: "Neutral" }));
     fireEvent.change(screen.getByLabelText("Summary"), { target: { value: "Fine." } });
-    fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "No strong view." } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "No strong view." } });
     fireEvent.click(screen.getByRole("button", { name: "Give verdict" }));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("This idea is closed."));
   });

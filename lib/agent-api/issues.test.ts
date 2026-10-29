@@ -32,7 +32,8 @@ import { PROJECT_ID_REQUIRED } from "./issues";
 
 afterEach(() => vi.restoreAllMocks());
 
-const issue = { id: "issue-a", title: "A distinct issue", createdAt: new Date("2026-10-19T12:00:00Z"), comments: [] };
+// Converted to an issue, so it takes comments; ideas take only verdicts (#idea-verdicts).
+const issue = { id: "issue-a", title: "A distinct issue", createdAt: new Date("2026-10-19T12:00:00Z"), comments: [], convertedToIssueAt: new Date("2026-10-19T13:00:00Z") };
 const context = { params: Promise.resolve({ id: issue.id }) };
 const validBody = { projectId: "project-a", title: issue.title, description: "An adequate description of the issue.", acknowledgeSimilar: true };
 
@@ -517,6 +518,13 @@ describe("agent comments", () => {
     expect(db.bug.update).not.toHaveBeenCalled();
   });
 
+  it("refuses a comment on an idea, which takes only verdicts (#idea-verdicts)", async () => {
+    db.bug.findFirst.mockResolvedValue({ ...issue, convertedToIssueAt: null });
+    const res = await comment(request("POST", { body: "A plain comment on an idea" }), context);
+    expect(res.status).toBe(409);
+    // The code says what to do; the message says why, in words.
+    expect(await res.json()).toMatchObject({ error: "use_idea_verdict", message: expect.stringContaining("Ideas take verdicts") });
+  });
   it("still allows ordinary discussion by the reporter's agent", async () => {
     db.bug.findFirst.mockResolvedValue({ ...issue, reporterId: "owner-a" });
     expect((await comment(request("POST", { body: "More reproduction details", type: "comment" }), context)).status).toBe(201);

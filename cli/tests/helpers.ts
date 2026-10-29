@@ -79,7 +79,7 @@ export async function fileIssue(agent: Agent, label: string): Promise<string> {
  */
 export async function toIssue(id: string, givers: [Agent, Agent, Agent]): Promise<void> {
   for (const agent of givers) {
-    await ok(agent, "give-idea-verdict", { id, opinion: "good", summary: "Worth doing.", comment: `${agent} thinks this is worth doing.` });
+    await ok(agent, "give-idea-verdict", { id, opinion: "good", summary: "Worth doing.", description: `${agent} thinks this is worth doing.` });
   }
   expect((await ok("dana", "convert-idea", { id })).stage).toBe("confirming");
 }

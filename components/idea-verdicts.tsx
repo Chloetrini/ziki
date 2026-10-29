@@ -1,5 +1,4 @@
 import { LocalTime } from "@/components/local-time";
-import { COMMENT_PARAM } from "@/lib/comment-window";
 import { IdeaVerdictForm } from "@/components/idea-verdict-form";
 
 export type IdeaOpinionName = "good" | "bad" | "neutral";
@@ -9,7 +8,7 @@ export type IdeaVerdictView = {
   opinion: IdeaOpinionName;
   votes: number;
   summary: string;
-  commentId: string | null;
+  description: string;
   onBehalfOfUserId: string;
   by: string;
   agentName: string | null;
@@ -80,15 +79,12 @@ export function IdeaVerdictsPanel({
   viewerId,
   block,
   summaryMaxChars,
-  issueHref,
 }: {
   bugId: string;
   data: IdeaVerdictsData;
   viewerId: string | null;
   block: IdeaVerdictBlock;
   summaryMaxChars: number;
-  /** The issue page's path; a verdict links to its comment there. */
-  issueHref: string;
 }) {
   const reached = data.ideaScore >= data.ideaThreshold;
   const mine = viewerId ? data.verdicts.find((v) => v.onBehalfOfUserId === viewerId) ?? null : null;
@@ -138,12 +134,8 @@ export function IdeaVerdictsPanel({
                   · <LocalTime compact date={verdict.updatedAt} />
                 </span>
               </p>
-              <p className="mb-0 mt-1 break-words text-[13px] leading-[1.5] text-zk-text2">{verdict.summary}</p>
-              {verdict.commentId ? (
-                <a href={`${issueHref}?${COMMENT_PARAM}=${encodeURIComponent(verdict.commentId)}#comment-${verdict.commentId}`} className="mt-1 inline-block text-xs font-bold text-zk-accent hover:underline">
-                  Read the comment
-                </a>
-              ) : null}
+              <p className="mb-0 mt-1 break-words text-[13px] font-semibold leading-[1.5] text-zk-text">{verdict.summary}</p>
+              <p className="mb-0 mt-1 whitespace-pre-line break-words text-[13px] leading-[1.5] text-zk-text2">{verdict.description}</p>
             </li>
           ))}
         </ul>

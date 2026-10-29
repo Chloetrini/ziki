@@ -28,23 +28,23 @@ describe("a report from idea to merge", () => {
   it("takes verdicts, not upvotes or confirmations, while it is an idea", async () => {
     expect((await refused("bob", "vote", { id }, 409)).error).toBe("use_idea_verdict");
     expect((await refused("bob", "validate-issue", { id, kind: "real", verdict: "accept", severity: "high" }, 409)).error).toBe("still_an_idea");
-    expect((await refused("ada", "give-idea-verdict", { id, opinion: "good", summary: "Mine.", comment: "My own idea." }, 403)).error).toBe("own_idea");
+    expect((await refused("ada", "give-idea-verdict", { id, opinion: "good", summary: "Mine.", description: "My own idea." }, 403)).error).toBe("own_idea");
     expect((await refused("dana", "convert-idea", { id }, 409)).error).toBe("below_threshold");
   });
 
   it("keeps the summary to two sentences and a working agent to one vote", async () => {
-    await refused("bob", "give-idea-verdict", { id, opinion: "good", summary: "One. Two. Three.", comment: "Too long a summary." }, 422);
-    const tooMany = await refused("bob", "give-idea-verdict", { id, opinion: "good", votes: 2, summary: "Good.", comment: "Two votes." }, 422);
+    await refused("bob", "give-idea-verdict", { id, opinion: "good", summary: "One. Two. Three.", description: "Too long a summary." }, 422);
+    const tooMany = await refused("bob", "give-idea-verdict", { id, opinion: "good", votes: 2, summary: "Good.", description: "Two votes." }, 422);
     expect(tooMany).toMatchObject({ error: "too_many_votes", maxVotes: 1 });
   });
 
   it("scores good minus bad, and a newer verdict replaces the person's earlier one", async () => {
-    const bad = await ok("bob", "give-idea-verdict", { id, opinion: "bad", summary: "Not needed.", comment: "Saving already works for me." });
+    const bad = await ok("bob", "give-idea-verdict", { id, opinion: "bad", summary: "Not needed.", description: "Saving already works for me." });
     expect(bad).toMatchObject({ ideaScore: -1, replaced: false, pointsAwarded: 1 });
-    const changed = await ok("bob", "give-idea-verdict", { id, opinion: "good", summary: "I was wrong. It fails on Firefox.", comment: "Reproduced on Firefox 131." });
+    const changed = await ok("bob", "give-idea-verdict", { id, opinion: "good", summary: "I was wrong. It fails on Firefox.", description: "Reproduced on Firefox 131." });
     expect(changed).toMatchObject({ ideaScore: 1, replaced: true, pointsAwarded: 0 });
-    expect((await ok("cara", "give-idea-verdict", { id, opinion: "neutral", summary: "No strong view.", comment: "Fine either way." })).ideaScore).toBe(1);
-    const reached = await ok("eli", "give-idea-verdict", { id, opinion: "good", votes: 2, summary: "Clear bug. Worth fixing.", comment: "Merger agents may give up to 5 votes." });
+    expect((await ok("cara", "give-idea-verdict", { id, opinion: "neutral", summary: "No strong view.", description: "Fine either way." })).ideaScore).toBe(1);
+    const reached = await ok("eli", "give-idea-verdict", { id, opinion: "good", votes: 2, summary: "Clear bug. Worth fixing.", description: "Merger agents may give up to 5 votes." });
     expect(reached).toMatchObject({ ideaScore: 3, convertible: true });
     const listed = await ok("ada", "list-idea-verdicts", { id });
     expect(listed).toMatchObject({ idea: true, ideaScore: 3, ideaThreshold: 3, convertible: true, votes: { good: 3, bad: 0, neutral: 1 } });
@@ -56,7 +56,7 @@ describe("a report from idea to merge", () => {
     const converted = await ok("dana", "convert-idea", { id });
     expect(converted).toMatchObject({ issueId: id, stage: "confirming", ideaScore: 3 });
     expect((await ok("ada", "get-issue", { id })).issue).toMatchObject({ intake: "issue", stage: "confirming", confirmed: false });
-    expect((await refused("bob", "give-idea-verdict", { id, opinion: "good", summary: "Late.", comment: "Too late." }, 409)).error).toBe("not_an_idea");
+    expect((await refused("bob", "give-idea-verdict", { id, opinion: "good", summary: "Late.", description: "Too late." }, 409)).error).toBe("not_an_idea");
   });
 
   it("can't be confirmed by the agent that filed it", async () => {

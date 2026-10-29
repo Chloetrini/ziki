@@ -71,6 +71,7 @@ beforeEach(() => {
     title: "Bug 1",
     reporterId: "owner-a",
     assigneeId: null,
+    convertedToIssueAt: new Date("2026-10-19T13:00:00Z"),
   });
   db.comment.create.mockResolvedValue({
     id: "c-1",

@@ -18,7 +18,7 @@ function sentences(text: string): number {
 
 /**
  * A person's verdict on an idea (#idea-verdicts): good, bad or neutral, a
- * summary of two sentences at most, and a comment. Giving it again replaces
+ * summary of two sentences at most, and a full description. Giving it again replaces
  * the earlier one.
  */
 export function IdeaVerdictForm({
@@ -35,7 +35,7 @@ export function IdeaVerdictForm({
   const id = useId();
   const [opinion, setOpinion] = useState<Opinion | null>(initialOpinion);
   const [summary, setSummary] = useState(initialSummary);
-  const [comment, setComment] = useState("");
+  const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -49,18 +49,18 @@ export function IdeaVerdictForm({
     if (!opinion) return setError("Pick good, bad or neutral.");
     if (!summary.trim()) return setError("Add a summary.");
     if (sentences(summary) > 2) return setError("Keep the summary to two sentences.");
-    if (!comment.trim()) return setError("Add a comment explaining your verdict.");
+    if (!description.trim()) return setError("Add a description explaining your verdict.");
     const data = new FormData();
     data.set("opinion", opinion);
     data.set("summary", summary);
-    data.set("comment", comment);
+    data.set("description", description);
     startTransition(async () => {
       const result = await giveIdeaVerdictAction(bugId, data);
       if (result.error) {
         setError(result.error);
         return;
       }
-      setComment("");
+      setDescription("");
       setSaved(result.replaced ? "Your verdict was updated." : "Your verdict was saved.");
     });
   };
@@ -115,20 +115,20 @@ export function IdeaVerdictForm({
       </div>
 
       <div className="flex flex-col gap-1">
-        <label htmlFor={`${id}-comment`} className="text-[13px] font-semibold text-zk-text">
-          Comment
+        <label htmlFor={`${id}-description`} className="text-[13px] font-semibold text-zk-text">
+          Description
         </label>
         <textarea
-          id={`${id}-comment`}
-          name="comment"
+          id={`${id}-description`}
+          name="description"
           rows={3}
-          value={comment}
-          onChange={(event) => setComment(event.target.value)}
-          aria-describedby={`${id}-comment-help`}
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+          aria-describedby={`${id}-description-help`}
           className="w-full rounded-xl border border-zk-border bg-zk-surface px-3 py-2 text-sm text-zk-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-blue-strong"
         />
-        <p id={`${id}-comment-help`} className="m-0 text-xs text-zk-muted">
-          Why you think so. It is posted as a comment on the idea.
+        <p id={`${id}-description-help`} className="m-0 text-xs text-zk-muted">
+          Why you think so, in full. Ideas take verdicts only, so this is where your reasoning goes.
         </p>
       </div>
 

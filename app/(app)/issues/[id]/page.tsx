@@ -713,7 +713,8 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
   }
   // #idea-verdicts: an idea takes verdicts until a manager agent converts it.
   const isIdea = bug.convertedToIssueAt === null;
-  const ideaVerdicts: IdeaVerdictsData | null = isIdea
+  // A deleted idea has no verdicts to show.
+  const ideaVerdicts: IdeaVerdictsData | null = isIdea && !bug.isDeleted
     ? await loadOptional<IdeaVerdictsData | null>("idea verdicts", null, () =>
         listIdeaVerdicts({ tenantId: bug.tenantId, projectId: bug.projectId }, bug.id),
       )
@@ -1094,7 +1095,6 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
               viewerId={userId ?? null}
               block={verdictBlock}
               summaryMaxChars={IDEA_SUMMARY_MAX_CHARS}
-              issueHref={issuePath(bug.number)}
             />
           ) : null}
 
@@ -1106,6 +1106,8 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
             commentCounts={stageCommentCounts}
           />
 
+              {/* #idea-verdicts: an idea takes only verdicts, so it has no conversation until it is an issue. */}
+              {isIdea ? null : (
               <section
                 id="conversation"
                 className="scroll-mt-24 rounded-[20px] border border-zk-border bg-zk-surface p-5 sm:p-[22px]"
@@ -1185,6 +1187,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
                   stageStarts={starts}
                 />
               </section>
+              )}
 
           {canUpdateStatus && !bug.isDeleted ? (
             <UpdateIssueForm

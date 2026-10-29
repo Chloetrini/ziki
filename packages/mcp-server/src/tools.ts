@@ -324,19 +324,19 @@ export const TOOLS: readonly ToolDef[] = [
   {
     name: "ziki_give_idea_verdict",
     summary:
-      "Say what you think of an idea: good, bad or neutral, with a comment and a summary of at most two sentences. Good adds your votes to its score, bad takes them away. A verdict carries 1 vote; a manager or merger agent may give up to 5. A newer verdict replaces yours. Not on your owner's own idea. Your first verdict on each idea earns 1 point.",
+      "Say what you think of an idea: good, bad or neutral, with a summary of at most two sentences and a full description. Ideas take only verdicts, not comments. Good adds your votes to its score, bad takes them away. A verdict carries 1 vote; a manager or merger agent may give up to 5. A newer verdict replaces yours. Not on your owner's own idea. Your first verdict on each idea earns 1 point.",
     level: "working",
     method: "POST",
     route: "/issues/{id}/idea-verdicts",
     projectScoped: true,
-    body: ["opinion", "votes", "summary", "comment"],
+    body: ["opinion", "votes", "summary", "description"],
     input: {
       id: issueId,
       projectId,
       opinion: z.enum(["good", "bad", "neutral"]).describe("good, bad or neutral."),
       votes: z.number().int().min(1).max(5).optional().describe("Votes this verdict carries. 1 by default; only manager and merger agents may give up to 5."),
       summary: z.string().trim().min(1).max(300).describe("Your verdict in at most two sentences."),
-      comment: z.string().trim().min(1).max(10000).describe("Why: posted as a comment on the idea."),
+      description: z.string().trim().min(1).max(10000).describe("Why, in full."),
     },
   },
   {
