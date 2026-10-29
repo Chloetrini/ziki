@@ -220,6 +220,47 @@ exit 1
 `;
 }
 
+/** First deploy: the idea verdicts migration is recorded as failed. `db execute` is the rollback probe. */
+function rolledBackStub(probeExit: number) {
+  if (isWindows) {
+    return `import { appendFileSync, readFileSync } from "node:fs";
+import { argv, exit } from "node:process";
+const callsLog = '__CALLS__';
+const args = argv.slice(2).join(' ');
+appendFileSync(callsLog, \`prisma \${args}\n\`);
+if (/db\\ execute/.test(args)) { exit(${probeExit}); }
+if (/migrate\\ resolve/.test(args)) { exit(0); }
+if (/migrate\\ deploy/.test(args)) {
+  const n = (readFileSync(callsLog, "utf8").match(/migrate deploy/g) || []).length;
+  if (n === 1) {
+    console.error("Error: P3009");
+    console.error("The \`20261130000000_idea_verdicts\` migration started at 2026-10-29 13:00:33.229929 UTC failed");
+    exit(1);
+  }
+  exit(0);
+}
+exit(1);
+`;
+  }
+  return `#!/bin/sh
+echo "prisma $*" >> "__CALLS__"
+case "$*" in
+  *db\\ execute*) exit ${probeExit} ;;
+  *migrate\\ resolve*) exit 0 ;;
+  *migrate\\ deploy*)
+    n=$(grep -c "migrate deploy" "__CALLS__" || true)
+    if [ "$n" -eq 1 ]; then
+      echo "Error: P3009" >&2
+      echo 'The \`20261130000000_idea_verdicts\` migration started at 2026-10-29 13:00:33.229929 UTC failed' >&2
+      exit 1
+    fi
+    exit 0
+    ;;
+esac
+exit 1
+`;
+}
+
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
@@ -293,6 +334,21 @@ describe("scripts/migrate.mjs exit code (#580)", () => {
     expect(status).toBe(0);
     expect(calls).toContain("migrate resolve --applied 20261014193427_init");
     expect(calls).toContain("migrate resolve --applied 20261014195331_add_votes_and_proof_links");
+  });
+
+  it("reruns a known migration that failed and rolled back cleanly", () => {
+    const { status, calls, output } = runStub(rolledBackStub(0), { NODE_ENV: "production", DATABASE_URL: DB });
+    expect(status).toBe(0);
+    expect(calls).toContain("migrate resolve --rolled-back 20261130000000_idea_verdicts");
+    expect(calls).not.toContain("migrate resolve --applied 20261130000000_idea_verdicts");
+    expect((calls.match(/migrate deploy/g) ?? []).length).toBe(2);
+    expect(output).toContain("rolled back cleanly");
+  });
+
+  it("does not rerun it when its objects are already there", () => {
+    const { status, calls } = runStub(rolledBackStub(1), { NODE_ENV: "production", DATABASE_URL: DB });
+    expect(status).toBe(1);
+    expect(calls).not.toContain("migrate resolve");
   });
 
   it("the Dockerfile only starts the server when the script succeeds", () => {

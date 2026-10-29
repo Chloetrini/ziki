@@ -136,6 +136,50 @@ function recordApplied(name) {
   }
 }
 
+/**
+ * Migrations known to have failed and rolled back cleanly in production. Each
+ * probe raises when any object the migration creates exists, so a partial
+ * apply is never retried. A probe that passes means the failed row is all
+ * that is left: record it rolled back and run the fixed migration again.
+ */
+const ROLLED_BACK_CLEANLY = {
+  // 2026-10-29: a regex repetition count over Postgres's 255 limit stopped it (#254).
+  "20261130000000_idea_verdicts": `DO $$ BEGIN
+  IF to_regclass('public."IdeaVerdict"') IS NOT NULL
+     OR to_regtype('public."IdeaOpinion"') IS NOT NULL
+     OR EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'Bug'
+                  AND column_name IN ('ideaScore', 'convertedToIssueAt', 'convertedByAgentId'))
+     OR EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'ProjectWorkflow' AND column_name = 'ideaThreshold') THEN
+    RAISE EXCEPTION 'idea verdict objects already exist';
+  END IF;
+END $$;
+`,
+};
+
+/** True when `name` has a probe and the probe finds none of its objects. */
+function rolledBackCleanly(name) {
+  const probe = ROLLED_BACK_CLEANLY[name];
+  if (!probe) return false;
+  const file = join(tmpdir(), "ziki-rollback-probe.sql");
+  writeFileSync(file, probe);
+  try {
+    runPrisma(`db execute --schema prisma/schema.prisma --file ${JSON.stringify(file)}`);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[db:migrate] ${name} left objects behind, so it is not retried:`, message.split(/\r?\n/)[0]);
+    return false;
+  } finally {
+    try {
+      unlinkSync(file);
+    } catch {
+      // The probe file is only a signal. A leftover does not change the database.
+    }
+  }
+}
+
 function failedMigrationName(text) {
   const started = text.match(/The `([^`]+)` migration started at [^\n]* failed/);
   if (started) return started[1];
@@ -178,6 +222,23 @@ function baselineStuckMigrations(initialText) {
     const name = failedMigrationName(text);
     if (!name) return false;
     if (/P3009/.test(text)) {
+      if (name !== initMigration && rolledBackCleanly(name)) {
+        console.log(`[db:migrate] ${name} failed and rolled back cleanly. Recording it rolled back and running it again.`);
+        try {
+          runPrisma(`migrate resolve --rolled-back ${name}`);
+        } catch (resolveError) {
+          console.error(`[db:migrate] Could not record ${name} rolled back:`, resolveError instanceof Error ? resolveError.message.split(/\r?\n/)[0] : resolveError);
+          return false;
+        }
+        try {
+          deploy();
+          return true;
+        } catch (error) {
+          text = error instanceof Error ? error.message : String(error);
+          console.error("[db:migrate] prisma migrate deploy encountered error:", text);
+          continue;
+        }
+      }
       if (name !== initMigration) {
         console.error(`[db:migrate] ${name} is recorded as failed. Not marking it applied.`);
         return false;

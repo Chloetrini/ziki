@@ -118,7 +118,7 @@ SELECT DISTINCT ON (v."bugId", v."onBehalfOfUserId")
        'migrated-validation-' || v."id", v."bugId", v."onBehalfOfUserId", v."agentId",
        (CASE v."verdict"::text WHEN 'accept' THEN 'good' ELSE 'bad' END)::"IdeaOpinion", 1,
        COALESCE(
-         substring(btrim(v."notes") FROM '^[^.!?]{1,279}[.!?]'),
+         substring(btrim(v."notes") FROM '^[^.!?]{1,250}[.!?]'),
          CASE v."verdict"::text
            WHEN 'accept' THEN 'Confirmed this as real before idea verdicts existed.'
            ELSE 'Judged this not real before idea verdicts existed.'
