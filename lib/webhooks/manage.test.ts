@@ -3,6 +3,8 @@ import { createSubscriptionRecord, MAX_SUBSCRIPTIONS_PER_AGENT, normalizeSubscri
 
 const db = {
   webhookSubscription: { count: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
+  $transaction: vi.fn((fn: (tx: unknown) => unknown) => fn(db)),
+  $queryRaw: vi.fn(),
 };
 
 const input = {
@@ -57,5 +59,55 @@ describe("webhook subscription limits (#512)", () => {
       "issue.created",
     ]);
     expect(normalizeSubscriptionEvents(undefined)).toEqual([]);
+  });
+
+  it("locks the agent row inside a transaction to prevent concurrent cap bypass (#498)", async () => {
+    await createSubscriptionRecord(db as never, input);
+    expect(db.$transaction).toHaveBeenCalled();
+    expect(db.$queryRaw).toHaveBeenCalled();
+  });
+
+  it("maps Prisma P2002 unique constraint violation to 409 duplicate error (#498)", async () => {
+    db.webhookSubscription.create.mockRejectedValue({ code: "P2002" });
+    const result = await createSubscriptionRecord(db as never, input);
+    expect(result).toMatchObject({ ok: false, status: 409, error: "That URL is already subscribed for this agent." });
+  });
+
+  it("enforces cap and duplicate rejection when concurrent creates fire (#498)", async () => {
+    let count = 2;
+    const urls = new Set<string>();
+    let lock = Promise.resolve();
+    db.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+      const run = lock.then(async () => {
+        return fn({
+          ...db,
+          webhookSubscription: {
+            count: vi.fn(async () => count),
+            findFirst: vi.fn(async ({ where }: { where: { url: string } }) =>
+              urls.has(where.url) ? { id: "existing" } : null,
+            ),
+            create: vi.fn(async ({ data }: { data: { url: string } }) => {
+              if (urls.has(data.url)) throw { code: "P2002" };
+              urls.add(data.url);
+              count++;
+              return { id: `sub-${count}`, url: data.url, enabled: true, createdAt: new Date(), events: [] };
+            }),
+          },
+        });
+      });
+      lock = run.then(() => {}, () => {});
+      return run;
+    });
+
+    const [first, second, third] = await Promise.all([
+      createSubscriptionRecord(db as never, { ...input, url: "https://a.test" }),
+      createSubscriptionRecord(db as never, { ...input, url: "https://b.test" }),
+      createSubscriptionRecord(db as never, { ...input, url: "https://a.test" }),
+    ]);
+
+    const successes = [first, second, third].filter((r) => r.ok);
+    const failures = [first, second, third].filter((r) => !r.ok);
+    expect(successes.length).toBe(1);
+    expect(failures.length).toBe(2);
   });
 });
