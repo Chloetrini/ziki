@@ -937,7 +937,7 @@ describe("acceptFix: a manager checks the fix won't break the code before accept
     blockedComment(/^Accept blocked: GitHub Actions CI\/CD checks.*stays In Review\. What to do: The author opens the pull request's Checks tab/);
   });
 
-  it("doesn't judge a merge conflict: the manager only checks the code", async () => {
+  it("does not give ready to merge to a pull request that conflicts: it comments and tells the author", async () => {
     readyToAccept();
     const client = defaultMockGhClient({
       getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: false, headSha: "linked-sha" })),
@@ -945,24 +945,58 @@ describe("acceptFix: a manager checks the fix won't break the code before accept
 
     const result = await acceptFix(merger("m1", "mo", "manager"), "bug1", { client });
 
-    expect(result).toMatchObject({ status: 200, accepted: true, readyToMerge: true });
-    expect(db.comment.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ body: "Fix accepted by merger agent. Status changed to ready to merge." }) }),
+    expect(result).toMatchObject({ status: 409, error: "not_ready", missing: "merge_conflict" });
+    acceptsNothing();
+    blockedComment(/^Accept blocked: .*merge conflicts.*don't resolve conflicts: the agent that delivered this fix and its owner have to\..*What to do: .*come and resolve it/);
+    expect(notify.notifyMergeFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ recipientId: "ada", reason: expect.stringContaining("merge conflicts") }),
     );
   });
 
-  it("still refuses to accept when the checks are red, even if the pull request also conflicts", async () => {
+  it("does not accept while CodeRabbit has unresolved threads", async () => {
+    readyToAccept();
+    const client = defaultMockGhClient({ unresolvedCodeRabbitThreads: vi.fn(async () => 3) });
+
+    expect(await acceptFix(merger("m1", "mo", "manager"), "bug1", { client })).toMatchObject({
+      status: 409,
+      missing: "review_threads",
+      message: expect.stringContaining("3 unresolved review threads"),
+    });
+    acceptsNothing();
+  });
+
+  it("does not accept while a deployment is failing, and names it", async () => {
+    readyToAccept();
+    const client = defaultMockGhClient({
+      failingChecks: vi.fn(async () => ['deployment to Production: failure, Build failed (https://vercel.example/d/1)']),
+    });
+
+    const result = await acceptFix(merger("m1", "mo", "manager"), "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, missing: "deployment_verification" });
+    acceptsNothing();
+    blockedComment(/Not green: deployment to Production: failure, Build failed \(https:\/\/vercel\.example\/d\/1\)/);
+  });
+
+  it("accepts when nothing is deployed for the commit and every check is green", async () => {
+    readyToAccept();
+    const client = defaultMockGhClient({ failingChecks: vi.fn(async () => []) });
+
+    expect(await acceptFix(merger("m1", "mo", "manager"), "bug1", { client })).toMatchObject({ status: 200, accepted: true });
+  });
+
+  it("lists every reason when the pull request conflicts and the checks are red", async () => {
     readyToAccept();
     const client = defaultMockGhClient({
       getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: false, headSha: "linked-sha" })),
       checksGreen: vi.fn(async () => false),
     });
 
-    expect(await acceptFix(merger("m1", "mo", "manager"), "bug1", { client })).toMatchObject({
-      status: 409,
-      missing: "deployment_verification",
-    });
+    const result = await acceptFix(merger("m1", "mo", "manager"), "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, missing: "merge_conflict", message: expect.stringContaining("for 2 reasons") });
     acceptsNothing();
+    blockedComment(/for 2 reasons: \(1\) .*merge conflicts.*\(2\) GitHub Actions.*What to do: \(1\) .*\(2\) /);
   });
 
   it("does not accept when the head commit moved after the testers approved it", async () => {
@@ -1032,7 +1066,7 @@ describe("executeAdminMerge: the merger checks again that the fix won't break th
       expect.objectContaining({
         data: expect.objectContaining({
           body: expect.stringMatching(
-            /^Merge blocked: .*merge conflicts.*The merger does not resolve conflicts: the agent that delivered this fix and its owner have to\. Nothing was merged.*What to do: .*come and resolve it.*git merge origin\/<base-branch>.*the testers check it and report again/,
+            /^Merge blocked: .*merge conflicts.*don't resolve conflicts: the agent that delivered this fix and its owner have to\. Nothing was merged.*What to do: .*come and resolve it.*git merge origin\/<base-branch>.*the testers check it and report again/,
           ),
         }),
       }),
@@ -1078,6 +1112,40 @@ describe("executeAdminMerge: the merger checks again that the fix won't break th
       message: expect.stringContaining("head commit changed"),
     });
     expect(client.mergePullRequest).not.toHaveBeenCalled();
+  });
+
+  it("lists every reason in one comment when the merge has more than one problem", async () => {
+    readyToMerge();
+    const client = defaultMockGhClient({
+      getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: false, headSha: "linked-sha" })),
+      checksGreen: vi.fn(async () => false),
+      unresolvedCodeRabbitThreads: vi.fn(async () => 1),
+    });
+
+    const result = await executeAdminMerge(merger("m1", "mo", "merger"), "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, missing: "merge_conflict" });
+    expect(client.mergePullRequest).not.toHaveBeenCalled();
+    expect(db.comment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          body: expect.stringMatching(/for 3 reasons: \(1\) .*merge conflicts.*\(2\) GitHub Actions.*\(3\) CodeRabbit has 1 unresolved review thread.*What to do: \(1\) .*\(2\) .*\(3\) /),
+        }),
+      }),
+    );
+  });
+
+  it("does not merge while a deployment is failing, and names the failing deployment", async () => {
+    readyToMerge();
+    const client = defaultMockGhClient({
+      failingChecks: vi.fn(async () => ['status "Vercel": failure, Deployment failed (https://vercel.example/d/9)']),
+    });
+
+    const result = await executeAdminMerge(merger("m1", "mo", "merger"), "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, missing: "deployment_verification", message: expect.stringContaining('status "Vercel": failure') });
+    expect(client.mergePullRequest).not.toHaveBeenCalled();
+    expect(db.bug.update).toHaveBeenCalledWith({ where: { id: "bug1" }, data: { reviewStatus: "merge_blocked" } });
   });
 
   it("tells the author what to do when the checks are red", async () => {

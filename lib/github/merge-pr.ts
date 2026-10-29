@@ -96,6 +96,13 @@ export type MergePullResult = {
 export interface GitHubClient {
   getPullRequest(ref: PullRequestRef): Promise<PullRequest>;
   checksGreen(ref: PullRequestRef, headSha: string): Promise<boolean>;
+  /**
+   * Everything on the head commit that is not green, named so the author knows
+   * what to fix: check runs, commit statuses (Vercel and other deploy tools post
+   * these) and deployments. Empty when all is green. Optional so a client that
+   * only knows `checksGreen` still works.
+   */
+  failingChecks?(ref: PullRequestRef, headSha: string): Promise<string[]>;
   /** Merge `ref` pinned to `headSha`, the commit whose checks were verified. */
   mergePullRequest(ref: PullRequestRef, headSha: string): Promise<MergePullResult>;
   /** Review threads CodeRabbit started that are not resolved yet. Throws when they can't be read. */
@@ -126,36 +133,6 @@ export type FixBreakBlock = {
 export function hasMergeConflicts(pullRequest: PullRequest): boolean {
   // A merged pull request is already in; GitHub no longer reports conflicts for it.
   return !pullRequest.merged && !pullRequest.mergeable;
-}
-
-/**
- * Ziki does not build or run a project's code, so "this fix won't break
- * anything" rests on what GitHub reports for the pull request: every check run
- * on the head commit (tests, build, lint) passed. A manager reads this before
- * accepting a fix and the merger reads it again before merging. Null means
- * nothing blocks the fix.
- *
- * A merge conflict is not part of this check: the merger escalates it to its
- * owner at merge time (`lib/agent-api/merge-conflict.ts`).
- */
-export async function checksBlock(
-  client: Pick<GitHubClient, "checksGreen">,
-  ref: PullRequestRef,
-  headSha: string,
-): Promise<FixBreakBlock | null> {
-  let green = false;
-  try {
-    green = await client.checksGreen(ref, headSha);
-  } catch {
-    green = false;
-  }
-  if (green) return null;
-  return {
-    missing: "deployment_verification",
-    message: CHECKS_NOT_GREEN_MESSAGE,
-    todo:
-      "The author opens the pull request's Checks tab on GitHub, fixes whatever failed (tests, build or lint) and pushes. The checks have to pass on the latest commit before the fix can be accepted or merged.",
-  };
 }
 
 // Whether a review thread is resolved is only available through GraphQL.
@@ -357,6 +334,75 @@ export function createInstallationClient(
       const statuses = body.statuses ?? [];
       if (!statuses.length && (body.state === undefined || body.state === "pending")) return true;
       return body.state === "success";
+    },
+    async failingChecks(ref, headSha) {
+      const failing: string[] = [];
+      const withLink = (text: string, link?: string | null) => (link ? `${text} (${link})` : text);
+
+      // 1. Check runs (GitHub Actions and other apps). Anything not completed
+      // with a passing conclusion is named; an unreadable page is a failure,
+      // not an absence (#531).
+      const runs: { name?: string; status?: string; conclusion?: string | null; html_url?: string | null }[] = [];
+      for (let page = 1; ; page += 1) {
+        const response = await request(
+          `/repos/${ref.owner}/${ref.repo}/commits/${headSha}/check-runs?per_page=100&page=${page}`,
+        );
+        if (!response.ok) return ["GitHub could not be asked for the check runs on this commit"];
+        const body = (await response.json()) as { check_runs?: typeof runs; total_count?: number };
+        const batch = body.check_runs ?? [];
+        runs.push(...batch);
+        if (batch.length < 100 || runs.length >= (body.total_count ?? runs.length)) break;
+      }
+      for (const run of runs) {
+        const passed =
+          run.status === "completed" &&
+          (run.conclusion === "success" || run.conclusion === "neutral" || run.conclusion === "skipped");
+        if (passed) continue;
+        const state = run.status === "completed" ? `${run.conclusion ?? "did not pass"}` : `still ${run.status ?? "running"}`;
+        failing.push(withLink(`check "${run.name ?? "unnamed"}": ${state}`, run.html_url));
+      }
+
+      // 2. Commit statuses. Vercel and other deploy tools report a deployment
+      // here, and they are not check runs, so they were never looked at once a
+      // repository had any check run.
+      const status = await request(`/repos/${ref.owner}/${ref.repo}/commits/${headSha}/status`);
+      if (!status.ok) {
+        failing.push("GitHub could not be asked for the commit statuses");
+      } else {
+        const body = (await status.json()) as {
+          statuses?: { context?: string; state?: string; description?: string | null; target_url?: string | null }[];
+        };
+        for (const item of body.statuses ?? []) {
+          if (item.state === "success") continue;
+          const why = item.description ? `${item.state}, ${item.description}` : `${item.state}`;
+          failing.push(withLink(`status "${item.context ?? "unnamed"}": ${why}`, item.target_url));
+        }
+      }
+
+      // 3. Deployments of this commit. A deployment the app can't read (no
+      // deployments permission) is skipped; its status or check run above
+      // covers the common tools.
+      const deployments = await request(`/repos/${ref.owner}/${ref.repo}/deployments?sha=${headSha}&per_page=10`);
+      if (deployments.ok) {
+        const list = (await deployments.json()) as { id: number; environment?: string }[];
+        for (const deployment of list ?? []) {
+          const latest = await request(
+            `/repos/${ref.owner}/${ref.repo}/deployments/${deployment.id}/statuses?per_page=1`,
+          );
+          if (!latest.ok) continue;
+          const [first] = (await latest.json()) as {
+            state?: string;
+            description?: string | null;
+            log_url?: string | null;
+            target_url?: string | null;
+          }[];
+          if (!first || first.state === "success" || first.state === "inactive") continue;
+          const where = deployment.environment ?? "an environment";
+          const why = first.description ? `${first.state}, ${first.description}` : `${first.state}`;
+          failing.push(withLink(`deployment to ${where}: ${why}`, first.log_url ?? first.target_url));
+        }
+      }
+      return failing;
     },
     async mergePullRequest(ref, headSha) {
       // Squash is not universally allowed (#492): ask the repository which

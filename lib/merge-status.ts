@@ -30,6 +30,11 @@ export function mergeOutcomeComment(status: MergeOutcomeStatus, reason: string, 
   return `${lead}: ${reason} Nothing was merged on GitHub, the issue was not resolved, and no points were paid.${next}`;
 }
 
+/** The comment posted when a tester's "good to merge" wasn't recorded, so the author knows what to fix. */
+export function verdictBlockedComment(reason: string, todo: string): string {
+  return `Good-to-merge verdict not recorded: ${reason} The fix stays In Review. What to do: ${todo}`;
+}
+
 /** The comment posted when a manager's accept stopped, so the author knows what to fix. */
 export function acceptBlockedComment(reason: string, todo: string): string {
   return `Accept blocked: ${reason} The fix was not accepted and stays In Review. What to do: ${todo}`;
@@ -104,6 +109,30 @@ export async function recordAcceptBlocked(
         type: "commented",
         summary: commentedSummary(body),
         metadata: { commentId: comment.id, commentPreview: commentPreview(body), acceptBlocked: true },
+      },
+    });
+  });
+}
+
+/** Post the "verdict not recorded" comment on the issue. No status changes. */
+export async function recordVerdictBlocked(
+  db: PrismaClient,
+  input: { agent: AgentContext; bug: { id: string }; reason: string; todo: string },
+): Promise<void> {
+  const { agent, bug, reason, todo } = input;
+  const body = verdictBlockedComment(reason, todo);
+  await db.$transaction(async (tx) => {
+    const comment = await tx.comment.create({
+      data: { bugId: bug.id, authorId: agent.ownerId, agentId: agent.agentId, body, type: "comment" },
+      select: { id: true },
+    });
+    await tx.bugActivity.create({
+      data: {
+        bugId: bug.id,
+        actorId: agent.ownerId,
+        type: "commented",
+        summary: commentedSummary(body),
+        metadata: { commentId: comment.id, commentPreview: commentPreview(body), verdictBlocked: true },
       },
     });
   });

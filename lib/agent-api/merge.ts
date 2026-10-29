@@ -19,9 +19,6 @@ import { statusChangedSummary, commentedSummary, commentPreview } from "@/lib/ac
 import { workflowFor } from "@/lib/workflow";
 import {
   clientForInstallation,
-  codeRabbitThreadsMessage,
-  checksBlock,
-  hasMergeConflicts,
   isPullRequestClosedUnmerged,
   parseGitHubRepoUrl,
   parsePullRequestUrl,
@@ -31,7 +28,7 @@ import {
   type PullRequest,
 } from "@/lib/github/merge-pr";
 import { recordMistake, type RecordMistakeInput } from "@/lib/agent-api/mistakes";
-import { conflictComment, MERGE_CONFLICT_MESSAGE } from "@/lib/agent-api/merge-conflict";
+import { checksProblem, combineProblems, notifyAuthor, readinessProblems } from "@/lib/agent-api/pr-readiness";
 import { notifyMergeFailed } from "@/lib/agent-notifications";
 import {
   MERGE_BLOCKED,
@@ -354,11 +351,14 @@ export async function acceptFix(
 
   if (!isAdminMerge) {
     // Before a manager says yes, GitHub has to say the fix won't break the
-    // code: checks green on the commit the testers approved. Nothing is
-    // accepted otherwise; a comment says why. A merge conflict is not the
-    // manager's business: the merger escalates it to its owner at merge time.
-    const block = await acceptCheck(githubClientFor(bug, deps), ref, acceptedHeadSha);
+    // code: no conflict with the base branch, checks green on the commit the testers approved. Nothing is
+    // accepted otherwise; a comment says why. A merge conflict is the same:
+    // no "ready to merge", a comment, and the author is told to resolve it.
+    const block = await acceptCheck(githubClientFor(bug, deps), ref, acceptedHeadSha, claim?.agent.name);
     if (block) {
+      if (block.missing === "merge_conflict" || block.missing === "review_threads" || block.missing === "deployment_verification") {
+        notifyAuthor({ bug, recipientId: claim?.beneficiaryUserId ?? bug.assigneeId, reason: block.message, fromAgentName: agent.name });
+      }
       await recordAcceptBlocked(prisma, { agent, bug, reason: block.message, todo: block.todo });
       return { status: 409 as const, error: "not_ready" as const, missing: block.missing, message: block.message };
     }
@@ -492,57 +492,30 @@ export async function acceptFix(
     );
   }
 
-  // 2. A conflict with the base branch is for the fix's author to resolve. The
-  // merger neither resolves it nor merges around it: it says so on the issue
-  // and tells the author, and the merge waits for a new commit.
-  if (hasMergeConflicts(pullRequest)) {
-    const author = claim?.agent.name ?? "the agent that delivered this fix";
-    const recipient = claim?.beneficiaryUserId ?? bug.assigneeId ?? null;
-    if (recipient) {
-      notifyMergeFailed({
-        bugId: bug.id,
-        bugTitle: bug.title,
-        recipientId: recipient,
-        reason: MERGE_CONFLICT_MESSAGE,
-        agent: { name: agent.name },
-      });
+  // 2. The fix must not break the code and must be ready to go: every check
+  // on the head commit green, CodeRabbit's threads resolved, no conflict with
+  // the base branch. The same three things testers and managers check; they
+  // are read again here because time has passed. Every problem is listed in
+  // one comment, and the author is told. A merged pull request is already in,
+  // so only its checks are read.
+  if (pullRequest.merged) {
+    const checks = combineProblems(
+      [await checksProblem(ghClient, ref, headToVerify)].filter((problem) => problem !== null),
+    );
+    if (checks) return stop(MERGE_BLOCKED, checks.missing, checks.message, checks.todo);
+  } else {
+    const block = combineProblems(await readinessProblems(ghClient, ref, pullRequest, headToVerify, claim?.agent.name));
+    if (block) {
+      notifyAuthor({ bug, recipientId: claim?.beneficiaryUserId ?? bug.assigneeId, reason: block.message, fromAgentName: agent.name });
+      return stop(MERGE_BLOCKED, block.missing, block.message, block.todo);
     }
-    const note = conflictComment(author);
-    return stop(MERGE_BLOCKED, "merge_conflict", note.reason, note.todo);
   }
-
-  // 3. The fix must not break the code: every check on the head commit green.
-  // The same check a manager makes before accepting; it is repeated here
-  // because time has passed.
-  const breakBlock = await checksBlock(ghClient, ref, headToVerify);
-  if (breakBlock) return stop(MERGE_BLOCKED, breakBlock.missing, breakBlock.message, breakBlock.todo);
 
   // The merge commit comes only from GitHub's answer, never from the request.
   let mergeCommitSha: string | null;
 
   // 3. Execute GitHub merge if not already merged
   if (!pullRequest.merged) {
-    // Every review thread CodeRabbit opened must be resolved first. When the
-    // threads can't be read, the merge waits rather than guessing.
-    let openThreads: number;
-    try {
-      openThreads = await ghClient.unresolvedCodeRabbitThreads(ref);
-    } catch (error) {
-      const detail = error instanceof Error && error.message ? error.message : "GitHub could not be reached to read CodeRabbit's review threads.";
-      const message = detail.startsWith("GitHub could not be reached")
-        ? detail
-        : `GitHub could not be reached to read CodeRabbit's review threads: ${detail}`;
-      return stop(MERGE_BLOCKED, "review_threads", message);
-    }
-    if (openThreads > 0) {
-      return stop(
-        MERGE_BLOCKED,
-        "review_threads",
-        codeRabbitThreadsMessage(openThreads),
-        "The author fixes what CodeRabbit asked for (or replies if it does not apply) and resolves each thread on the pull request. If that changes the code, testers check the new commit and report again.",
-      );
-    }
-
     let mergeResult: MergePullResult;
     try {
       mergeResult = await ghClient.mergePullRequest(ref, headToVerify);
@@ -718,15 +691,20 @@ function githubClientFor(bug: LoadedBug, deps: AcceptFixDeps): GitHubClient | nu
 
 /**
  * What stops a manager from accepting a fix: GitHub can't be asked, the pull
- * request moved after the testers approved it, or its checks are not green.
- * Null when the fix is safe to accept. The manager only judges the code; a
- * merge conflict is the merger's to escalate.
+ * request moved after the testers approved it, its checks are not green, it
+ * conflicts with its base branch, or CodeRabbit has unresolved review threads.
+ * Null when the fix is safe to accept.
  */
 async function acceptCheck(
   client: GitHubClient | null,
   ref: ReturnType<typeof parsePullRequestUrl>,
   acceptedHeadSha: string | null,
-): Promise<{ missing: "pull_request" | "deployment_verification" | "github_app"; message: string; todo: string } | null> {
+  author?: string,
+): Promise<{
+  missing: "pull_request" | "deployment_verification" | "github_app" | "merge_conflict" | "review_threads";
+  message: string;
+  todo: string;
+} | null> {
   if (!client) {
     return {
       missing: "github_app",
@@ -758,5 +736,5 @@ async function acceptCheck(
       todo: "Testers check the new commit and report again. Then a manager can accept it.",
     };
   }
-  return checksBlock(client, ref, acceptedHeadSha || pullRequest.headSha);
+  return combineProblems(await readinessProblems(client, ref, pullRequest, acceptedHeadSha || pullRequest.headSha, author));
 }
