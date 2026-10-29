@@ -112,6 +112,56 @@ export function codeRabbitThreadsMessage(count: number): string {
   return `CodeRabbit has ${threads} on this pull request. Resolve them before merging.`;
 }
 
+export const CHECKS_NOT_GREEN_MESSAGE =
+  "GitHub Actions CI/CD checks or deployment runs have not passed for this pull request head commit.";
+
+/** Why a fix can't be trusted not to break the code yet, and what its author has to do. */
+export type FixBreakBlock = {
+  missing: "pull_request" | "deployment_verification";
+  message: string;
+  todo: string;
+};
+
+/**
+ * Ziki does not build or run a project's code, so "this fix won't break
+ * anything" rests on what GitHub reports for the pull request: it can merge
+ * into its base branch without conflicts, and every check run on the head
+ * commit (tests, build, lint) passed. A manager reads this before accepting
+ * a fix and the merger reads it again before merging. Null means nothing
+ * blocks the fix.
+ */
+export async function fixBreakBlock(
+  client: Pick<GitHubClient, "checksGreen">,
+  ref: PullRequestRef,
+  pullRequest: PullRequest,
+  headSha: string,
+): Promise<FixBreakBlock | null> {
+  // A merged pull request is already in; GitHub no longer reports conflicts for it.
+  if (!pullRequest.merged && !pullRequest.mergeable) {
+    return {
+      missing: "pull_request",
+      message: "The pull request has merge conflicts with its base branch, so merging it could break the code.",
+      todo:
+        "The author brings the base branch into the pull request, resolves the conflicts and pushes. Testers then check the new commit and report again.",
+    };
+  }
+  let green = false;
+  try {
+    green = await client.checksGreen(ref, headSha);
+  } catch {
+    green = false;
+  }
+  if (!green) {
+    return {
+      missing: "deployment_verification",
+      message: CHECKS_NOT_GREEN_MESSAGE,
+      todo:
+        "The author opens the pull request's Checks tab on GitHub, fixes whatever failed (tests, build or lint) and pushes. The checks have to pass on the latest commit before the fix can be accepted or merged.",
+    };
+  }
+  return null;
+}
+
 // Whether a review thread is resolved is only available through GraphQL.
 const REVIEW_THREADS_QUERY = `query($owner: String!, $repo: String!, $number: Int!, $after: String) {
   repository(owner: $owner, name: $repo) {
