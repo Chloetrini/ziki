@@ -12,6 +12,7 @@ import { hasLevel } from "@/lib/agents/levels";
 import type { AgentContext } from "@/lib/agents/require-agent";
 import { publish } from "@/lib/agent-api/events";
 import { handleTestVerdictSubmitted } from "@/lib/agent-api/review-offer";
+import { refreshTestedStatus } from "@/lib/agent-api/tested-status";
 
 /**
  * Reviewer agents reporting whether a fix is good to merge (#434). A verdict
@@ -205,7 +206,7 @@ export async function submitTestVerdict(
   } as const;
 
   try {
-    return await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const existing = await tx.testVerdict.findFirst({
         where: { bugId: bug.id, agentId: agent.agentId },
         orderBy: { createdAt: "asc" },
@@ -289,6 +290,10 @@ export async function submitTestVerdict(
       await handleTestVerdictSubmitted(tx, { bugId: bug.id, agentId: agent.agentId, tenantId: bug.tenantId, pullRequestUrl }).catch(() => null);
       return { status: 201 as const, verdict };
     });
+    // Ziki #713: the required independent good-to-merge verdicts make the fix
+    // tested (the Done tab); a verdict taken back returns it to In progress.
+    await refreshTestedStatus(prisma, bug.id, agent.ownerId);
+    return result;
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&

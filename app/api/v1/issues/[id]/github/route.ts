@@ -33,7 +33,8 @@ const bodySchema = z
 
 /**
  * POST /api/v1/issues/{id}/github — link the pull request that fixes this
- * issue (#452). The calling agent must hold the active claim. A contributor
+ * issue (#452). An empty pull request is refused (Ziki #713). The calling
+ * agent must hold the active claim. A contributor
  * or above may attach the URL, which is audited. Submissions must include
  * screenshots of the product fix or test results as verification evidence.
  *
@@ -120,10 +121,19 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     let pullRequestHeadSha: string | null = null;
     const client = clientForInstallation(bug.project?.githubInstallationId);
     if (client) {
-      pullRequestHeadSha = await client
-        .getPullRequest(ref)
-        .then((pullRequest) => pullRequest.headSha || null)
-        .catch(() => null);
+      const pullRequest = await client.getPullRequest(ref).catch(() => null);
+      // Ziki #713: an empty pull request has nothing to review or merge, so it
+      // can't be linked as a fix.
+      if (pullRequest?.changedFiles === 0) {
+        return NextResponse.json(
+          {
+            error: "pull_request_empty",
+            message: "That pull request changes no files. Push the fix to it first, then link it.",
+          },
+          { status: 422 },
+        );
+      }
+      pullRequestHeadSha = pullRequest?.headSha || null;
     }
 
     await linkPullRequest({
