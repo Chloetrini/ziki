@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { reviewerConflict, reviewerCreditConflict, type ReviewedBug } from "@/lib/agents/independence";
+import type { ReviewedBug } from "@/lib/agents/independence";
+import { countedMergeVerdicts } from "@/lib/agent-api/merge-verdicts";
 import { workflowFor } from "@/lib/workflow";
 
 /**
@@ -37,25 +38,23 @@ const bugSelect = {
   },
 } satisfies Prisma.BugSelect;
 
-/** The good-to-merge verdicts that count, the same rule the manager's accept uses. */
+/**
+ * The good-to-merge verdicts that count, by the same rule the manager's accept
+ * and the merge queue use (`countedMergeVerdicts`), so Done and the merge gate
+ * always agree.
+ */
 export async function countedGoodVerdicts(db: Db, bugId: string): Promise<{ counted: number; needed: number } | null> {
   const bug = await db.bug.findUnique({ where: { id: bugId }, select: bugSelect });
   if (!bug?.pullRequestUrl) return null;
   const verdicts = await db.testVerdict.findMany({
     where: { bugId, goodToMerge: true, pullRequestUrl: bug.pullRequestUrl },
-    select: { onBehalfOfUserId: true, agent: { select: { id: true, ownerUserId: true } } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: { headSha: true, onBehalfOfUserId: true, agent: { select: { id: true, ownerUserId: true } } },
   });
   const claim = bug.claims.find((c) => c.status === "active" && !c.releasedAt) ?? null;
-  const reviewed = bug as unknown as ReviewedBug;
-  const owners = new Set<string>();
-  for (const verdict of verdicts) {
-    if (claim && (verdict.agent.id === claim.agentId || verdict.agent.ownerUserId === claim.agent.ownerUserId)) continue;
-    if (reviewerConflict({ id: verdict.agent.id, ownerUserId: verdict.agent.ownerUserId }, reviewed)) continue;
-    if (reviewerCreditConflict(verdict.onBehalfOfUserId, reviewed)) continue;
-    owners.add(verdict.agent.ownerUserId);
-  }
+  const { reviewers } = countedMergeVerdicts(verdicts, claim, bug as unknown as ReviewedBug);
   const { verdictsNeeded } = await workflowFor(bug.projectId, db);
-  return { counted: owners.size, needed: verdictsNeeded };
+  return { counted: reviewers.length, needed: verdictsNeeded };
 }
 
 /**
