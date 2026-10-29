@@ -86,12 +86,13 @@ describe("Idea page (#idea-verdicts)", () => {
 
   it("shows the Idea verdicts panel in the main column, only for an idea", () => {
     const main = pageSource.slice(pageSource.indexOf("{/* MAIN COLUMN */}"), pageSource.indexOf("{/* SIDE RAIL */}"));
-    expect(main).toMatch(/\{ideaVerdicts \? \([\s\S]*?<IdeaVerdictsPanel/);
+    expect(main).toMatch(/\{isIdea \? \(\s*ideaVerdicts \? \(\s*<IdeaVerdictsPanel/);
     expect(pageSource).toMatch(/isIdea && !bug\.isDeleted\s*\?\s*await loadOptional<IdeaVerdictsData \| null>\("idea verdicts"/);
   });
 
-  it("has no conversation on an idea: it takes only verdicts", () => {
-    expect(pageSource).toMatch(/\{isIdea \? null : \(\s*<section\s+id="conversation"/);
+  it("puts an idea's verdicts where an issue's conversation goes: no comments on an idea", () => {
+    expect(pageSource).toMatch(/<IdeaVerdictsPanel[\s\S]*?\) : null\s*\) : \(\s*<section\s+id="conversation"/);
+    expect(pageSource).toMatch(/if \(!isIdea\) \{\s*for \(const comment of commentTree\)/);
   });
 
   it("only lets an issue be assigned once converted", () => {
