@@ -225,6 +225,7 @@ describe("agent issue reads", () => {
       id: "issue-a",
       status: "open",
       voteCount: 0,
+      convertedToIssueAt: null,
       beneficiaryUserId: "other",
       reporterId: "other",
       createdByAgentId: null,
@@ -232,7 +233,7 @@ describe("agent issue reads", () => {
       claims: [],
     };
     db.bug.findMany.mockResolvedValueOnce([open]).mockResolvedValueOnce([issue]);
-    const response = await list(request("GET", undefined, "?projectId=project-a&stage=reported&limit=1"));
+    const response = await list(request("GET", undefined, "?projectId=project-a&stage=idea&limit=1"));
     expect(response.status).toBe(200);
     expect(db.bug.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
       where: expect.objectContaining({ status: "open", id: { in: ["issue-a"] } }),
@@ -240,18 +241,20 @@ describe("agent issue reads", () => {
     }));
 
     db.bug.findMany.mockClear();
-    db.bug.findMany.mockResolvedValueOnce([{ ...open, voteCount: 1 }]);
-    const confirmed = await list(request("GET", undefined, "?projectId=project-a&stage=confirmed"));
+    // A converted issue is no longer an idea; `reported` is the old name for the idea stage.
+    db.bug.findMany.mockResolvedValueOnce([{ ...open, convertedToIssueAt: new Date("2026-10-20T00:00:00Z") }]);
+    const confirmed = await list(request("GET", undefined, "?projectId=project-a&stage=reported"));
     expect(confirmed.status).toBe(200);
     expect(await confirmed.json()).toEqual({ items: [], nextCursor: null });
     expect(db.bug.findMany).toHaveBeenCalledTimes(1);
   });
 
-  it("treats a confirmed issue with three upvotes as ready", async () => {
+  it("treats a converted, confirmed issue as ready, whatever its upvotes", async () => {
     const open = {
       id: "issue-a",
       status: "open",
-      voteCount: 3,
+      voteCount: 0,
+      convertedToIssueAt: new Date("2026-10-20T00:00:00Z"),
       beneficiaryUserId: "other",
       reporterId: "other",
       createdByAgentId: null,
@@ -305,7 +308,7 @@ describe("agent issue reads", () => {
     const cases: [string, string][] = [
       ["status=unknown", "status must be one of open, in_progress, resolved, closed."],
       ["severity=urgent", "severity must be one of low, medium, high, critical."],
-      ["stage=queued", "stage must be one of reported, confirmed, ready."],
+      ["stage=queued", "stage must be one of idea, confirming, ready, reported, confirmed."],
       ["assignee=%20", 'assignee must be "none" or a valid user id.'],
     ];
     for (const [query, error] of cases) {
@@ -774,7 +777,7 @@ describe("issue read confirmation", () => {
   it("returns validations newest-first and confirmed false with no accepts", async () => {
     const older = validation("v-old", "2026-10-19T10:00:00Z", { kind: "format", severity: null });
     const newer = validation("v-new", "2026-10-19T12:00:00Z");
-    db.bug.findFirst.mockResolvedValue({ ...issue, validations: [newer, older] });
+    db.bug.findFirst.mockResolvedValue({ ...issue, convertedToIssueAt: null, validations: [newer, older] });
     db.issueValidation.findMany.mockResolvedValue([]);
 
     const body = await readIssue();
@@ -809,7 +812,7 @@ describe("issue read confirmation", () => {
   }
 
   it("is confirmed once two distinct owners have accepted", async () => {
-    db.bug.findFirst.mockResolvedValue({ ...issue, status: "open", voteCount: 1 });
+    db.bug.findFirst.mockResolvedValue({ ...issue, status: "open", voteCount: 1, convertedToIssueAt: null });
     db.issueValidation.findMany.mockResolvedValue([
       accept("v1", "r1", "rob"),
       accept("v2", "r2", "sam"),
@@ -820,26 +823,30 @@ describe("issue read confirmation", () => {
     expect(body.intake).toBe("idea");
   });
 
-  it("passes a confirmed report on as an issue once it has three upvotes", async () => {
-    db.bug.findFirst.mockResolvedValue({ ...issue, status: "open", voteCount: 3 });
+  it("is an issue, ready once confirmed, after a manager agent converts it (#idea-verdicts)", async () => {
+    db.bug.findFirst.mockResolvedValue({ ...issue, status: "open", voteCount: 0, convertedToIssueAt: new Date("2026-10-20T00:00:00Z") });
     db.issueValidation.findMany.mockResolvedValue([
       accept("v1", "r1", "rob"),
       accept("v2", "r2", "sam"),
       triageClear("vt", "t1", "tia"),
     ]);
-    const body = await readIssue();
+    const body = (await readIssue()) as unknown as { confirmed: boolean; intake: string; stage: string };
     expect(body.confirmed).toBe(true);
     expect(body.intake).toBe("issue");
+    expect(body.stage).toBe("ready");
   });
 
-  it("shows the upvote count and the threshold an idea needs (#463)", async () => {
-    db.bug.findFirst.mockResolvedValue({ ...issue, status: "open", voteCount: 2 });
-    db.issueValidation.findMany.mockResolvedValue([accept("v1", "r1", "rob"), accept("v2", "r2", "sam")]);
-    const body = (await readIssue()) as unknown as { voteCount: number; voteThreshold: number; intake: string };
-    expect(body.voteCount).toBe(2);
-    expect(body.voteThreshold).toBe(3);
+  it("shows an idea's score and the project's threshold for converting it (#idea-verdicts)", async () => {
+    db.bug.findFirst.mockResolvedValue({ ...issue, status: "open", ideaScore: 2, convertedToIssueAt: null });
+    db.issueValidation.findMany.mockResolvedValue([]);
+    const body = (await readIssue()) as unknown as { ideaScore: number; ideaThreshold: number; intake: string; stage: string };
+    expect(body.ideaScore).toBe(2);
+    expect(body.ideaThreshold).toBe(3);
     expect(body.intake).toBe("idea");
-    expect(db.bug.findFirst.mock.calls.at(-1)?.[0]?.select.voteCount).toBe(true);
+    expect(body.stage).toBe("idea");
+    const select = db.bug.findFirst.mock.calls.at(-1)?.[0]?.select;
+    expect(select.ideaScore).toBe(true);
+    expect(select.convertedToIssueAt).toBe(true);
   });
 
   it("shows the linked fix and the commit a verdict would test (#544)", async () => {

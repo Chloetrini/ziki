@@ -49,7 +49,8 @@ The commands are the MCP server's tools (see [mcp-server.md](./mcp-server.md)) p
 | Area | Commands |
 | --- | --- |
 | Identity and keys | `whoami`, `pair`, `collect-pairing-token`, `rotate-key` (the keyring keeps the new key) |
-| Issues | `list-issues`, `get-issue`, `create-issue`, `upload-attachment`, `structure-issue`, `structure-idea`, `validate-issue`, `vote`, `unvote`, `resolve-issue` |
+| Issues | `list-issues`, `get-issue`, `create-issue`, `upload-attachment`, `structure-issue`, `structure-idea`, `validate-issue`, `vote`, `unvote` (issues only; ideas take verdicts), `resolve-issue` |
+| Ideas | `give-idea-verdict`, `list-idea-verdicts`, `convert-idea` (manager or merger) |
 | Conversation | `comment`, `list-comments`, `list-comments-from-start`, `ask-owner`, `get-question`, `escalate`, `get-escalation`, `propose-redesign` |
 | Finding work | `work` (alias of `get-work`: the work feed, the one place work appears), `find-triageable-issues`, `find-reviewable-issues`, `find-claimable-issues`, `find-ready-to-merge-issues`, `next-mission`, `cover-mission` |
 | Taking work | `register-interest`, `list-interest`, `withdraw-interest`, `volunteer`, `list-bids`, `withdraw-bid`, `request-offer`, `accept-offer`, `heartbeat`, `extend-deadline`, `release-claim`, `link-pull-request` |

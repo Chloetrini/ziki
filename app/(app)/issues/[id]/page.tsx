@@ -56,6 +56,8 @@ import { IssueBids } from "@/components/issue-bids";
 import { GoalBudgetSection } from "@/components/goal-budgets";
 import { Badge } from "@/components/ui/badge";
 import { VoteButton } from "@/components/vote-button";
+import { IdeaVerdictsPanel, IdeaVoteTotals, ideaScoreText, type IdeaVerdictBlock, type IdeaVerdictsData } from "@/components/idea-verdicts";
+import { IDEA_SUMMARY_MAX_CHARS, listIdeaVerdicts } from "@/lib/agent-api/idea-verdicts";
 import { UpdateIssueForm } from "@/components/update-issue-form";
 import { AddCommentDialog } from "@/components/add-comment-dialog";
 import type { DisputeRole } from "@/components/comment-form";
@@ -299,7 +301,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
       include: {
         type: { select: { id: true, name: true, isActive: true } },
         reporter: { select: { name: true, email: true, role: true, image: true } },
-        createdByAgent: { select: { id: true, name: true } },
+        createdByAgent: { select: { id: true, name: true, ownerUserId: true } },
         milestone: { select: { id: true, title: true, dueDate: true, isClosed: true } },
         assignee: { select: { id: true, name: true, role: true, image: true } },
         category: { select: { id: true, name: true, isActive: true } },
@@ -333,7 +335,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
         include: {
           type: { select: { id: true, name: true, isActive: true } },
           reporter: { select: { name: true, email: true, role: true, image: true } },
-          createdByAgent: { select: { id: true, name: true } },
+          createdByAgent: { select: { id: true, name: true, ownerUserId: true } },
           assignee: { select: { id: true, name: true, role: true, image: true } },
           category: { select: { id: true, name: true, isActive: true } },
           area: { select: { id: true, name: true } },
@@ -709,6 +711,22 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
       console.error("[bugs] issue stage lookup failed", error);
     }
   }
+  // #idea-verdicts: an idea takes verdicts until a manager agent converts it.
+  const isIdea = bug.convertedToIssueAt === null;
+  const ideaVerdicts: IdeaVerdictsData | null = isIdea
+    ? await loadOptional<IdeaVerdictsData | null>("idea verdicts", null, () =>
+        listIdeaVerdicts({ tenantId: bug.tenantId, projectId: bug.projectId }, bug.id),
+      )
+    : null;
+  const ownIdea =
+    bug.reporterId === userId || bug.beneficiaryUserId === userId || bug.createdByAgent?.ownerUserId === userId;
+  const verdictBlock: IdeaVerdictBlock = bug.isDeleted
+    ? "deleted"
+    : bug.status !== "open"
+      ? "closed"
+      : ownIdea
+        ? "own"
+        : null;
   const isAssignee = !!userId && bug.assigneeId === userId;
   const canUpdateStatus = canTriage || isAssignee;
   const canEdit =
@@ -726,7 +744,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
       membershipRole: access.membershipRole,
       currentAssigneeId: bug.assigneeId,
       targetAssigneeId: isAssignee ? null : userId,
-      voteCount: bug.voteCount,
+      converted: bug.convertedToIssueAt !== null,
     });
   const userVote =
     Array.isArray(bug.votes) && bug.votes.length > 0
@@ -995,17 +1013,30 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
 
           <div className="flex shrink-0 flex-wrap items-center gap-2 self-start print:hidden">
             <div className="hidden sm:contents">{headerActions}</div>
-            <VoteButton
-              bugId={bug.id}
-              voteCount={bug.voteCount}
-              userVote={userVote}
-              likeCount={voterSummary.likes.count}
-              likeVoters={voterSummary.likes.voters}
-              size="md"
-              showAvatars={false}
-              showReadinessGate={false}
-              readOnly={bug.isDeleted}
-            />
+            {isIdea ? (
+              // An idea takes verdicts, not upvotes (#idea-verdicts).
+              ideaVerdicts ? (
+                <a
+                  href="#idea-verdicts"
+                  data-testid="idea-score-link"
+                  className="inline-flex h-11 items-center gap-2 rounded-full border border-zk-border bg-zk-surface px-4 text-sm font-bold text-zk-text hover:bg-zk-chip"
+                >
+                  <span className="tabular-nums">{ideaScoreText(ideaVerdicts.ideaScore, ideaVerdicts.ideaThreshold)}</span>
+                  <IdeaVoteTotals votes={ideaVerdicts.votes} />
+                </a>
+              ) : null
+            ) : (
+              <VoteButton
+                bugId={bug.id}
+                voteCount={bug.voteCount}
+                userVote={userVote}
+                likeCount={voterSummary.likes.count}
+                likeVoters={voterSummary.likes.voters}
+                size="md"
+                showAvatars={false}
+                readOnly={bug.isDeleted}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -1056,6 +1087,17 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
             </section>
           ) : null}
 
+          {ideaVerdicts ? (
+            <IdeaVerdictsPanel
+              bugId={bug.id}
+              data={ideaVerdicts}
+              viewerId={userId ?? null}
+              block={verdictBlock}
+              summaryMaxChars={IDEA_SUMMARY_MAX_CHARS}
+              issueHref={issuePath(bug.number)}
+            />
+          ) : null}
+
           {/* Progress report (#1446), where the summary strip was; its stage drives the Conversation card. */}
           <IssueProgressReport
             decisions={agentDecisions}
@@ -1093,7 +1135,11 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
                   setback={bug.reviewStatus === "rejected"}
                   pullRequestUrl={bug.pullRequestUrl}
                   severity={bug.severity}
-                  voteCount={bug.voteCount}
+                  ideaVerdicts={
+                    ideaVerdicts
+                      ? { score: ideaVerdicts.ideaScore, threshold: ideaVerdicts.ideaThreshold, votes: ideaVerdicts.votes }
+                      : undefined
+                  }
                 />
                 {comments.hiddenThreads > 0 ? (
                   <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-zk-chip px-3 py-2 text-sm text-zk-text2 print:hidden">
@@ -1211,7 +1257,11 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
               </Badge>
               {intakeStage ? (
                 // What the stage means stays one hover away now the note under the chips is gone.
-                <span title={intakeDetail(intakeStage, bug.voteCount)} className="inline-flex">
+                <span
+                  title={intakeDetail(
+                    intakeStage,
+                    ideaVerdicts ? { score: ideaVerdicts.ideaScore, threshold: ideaVerdicts.ideaThreshold } : undefined,
+                  )} className="inline-flex">
                   <Badge className={`${issueChipBaseClass} ${issueStageChipClass[intakeStage]}`}>
                     {issueStageLabels[intakeStage]}
                   </Badge>

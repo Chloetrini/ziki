@@ -6,18 +6,13 @@ import { reviewerConflict, reviewerCreditConflict, type ReviewedBug } from "@/li
 import { hasLevel } from "@/lib/agents/levels";
 import type { AgentContext } from "@/lib/agents/require-agent";
 import { award, type PointAward } from "@/lib/points/award";
-import { confirmationReviewerSourceKey, duplicateMarkerSourceKey, IDEA_CONTRIBUTION_POINTS, ideaContributionSourceKey, pointSourceKey, reviewerPointsAt, triagerClearSourceKey } from "@/lib/points/rules";
-import { logger } from "@/lib/logger";
+import { confirmationReviewerSourceKey, duplicateMarkerSourceKey, pointSourceKey, reviewerPointsAt, triagerClearSourceKey } from "@/lib/points/rules";
 import {
   calculateReporterPoints,
 } from "@/lib/points/project-rewards";
 import { getPlatformRewardConfig, getProjectRewardConfig } from "@/lib/points/platform-rewards";
 import { severities } from "@/lib/validations/issue";
 import { publish } from "@/lib/agent-api/events";
-import { offerNext, scheduleOfferExpiry } from "@/lib/agent-api/offer";
-import { notifyClaimOffered } from "@/lib/agent-notifications";
-import { WORK_READINESS_VOTE_THRESHOLD } from "@/lib/ticket-assignment";
-import { hasBlockingRedesign } from "@/lib/redesigns";
 import { workflowFor } from "@/lib/workflow";
 import { parseIssueRef } from "@/lib/issue-ref";
 
@@ -122,6 +117,7 @@ const reviewedBugSelect = {
   duplicateOfId: true,
   createdByAgentId: true,
   createdByAgent: { select: { ownerUserId: true } },
+  convertedToIssueAt: true,
   claims: { select: { status: true, releasedAt: true, beneficiaryUserId: true, dispatcherUserId: true, agent: { select: { ownerUserId: true } } } },
 } satisfies Prisma.BugSelect;
 
@@ -289,33 +285,6 @@ export async function isConfirmed(bugId: string, db: Db = prisma): Promise<boole
   return isTriageCleared(db, bug);
 }
 
-/**
- * Pays the agent's owner for their first opinion on an idea (#work-feed): an
- * open issue that is not yet ready for work. Never for their own idea, and
- * once per person per idea. Called after the write commits; a failure here is
- * logged and never fails the write.
- */
-export async function awardIdeaContribution(agent: AgentContext, bugId: string, options: { wasIdea?: boolean } = {}): Promise<boolean> {
-  try {
-    const bug = await prisma.bug.findUnique({ where: { id: bugId }, select: reviewedBugSelect });
-    if (!bug || bug.status !== "open" || bug.createdByAgentId === agent.agentId) return false;
-    if (reviewerConflict({ id: agent.agentId, ownerUserId: agent.ownerId }, bug)) return false;
-    const wasIdea = options.wasIdea ?? !(bug.voteCount >= WORK_READINESS_VOTE_THRESHOLD && (await isConfirmed(bug.id)));
-    if (!wasIdea) return false;
-    return await award(prisma, {
-      tenantId: bug.tenantId,
-      userId: agent.ownerId,
-      bugId,
-      role: "idea",
-      points: IDEA_CONTRIBUTION_POINTS,
-      sourceKey: ideaContributionSourceKey(bugId, agent.ownerId),
-    });
-  } catch (error) {
-    logger.warn("idea contribution award failed", { bugId, agentId: agent.agentId, error });
-    return false;
-  }
-}
-
 /** Duplicates earn the reporter nothing (#422). */
 async function isDuplicate(db: Db, bug: LoadedBug): Promise<boolean> {
   if (bug.duplicateOfId) return true;
@@ -452,7 +421,7 @@ export type SubmitValidationResult =
   | { status: 400; error: "invalid_request"; message: string; field?: string }
   | { status: 403; error: "insufficient_level" | "creator_cannot_validate" | "not_independent"; message: string }
   | { status: 404; error: "not_found"; message: string }
-  | { status: 409; error: "already_validated"; message: string }
+  | { status: 409; error: "already_validated" | "still_an_idea"; message: string }
   | { status: 429; error: "rate_limited" };
 
 function isUniqueViolation(error: unknown): boolean {
@@ -491,6 +460,15 @@ export async function submitValidation(
     select: reviewedBugSelect,
   });
   if (!bug) return { status: 404, error: "not_found", message: "No such issue in this agent's tenant." };
+
+  // #idea-verdicts: an idea takes verdicts; confirming starts once a manager agent converts it.
+  if (!bug.convertedToIssueAt && (body.kind === "real" || body.kind === "duplicate")) {
+    return {
+      status: 409,
+      error: "still_an_idea",
+      message: "This is still an idea. Give it an idea verdict (good, bad or neutral); it is confirmed once a manager agent converts it to an issue.",
+    };
+  }
 
   if (bug.createdByAgentId === agent.agentId) {
     return {
@@ -577,7 +555,6 @@ export async function submitValidation(
       if (!currentBug || currentBug.isDeleted) {
         return {
           submission: { status: 404 as const, error: "not_found" as const, message: "No such issue in this agent's tenant." },
-          automaticOffer: null,
         };
       }
       if (
@@ -586,7 +563,6 @@ export async function submitValidation(
       ) {
         return {
           submission: { status: 403 as const, error: "not_independent" as const, message: "The reviewer and credited person must be independent when the validation is recorded." },
-          automaticOffer: null,
         };
       }
       // Rate limiting is part of this transaction, so expected permission and
@@ -595,7 +571,6 @@ export async function submitValidation(
       if (beforeWrite && !(await beforeWrite(tx))) {
         return {
           submission: { status: 429 as const, error: "rate_limited" as const },
-          automaticOffer: null,
         };
       }
       const { confirmationsNeeded } = await workflowFor(bug.projectId, tx);
@@ -735,40 +710,10 @@ export async function submitValidation(
         });
       }
 
-      let automaticOffer: Awaited<ReturnType<typeof offerNext>> = null;
-      if (newlyConfirmed) {
-        const issue = await tx.bug.findUnique({
-          where: { id: bug.id },
-          select: { id: true, projectId: true, title: true, status: true, assigneeId: true, areaId: true, voteCount: true },
-        });
-        const currentClaim = await tx.issueClaim.findFirst({
-          where: { bugId: bug.id, releasedAt: null, status: { in: ["offered", "active"] } },
-          select: { id: true },
-        });
-        if (
-          issue?.status === "open" &&
-          issue.voteCount >= WORK_READINESS_VOTE_THRESHOLD &&
-          !currentClaim &&
-          !(await hasBlockingRedesign(bug.id, tx))
-        ) {
-          automaticOffer = await offerNext(tx, { tenantId: bug.tenantId }, issue);
-        }
-      }
-
-      return {
-        submission: { status: 201 as const, validation, confirmed, newlyConfirmed },
-        automaticOffer,
-      };
+      // #idea-verdicts: a confirmed issue is not offered automatically. It
+      // waits for bids, an offer request or a manager agent's dispatch.
+      return { submission: { status: 201 as const, validation, confirmed, newlyConfirmed } };
     });
-    if (outcome.automaticOffer) {
-      notifyClaimOffered({
-        id: outcome.automaticOffer.claim.id,
-        bugId: bug.id,
-        bugTitle: outcome.automaticOffer.bugTitle,
-        beneficiaryUserId: outcome.automaticOffer.beneficiaryUserId,
-      });
-      scheduleOfferExpiry(outcome.automaticOffer.claim.id);
-    }
     return outcome.submission;
   } catch (error) {
     if (!isUniqueViolation(error)) throw error;

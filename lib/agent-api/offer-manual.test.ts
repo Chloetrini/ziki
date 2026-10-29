@@ -47,6 +47,7 @@ beforeEach(() => {
     status: "open",
     assigneeId: null,
     voteCount: 3,
+    convertedToIssueAt: new Date("2026-10-01T00:00:00Z"),
   });
   db.issueClaim.findFirst.mockResolvedValue(pendingOffer);
   isConfirmed.mockResolvedValue(true);

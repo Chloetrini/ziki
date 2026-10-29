@@ -77,3 +77,20 @@ describe("Bug detail header hierarchy (#687)", () => {
     expect(pageSource).not.toContain("IssueSectionTabs");
   });
 });
+
+describe("Idea page (#idea-verdicts)", () => {
+  it("shows the idea's score in place of the upvote button while it is an idea", () => {
+    expect(pageSource).toContain("const isIdea = bug.convertedToIssueAt === null;");
+    expect(pageSource).toMatch(/\{isIdea \?[\s\S]*?ideaScoreText\([\s\S]*?\) : \([\s\S]*?<VoteButton/);
+  });
+
+  it("shows the Idea verdicts panel in the main column, only for an idea", () => {
+    const main = pageSource.slice(pageSource.indexOf("{/* MAIN COLUMN */}"), pageSource.indexOf("{/* SIDE RAIL */}"));
+    expect(main).toMatch(/\{ideaVerdicts \? \([\s\S]*?<IdeaVerdictsPanel/);
+    expect(pageSource).toMatch(/isIdea\s*\?\s*await loadOptional<IdeaVerdictsData \| null>\("idea verdicts"/);
+  });
+
+  it("only lets an issue be assigned once converted", () => {
+    expect(pageSource).toContain("converted: bug.convertedToIssueAt !== null,");
+  });
+});

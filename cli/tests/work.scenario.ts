@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { readKeyring } from "../keyring";
-import { fileIssue, ok, refused, ziki, type Agent } from "./helpers";
+import { confirm, fileIssue, offeredTo, ok, refused, toIssue, ziki, type Agent } from "./helpers";
 
 type Item = { kind: string; key: string; minimumRole: string; canAct: boolean; blockedReason?: string; points?: number; issue?: { id: string }; actions: { name: string; cli: string }[] };
 
@@ -43,59 +43,60 @@ describe("the work feed", () => {
     expect((await fetch(url, { headers: { Authorization: "Bearer ziki_not_a_key" } })).status).toBe(401);
   });
 
-  it("shows a new idea at once, asks for opinions, and leaves it out of the reporter's own list", async () => {
-    const idea = await fileIssue("ada", "Work feed: an idea for opinions");
+  it("shows a new idea at once, asks for a verdict, and leaves it out of the reporter's own list", async () => {
+    const idea = await fileIssue("ada", "Work feed: an idea for verdicts");
     const bobs = await work("bob");
     const item = itemFor(bobs.items, "idea", idea);
     expect(item, "the new idea is in bob's list straight away").toBeTruthy();
     expect(item!.points).toBe(1);
-    expect(item!.actions.map((action) => action.name)).toEqual(expect.arrayContaining(["validate_issue", "check_duplicate", "comment"]));
-    expect(bobs.ask.join(" ")).toMatch(/opinion/);
+    expect(item!.actions.map((action) => action.name)).toEqual(["give_idea_verdict"]);
+    expect(bobs.ask.join(" ")).toMatch(/verdict/);
     expect(itemFor((await work("ada")).items, "idea", idea)).toBeUndefined();
   });
 
-  it("pays 1 point for the first opinion on an idea, once per person", async () => {
+  it("pays 1 point for the first verdict on an idea, once per person, and nothing for comments", async () => {
     const idea = await fileIssue("ada", "Work feed: an idea worth one point");
-    await ok("bob", "comment", { id: idea, body: "This would help: the current flow loses the draft when the page reloads." });
+    await ok("bob", "comment", { id: idea, body: "A plain comment on an idea is welcome but earns no idea point." });
+    expect(await ideaPoints("bob", idea)).toBe(0);
+    await ok("bob", "give-idea-verdict", { id: idea, opinion: "good", summary: "It keeps the draft.", comment: "The current flow loses the draft on reload." });
     expect(await ideaPoints("bob", idea)).toBe(1);
-    await ok("bob", "comment", { id: idea, body: "A second thought from the same owner should not pay a second point." });
-    await ok("bob", "validate-issue", { id: idea, kind: "real", verdict: "accept", severity: "medium" });
+    await ok("bob", "give-idea-verdict", { id: idea, opinion: "neutral", summary: "On second thought, unsure.", comment: "Changing my verdict pays nothing more." });
     expect(await ideaPoints("bob", idea)).toBe(1);
-    // Contributed, so no point is offered again; the duplicate check is still open.
-    const item = itemFor((await work("bob")).items, "idea", idea);
-    expect(item?.points).toBeUndefined();
+    expect(itemFor((await work("bob")).items, "idea", idea), "given a verdict, so it leaves bob's list").toBeUndefined();
   });
 
-  it("pays nothing for a one-word comment, but a validation counts", async () => {
-    const idea = await fileIssue("ada", "Work feed: short replies earn nothing");
-    await ok("cara", "comment", { id: idea, body: "+1" });
-    expect(await ideaPoints("cara", idea)).toBe(0);
-    await ok("cara", "validate-issue", { id: idea, kind: "duplicate", verdict: "reject" });
-    expect(await ideaPoints("cara", idea)).toBe(1);
-  });
-
-  it("never pays for an opinion on your own idea", async () => {
-    const idea = await fileIssue("ada", "Work feed: my own idea");
-    await ok("ada", "comment", { id: idea, body: "Adding detail to my own idea is fine but earns no idea point." });
-    expect(await ideaPoints("ada", idea)).toBe(0);
+  it("asks managers to convert an idea at the threshold, then lists it to confirm", async () => {
+    const idea = await fileIssue("ada", "Work feed: an idea to convert");
+    await ok("bob", "give-idea-verdict", { id: idea, opinion: "good", summary: "Yes.", comment: "Good idea." });
+    expect(itemFor((await work("dana")).items, "convert_idea", idea), "below the threshold, nothing to convert").toBeUndefined();
+    await ok("eli", "give-idea-verdict", { id: idea, opinion: "good", votes: 2, summary: "Yes. Clear win.", comment: "A merger agent may give up to 5." });
+    const forBob = itemFor((await work("bob")).items, "convert_idea", idea);
+    expect(forBob).toMatchObject({ minimumRole: "manager", canAct: false });
+    const forDana = itemFor((await work("dana")).items, "convert_idea", idea);
+    expect(forDana).toMatchObject({ canAct: true });
+    expect((await work("dana")).ask.join(" ")).toMatch(/convert/);
+    await ok("dana", "convert-idea", { id: idea });
+    const confirmItem = itemFor((await work("cara")).items, "confirm_issue", idea);
+    expect(confirmItem?.actions.map((action) => action.name)).toEqual(["validate_issue", "check_duplicate"]);
+    expect(itemFor((await work("cara")).items, "idea", idea)).toBeUndefined();
   });
 
   it("lists offers to the agent and then its claim, with what to do next", async () => {
     const issue = await fileIssue("ada", "Work feed: an issue to offer");
-    await ok("bob", "validate-issue", { id: issue, kind: "real", verdict: "accept", severity: "high" });
-    await ok("cara", "validate-issue", { id: issue, kind: "real", verdict: "accept", severity: "high" });
-    await ok("dana", "validate-issue", { id: issue, kind: "duplicate", verdict: "reject" });
-    for (const agent of ["bob", "cara", "eli"] as const) await ok(agent, "vote", { id: issue });
-    expect(itemFor((await work("bob")).items, "ready_issue", issue), "ready issues are listed to take").toBeTruthy();
+    await toIssue(issue, ["bob", "cara", "eli"]);
+    await confirm(issue, ["bob", "cara"], "dana");
 
-    const { offer } = await ok("bob", "request-offer", { id: issue });
-    const solver = agentIds.get(offer.agentId)!;
-    const offered = (await work(solver)).items.find((item) => item.key === `offer:${offer.id}`);
-    expect(offered?.actions[0].cli).toBe(`accept-offer --id ${offer.id}`);
-    await ok(solver, "accept-offer", { id: offer.id });
-    const claim = itemFor((await work(solver)).items, "active_claim", issue);
+    // A confirmed issue is listed to take; it is offered once an agent asks.
+    expect(await offeredTo(issue)).toBeNull();
+    expect(itemFor((await work("bob")).items, "ready_issue", issue), "ready issues are listed to take").toBeTruthy();
+    const requested = (await ok("bob", "request-offer", { id: issue })).offer;
+    const offer = { agent: agentIds.get(requested.agentId)!, offerId: requested.id };
+    const offered = (await work(offer.agent)).items.find((item) => item.key === `offer:${offer.offerId}`);
+    expect(offered?.actions[0].cli).toBe(`accept-offer --id ${offer.offerId}`);
+    await ok(offer.agent, "accept-offer", { id: offer.offerId });
+    const claim = itemFor((await work(offer.agent)).items, "active_claim", issue);
     expect(claim?.actions.map((action) => action.name)).toEqual(["heartbeat", "link_pull_request", "release_claim"]);
-    await ok(solver, "release-claim", { id: issue, reason: "Done testing the feed." });
+    await ok(offer.agent, "release-claim", { id: issue, reason: "Done testing the feed." });
   });
 
   it("shows manager and merger tasks to everyone, but only lets those classes act", async () => {

@@ -3,7 +3,6 @@ import { awardBid } from "@/lib/agent-api/bid";
 import { isConfirmed } from "@/lib/agent-api/validation";
 import { openIssueStages } from "@/lib/issue-stage";
 import type { PrismaClient } from "@prisma/client";
-import { WORK_READINESS_VOTE_THRESHOLD } from "@/lib/ticket-assignment";
 import { commentedSummary } from "@/lib/activity-log";
 import { publish } from "@/lib/agent-api/events";
 import { logger } from "@/lib/logger";
@@ -60,7 +59,7 @@ export async function sweepPendingBids(options?: {
       status: "open",
       isDeleted: false,
       assigneeId: null,
-      voteCount: { gte: WORK_READINESS_VOTE_THRESHOLD },
+      convertedToIssueAt: { not: null },
       claims: {
         none: {
           releasedAt: null,
@@ -94,7 +93,7 @@ export async function sweepPendingBids(options?: {
       if (!isConfirmedIssue && typeof (prisma as unknown as { bug?: { findMany?: unknown } }).bug?.findMany === "function") {
         try {
           const stage = (await openIssueStages(prisma as unknown as PrismaClient, { id: issue.id })).get(issue.id);
-          isConfirmedIssue = stage === "ready" || stage === "confirmed";
+          isConfirmedIssue = stage === "ready";
         } catch {}
       }
       if (!isConfirmedIssue) continue;

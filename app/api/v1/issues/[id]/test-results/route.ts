@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { agentErrorResponse, requireAgent } from "@/lib/agents/require-agent";
 import { agentBudgetExceededResponse, consumeAgentBudget } from "@/lib/agents/rate-budget";
 import { withAgentBudgetHeaders } from "@/lib/agents/rate-budget-headers";
+import { eventStreamBus, TENANT_WRITE } from "@/lib/events/stream-bus";
 import { submitTestVerdict } from "@/lib/agent-api/test-verdict";
 
 /**
@@ -40,6 +41,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const result = await submitTestVerdict(agent, id, body);
+  // A committed verdict drops the work feed cache before the event broadcast (#work-feed).
+  if (result.status === 200 || result.status === 201) eventStreamBus.emit(TENANT_WRITE, agent.tenantId);
+
   if (result.status === 201) {
     return withAgentBudgetHeaders(NextResponse.json({ verdict: result.verdict }, { status: 201 }), budget);
   }

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
-import { confirm, fileIssue, ok, refused, unique, ziki } from "./helpers";
+import { confirm, fileIssue, offeredTo, ok, refused, toIssue, unique, ziki } from "./helpers";
 
 /** Talking about an issue and lining up work on it, through the CLI. */
 describe("working on issues together", () => {
@@ -37,6 +37,7 @@ describe("working on issues together", () => {
   });
 
   it("registers, lists and withdraws interest once confirmed", async () => {
+    await toIssue(id, ["ada", "bob", "eli"]);
     await confirm(id, ["ada", "bob"], "dana");
     await ok("bob", "register-interest", { id, note: "Happy to take this." });
     expect(JSON.stringify(await ok("ada", "list-interest", { id }))).toContain("Happy to take this.");
@@ -44,9 +45,9 @@ describe("working on issues together", () => {
     expect(JSON.stringify(await ok("ada", "list-interest", { id }))).not.toContain("Happy to take this.");
   });
 
-  it("takes bids once the issue is ready (three upvotes), and a bid can be withdrawn", async () => {
-    await refused("eli", "volunteer", { id, note: "Not ready yet." }, 409);
-    for (const agent of ["ada", "bob", "dana"] as const) await ok(agent, "vote", { id });
+  it("takes bids once the issue is ready (converted and confirmed), and a bid can be withdrawn", async () => {
+    // A confirmed issue is not offered automatically, so it is open to bids.
+    expect(await offeredTo(id)).toBeNull();
     const bid = await ok("eli", "volunteer", { id, note: "I can fix this today." });
     expect(bid.bid_id).toBeTruthy();
     expect(JSON.stringify(await ok("cara", "list-bids", { id }))).toContain(bid.bid_id);
@@ -103,6 +104,9 @@ describe("working on issues together", () => {
 
   it("finds work by role: triageable and reviewable issues", async () => {
     const fresh = await fileIssue("ada", "CLI collaboration: needs triage");
+    // Ideas take verdicts; the confirmation queues list it once it is converted.
+    expect(JSON.stringify(await ok("bob", "find-triageable-issues"))).not.toContain(fresh);
+    await toIssue(fresh, ["bob", "cara", "eli"]);
     expect(JSON.stringify(await ok("bob", "find-triageable-issues"))).toContain(fresh);
     expect(JSON.stringify(await ok("bob", "find-reviewable-issues", { type: "validation" }))).toContain(fresh);
   });

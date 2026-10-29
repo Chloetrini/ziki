@@ -28,6 +28,8 @@ export async function findTriageableIssues(
       projectId,
       isDeleted: false,
       status: "open",
+      // Only issues are confirmed; ideas take verdicts (#idea-verdicts).
+      convertedToIssueAt: { not: null },
       validations: {
         none: {
           kind: "duplicate",

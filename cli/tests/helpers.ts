@@ -73,6 +73,27 @@ export async function fileIssue(agent: Agent, label: string): Promise<string> {
   return created.issue.id as string;
 }
 
+/**
+ * Turns an idea into an issue: each of `givers` says it is a good idea (the
+ * default threshold is 3 net votes), then dana, the manager agent, converts it.
+ */
+export async function toIssue(id: string, givers: [Agent, Agent, Agent]): Promise<void> {
+  for (const agent of givers) {
+    await ok(agent, "give-idea-verdict", { id, opinion: "good", summary: "Worth doing.", comment: `${agent} thinks this is worth doing.` });
+  }
+  expect((await ok("dana", "convert-idea", { id })).stage).toBe("confirming");
+}
+
+/** The sandbox agent Ziki offered the issue to, from each agent's work feed, if any. */
+export async function offeredTo(id: string): Promise<{ agent: Agent; offerId: string } | null> {
+  for (const agent of ["ada", "bob", "cara", "dana", "eli"] as const) {
+    const feed = await ok(agent, "work");
+    const offer = (feed.items as { kind: string; key: string; issue?: { id: string } }[]).find((item) => item.kind === "offer" && item.issue?.id === id);
+    if (offer) return { agent, offerId: offer.key.replace(/^offer:/, "") };
+  }
+  return null;
+}
+
 /** Confirms an issue the way the workflow needs: two independent real-accepts and a duplicate clearance. */
 export async function confirm(id: string, reviewers: [Agent, Agent], triager: Agent): Promise<void> {
   for (const agent of reviewers) await ok(agent, "validate-issue", { id, kind: "real", verdict: "accept", severity: "high" });

@@ -13,6 +13,7 @@ export type ProjectWorkflowValues = {
   maxActiveClaims: number;
   volunteerWindowSeconds: number;
   autoMerge: boolean;
+  ideaThreshold: number;
 };
 
 export const DEFAULT_PROJECT_WORKFLOW: Readonly<ProjectWorkflowValues> = Object.freeze({
@@ -32,6 +33,8 @@ export const DEFAULT_PROJECT_WORKFLOW: Readonly<ProjectWorkflowValues> = Object.
   volunteerWindowSeconds: 120,
   // The accepted fix's linked PR is merged automatically when possible.
   autoMerge: true,
+  // An idea can be converted to an issue once good minus bad votes reach 3.
+  ideaThreshold: 3,
 });
 
 /**
@@ -48,6 +51,7 @@ export const WORKFLOW_LIMITS = {
   deliveryMinutes: { min: 1, max: 10080 },
   maxActiveClaims: { min: 1, max: 20 },
   volunteerWindowSeconds: { min: 30, max: 3600 },
+  ideaThreshold: { min: 1, max: 100 },
 } as const;
 
 const boundedInt = (field: keyof typeof WORKFLOW_LIMITS, label: string) => {
@@ -68,6 +72,7 @@ export const workflowSettingsSchema = z.object({
   maxActiveClaims: boundedInt("maxActiveClaims", "Maximum active claims"),
   volunteerWindowSeconds: boundedInt("volunteerWindowSeconds", "Volunteer window"),
   autoMerge: z.boolean({ error: "Auto-merge must be on or off." }),
+  ideaThreshold: boundedInt("ideaThreshold", "Idea threshold"),
 });
 
 /** A stored row, with defaults for a missing row or a test double. */
@@ -84,5 +89,6 @@ export function workflowValues(
     volunteerWindowSeconds:
       row?.volunteerWindowSeconds ?? DEFAULT_PROJECT_WORKFLOW.volunteerWindowSeconds,
     autoMerge: row?.autoMerge ?? DEFAULT_PROJECT_WORKFLOW.autoMerge,
+    ideaThreshold: row?.ideaThreshold ?? DEFAULT_PROJECT_WORKFLOW.ideaThreshold,
   };
 }

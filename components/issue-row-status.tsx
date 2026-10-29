@@ -2,7 +2,6 @@ import type { IssueStage } from "@/lib/issue-stage";
 import type { MergePath } from "@/lib/merge-history";
 import { MergePathChips } from "@/components/merge-path";
 import { ElapsedTime } from "@/components/elapsed-time";
-import { WORK_READINESS_VOTE_THRESHOLD } from "@/lib/ticket-assignment";
 
 const icon = "h-3 w-3 shrink-0";
 
@@ -44,15 +43,15 @@ export type IssueRowWork = {
 };
 
 /**
- * One line saying where an issue stands: Idea, Confirmed (bots), Ready for
- * bids, who is working on it and for how long, or Resolved / Closed.
+ * One line saying where an issue stands: Idea (with its score), Confirming
+ * (bots), Ready for bids, who is working on it and for how long, or Resolved / Closed.
  * Once its fix is merged, the dev → staging → main chips from merge history instead.
  */
 export function IssueRowStatus({
   status,
   stage,
   botConfirmations,
-  votes,
+  idea,
   work,
   reviewStatus,
   mergePath,
@@ -60,8 +59,8 @@ export function IssueRowStatus({
   status: string;
   stage: IssueStage | undefined;
   botConfirmations: number;
-  /** Upvotes so far, shown against the threshold while Confirming. */
-  votes: number;
+  /** An idea's net verdict score and the project's threshold (#idea-verdicts). */
+  idea?: { score: number; threshold: number | null } | null;
   work: IssueRowWork | null;
   reviewStatus?: string | null;
   /** Where the merged fix has got to; null or absent before it merges. */
@@ -137,28 +136,33 @@ export function IssueRowStatus({
       </span>
     );
   }
-  if (stage === "confirmed") {
-    // Bots confirmed it; it becomes Ready for bids at the upvote threshold.
-    const shown = Math.min(votes, WORK_READINESS_VOTE_THRESHOLD);
+  if (stage === "confirming") {
+    // An issue now; it is Ready for bids once independent bots confirm it.
+    const bots = `${botConfirmations} ${botConfirmations === 1 ? "bot" : "bots"}`;
     return (
       <span
         className="issue-row-status inline-flex items-center gap-1 text-zk-text2"
-        title={`Confirmed by ${botConfirmations} ${botConfirmations === 1 ? "bot" : "bots"}; ${shown} of ${WORK_READINESS_VOTE_THRESHOLD} upvotes to be ready for bids`}
+        title={`Confirmed by ${bots} so far`}
       >
         <span className="text-zk-accent"><BotIcon /></span>
-        <span>
-          Confirming… <span className="tabular-nums">({shown}/{WORK_READINESS_VOTE_THRESHOLD})</span>
-        </span>
-        <span className="sr-only">
-          {" "}upvotes. Confirmed by {botConfirmations} {botConfirmations === 1 ? "bot" : "bots"}.
-        </span>
+        <span>Confirming…</span>
+        <span className="sr-only"> Confirmed by {bots}.</span>
       </span>
     );
   }
-  if (stage === "reported") {
+  if (stage === "idea") {
+    const score = idea ? (idea.threshold === null ? `${idea.score}` : `${idea.score}/${idea.threshold}`) : null;
     return (
-      <span className="issue-row-status inline-flex items-center gap-1 text-zk-text2">
+      <span
+        className="issue-row-status inline-flex items-center gap-1 text-zk-text2"
+        title={idea ? `Score ${idea.score}${idea.threshold === null ? "" : ` of ${idea.threshold}`}` : undefined}
+      >
         <span className="text-amber-400"><BulbIcon /></span> Idea
+        {score ? (
+          <span className="tabular-nums">
+            ({score})<span className="sr-only"> score</span>
+          </span>
+        ) : null}
       </span>
     );
   }

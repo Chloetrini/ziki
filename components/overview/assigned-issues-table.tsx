@@ -14,6 +14,8 @@ export type OverviewAssignedIssue = {
   severity: Severity;
   status: Status;
   voteCount: number;
+  /** An idea's net verdict score; null once it is an issue (#idea-verdicts). */
+  ideaScore?: number | null;
   userVoted: boolean;
   typeName: string | null;
   commentCount: number;
@@ -53,7 +55,7 @@ function priorityTone(severity: Severity): {
 
 function stageTone(stage: IssueStage | null): { bg: string; fg: string; label: string } | null {
   if (!stage) return null;
-  if (stage === "confirmed" || stage === "ready") {
+  if (stage === "confirming" || stage === "ready") {
     return { bg: "bg-zk-ok-bg", fg: "text-zk-ok-fg", label: issueStageLabels[stage] };
   }
   return { bg: "bg-zk-chip", fg: "text-zk-text2", label: issueStageLabels[stage] };
@@ -127,11 +129,23 @@ export function AssignedIssuesTable({ issues }: { issues: OverviewAssignedIssue[
                       index < issues.length - 1 ? "border-b border-zk-divider" : ""
                     }`}
                   >
-                    <OverviewVote
-                      bugId={issue.id}
-                      voteCount={issue.voteCount}
-                      voted={issue.userVoted}
-                    />
+                    {typeof issue.ideaScore === "number" ? (
+                      // Ideas take verdicts, not upvotes.
+                      <span
+                        className="inline-flex h-9 w-[52px] shrink-0 flex-col items-center justify-center rounded-full border border-dashed border-zk-border text-zk-text"
+                        aria-label={`Idea score ${issue.ideaScore}`}
+                        title={`Idea score ${issue.ideaScore}`}
+                      >
+                        <span className="text-[13px] font-bold leading-none tabular-nums">{issue.ideaScore}</span>
+                        <span className="text-[9.5px] leading-tight text-zk-muted">score</span>
+                      </span>
+                    ) : (
+                      <OverviewVote
+                        bugId={issue.id}
+                        voteCount={issue.voteCount}
+                        voted={issue.userVoted}
+                      />
+                    )}
                     <Link
                       href={issuePath(issue.number)}
                       className="flex min-w-0 flex-1 items-center gap-3 text-left text-zk-text"

@@ -20,7 +20,7 @@ const notesProject = z.string().trim().min(1).describe("Project id whose notes t
 const EXTRA_TOOLS: readonly CliTool[] = [
   {
     name: "ziki_vote",
-    summary: "Upvote an issue on behalf of the agent's owner. Three upvotes on a confirmed issue make it ready for work.",
+    summary: "Upvote an issue (not an idea: ideas take give-idea-verdict) on behalf of the agent's owner. A manager or merger agent's upvote counts as 5.",
     level: "working",
     method: "POST",
     route: "/issues/{id}/vote",

@@ -1,7 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { AgentContext } from "@/lib/agents/require-agent";
 import { requireLevel } from "@/lib/agents/levels";
-import { WORK_READINESS_VOTE_THRESHOLD } from "@/lib/ticket-assignment";
 import { workflowFor } from "@/lib/workflow";
 import { isConfirmed } from "@/lib/agent-api/validation";
 
@@ -33,7 +32,7 @@ export async function findClaimableIssues(
       projectId,
       isDeleted: false,
       status: "open",
-      voteCount: { gte: WORK_READINESS_VOTE_THRESHOLD },
+      convertedToIssueAt: { not: null },
       claims: {
         none: {
           releasedAt: null,

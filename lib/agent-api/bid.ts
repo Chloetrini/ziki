@@ -12,7 +12,6 @@ import { isOfferExpired } from "@/lib/agent-api/offer";
 import { assertRedesignOpen } from "@/lib/redesigns";
 import { deliveryDeadline, deliveryWindowMinutes } from "@/lib/claim-deadline";
 import { assigneeChangedSummary, statusChangedSummary } from "@/lib/activity-log";
-import { WORK_READINESS_VOTE_THRESHOLD } from "@/lib/ticket-assignment";
 import { ensureWatching } from "@/lib/watch";
 import type { AppRole } from "@/lib/roles";
 import { parseIssueRef } from "@/lib/issue-ref";
@@ -69,7 +68,7 @@ export async function placeBid(caller: AgentContext, projectId: string, issueRef
     if (!locked.length) throw new IssueApiError(404, "Issue not found in this project.");
     const bug = await tx.bug.findFirst({
       where: { id: bugId, tenantId: caller.tenantId, projectId, isDeleted: false },
-      select: { id: true, projectId: true, status: true, voteCount: true },
+      select: { id: true, projectId: true, status: true, voteCount: true, convertedToIssueAt: true },
     });
     if (!bug) throw new IssueApiError(404, "Issue not found in this project.");
     if (bug.status !== "open") throw new IssueApiError(409, "Only open issues can take bids.");
@@ -78,11 +77,11 @@ export async function placeBid(caller: AgentContext, projectId: string, issueRef
     if (!isReady && typeof (tx as unknown as { bug?: { findMany?: unknown } }).bug?.findMany === "function") {
       try {
         const stage = (await openIssueStages(tx as unknown as PrismaClient, { id: bugId })).get(bugId);
-        isReady = stage === "ready" || stage === "confirmed";
+        isReady = stage === "ready";
       } catch {}
     }
-    if (!isReady || bug.voteCount < WORK_READINESS_VOTE_THRESHOLD) {
-      throw new IssueApiError(409, "This is still an idea. Reviewers must accept it, and it needs at least 3 upvotes, before it can be passed on.");
+    if (!isReady || !bug.convertedToIssueAt) {
+      throw new IssueApiError(409, "This is not ready yet. A manager agent converts an idea to an issue, then reviewers confirm it, before it can be passed on.");
     }
     await assertRedesignOpen(bugId, tx);
     await competingClaim(tx, bugId);
@@ -198,7 +197,7 @@ export async function awardBid(actor: Actor, bidId: string, dispatcher?: AgentCo
         where: { id: bidId },
         include: {
           beneficiary: { select: { name: true } },
-          bug: { select: { id: true, status: true, assigneeId: true, tenantId: true, projectId: true, reporterId: true, severity: true, voteCount: true, assignee: { select: { name: true } } } },
+          bug: { select: { id: true, status: true, assigneeId: true, tenantId: true, projectId: true, reporterId: true, severity: true, voteCount: true, convertedToIssueAt: true, assignee: { select: { name: true } } } },
         },
       });
       if (!fresh || fresh.withdrawnAt || fresh.awardedAt) throw new IssueApiError(409, "This bid is no longer open.");
@@ -208,11 +207,11 @@ export async function awardBid(actor: Actor, bidId: string, dispatcher?: AgentCo
       if (!isReady && typeof (tx as unknown as { bug?: { findMany?: unknown } }).bug?.findMany === "function") {
         try {
           const stage = (await openIssueStages(tx as unknown as PrismaClient, { id: fresh.bugId })).get(fresh.bugId);
-          isReady = stage === "ready" || stage === "confirmed";
+          isReady = stage === "ready";
         } catch {}
       }
-      if (!isReady || fresh.bug.voteCount < WORK_READINESS_VOTE_THRESHOLD) {
-        throw new IssueApiError(409, "This is still an idea. Reviewers must accept it, and it needs at least 3 upvotes, before it can be passed on.");
+      if (!isReady || !fresh.bug.convertedToIssueAt) {
+        throw new IssueApiError(409, "This is not ready yet. A manager agent converts an idea to an issue, then reviewers confirm it, before it can be passed on.");
       }
       if (fresh.bug.assigneeId && fresh.bug.assigneeId !== fresh.beneficiaryUserId) {
         throw new IssueApiError(409, "This issue is already assigned to someone else.");

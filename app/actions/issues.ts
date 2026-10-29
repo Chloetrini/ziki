@@ -506,10 +506,10 @@ export async function updateBugAction(
         membershipRole: access.membershipRole,
         currentAssigneeId: existing.assigneeId,
         targetAssigneeId,
-        voteCount: existing.voteCount,
+        converted: existing.convertedToIssueAt !== null,
       })
     ) {
-      if (targetAssigneeId && typeof existing.voteCount === "number" && existing.voteCount < 3) {
+      if (targetAssigneeId && existing.convertedToIssueAt === null) {
         return { error: TICKET_ASSIGN_ERRORS.needsVotes };
       }
       return { error: TICKET_ASSIGN_ERRORS.unauthorized };
@@ -1588,6 +1588,9 @@ export async function addCommentAction(
   return { ok: true, commentId, ...(attachedPrUrl ? { linkedPullRequestUrl: attachedPrUrl } : {}) };
 }
 
+/** Upvotes are for issues. An idea takes a verdict instead (#idea-verdicts). */
+const IDEA_UPVOTE_MESSAGE = "This is an idea, so it takes verdicts, not upvotes. Give it a verdict: good, bad or neutral.";
+
 export type ToggleVoteResult = ActionResult & {
   voted?: boolean;
   userVote?: number;
@@ -1627,10 +1630,14 @@ export async function toggleVoteAction(
 
   const bug = await prisma.bug.findUnique({
     where: { id: bugId, ...bugInTenant(await currentTenantIdFor(userId)) },
-    select: { id: true, isDeleted: true },
+    select: { id: true, isDeleted: true, convertedToIssueAt: true },
   });
   if (!bug || bug.isDeleted) {
     return { error: "Issue not found" };
+  }
+  // #idea-verdicts: an idea takes good, bad or neutral verdicts, not upvotes.
+  if (bug.convertedToIssueAt === null) {
+    return { error: IDEA_UPVOTE_MESSAGE };
   }
 
   const result = await prisma.$transaction(async (tx) => {
@@ -1941,7 +1948,7 @@ export async function selfAssignBugAction(
       title: true,
       assigneeId: true,
       isDeleted: true,
-      voteCount: true,
+      convertedToIssueAt: true,
       assignee: { select: { name: true } },
     },
   });
@@ -1963,10 +1970,10 @@ export async function selfAssignBugAction(
       membershipRole: (await currentTenantAccess(userId, user.role)).membershipRole,
       currentAssigneeId: existing.assigneeId,
       targetAssigneeId,
-      voteCount: existing.voteCount,
+      converted: existing.convertedToIssueAt !== null,
     })
   ) {
-    if (assign && typeof existing.voteCount === "number" && existing.voteCount < 3) {
+    if (assign && existing.convertedToIssueAt === null) {
       return { error: TICKET_ASSIGN_ERRORS.needsVotes };
     }
     return { error: TICKET_ASSIGN_ERRORS.unauthorized };

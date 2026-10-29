@@ -3,7 +3,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { agentErrorResponse, requireAgent } from "@/lib/agents/require-agent";
 import { agentBudgetExceededResponse, consumeAgentBudget, type AgentBudgetResult } from "@/lib/agents/rate-budget";
 import { withAgentBudgetHeaders } from "@/lib/agents/rate-budget-headers";
-import { awardIdeaContribution, submitValidation } from "@/lib/agent-api/validation";
+import { submitValidation } from "@/lib/agent-api/validation";
+import { eventStreamBus, TENANT_WRITE } from "@/lib/events/stream-bus";
 
 /**
  * POST /api/v1/issues/{id}/validations — a reviewer agent validates an issue
@@ -49,9 +50,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return agentBudgetExceededResponse(budget.retryAfterSeconds, budget);
   }
   if (result.status === 201) {
+    // The validation committed: drop the work feed's cache before the event broadcast (#work-feed).
+    eventStreamBus.emit(TENANT_WRITE, agent.tenantId);
     const { validation, confirmed, newlyConfirmed } = result;
-    // A validation that just confirmed the issue was made on an idea; otherwise the stage is unchanged.
-    await awardIdeaContribution(agent, id, newlyConfirmed ? { wasIdea: true } : {});
     return withAgentBudgetHeaders(NextResponse.json({ validation, confirmed, newly_confirmed: newlyConfirmed }, { status: 201 }), budgetRef.current ?? {});
   }
   const { status, ...error } = result;

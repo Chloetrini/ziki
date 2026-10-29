@@ -34,6 +34,7 @@ function form(values: Record<string, string | number | boolean> = {}) {
   const data = new FormData();
   data.set("slug", "web");
   const merged = {
+    ideaThreshold: 3,
     confirmationsNeeded: 3,
     verdictsNeeded: 2,
     offerWindowSeconds: 1800,
@@ -103,6 +104,26 @@ describe("updateProjectWorkflowAction (#595)", () => {
     });
     expect(invalidateWorkflow).toHaveBeenCalledWith("project-1");
     expect(revalidatePath).toHaveBeenCalledWith("/projects/web/settings");
+  });
+
+  it("saves the idea threshold (#idea-verdicts)", async () => {
+    await expect(updateProjectWorkflowAction(undefined, form({ ideaThreshold: 5 }))).resolves.toEqual({ ok: true });
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: expect.objectContaining({ ideaThreshold: 5 }) }),
+    );
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        changes: expect.objectContaining({ ideaThreshold: { from: 3, to: 5 } }),
+      }),
+    });
+  });
+
+  it("rejects an idea threshold out of range", async () => {
+    await expect(updateProjectWorkflowAction(undefined, form({ ideaThreshold: 0 }))).resolves.toMatchObject({
+      ok: false,
+      fieldErrors: { ideaThreshold: expect.any(String) },
+    });
+    expect(transaction).not.toHaveBeenCalled();
   });
 
   it("does not audit or invalidate an unchanged save", async () => {

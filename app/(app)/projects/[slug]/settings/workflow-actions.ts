@@ -14,6 +14,7 @@ export type WorkflowActionResult =
   | { ok: false; error: string; fieldErrors?: Record<string, string> };
 
 const NUMERIC_FIELDS = [
+  "ideaThreshold",
   "confirmationsNeeded",
   "verdictsNeeded",
   "offerWindowSeconds",

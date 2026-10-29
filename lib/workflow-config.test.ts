@@ -17,6 +17,7 @@ describe("project workflow defaults (#595)", () => {
       maxActiveClaims: 2,
       volunteerWindowSeconds: 120,
       autoMerge: true,
+      ideaThreshold: 3,
     });
   });
 

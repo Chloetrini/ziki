@@ -62,6 +62,8 @@ function bugRow(overrides: Record<string, unknown> = {}) {
     duplicateOfId: null,
     createdByAgentId: null,
     createdByAgent: null,
+    // Validations apply to issues; the fixture is one converted from an idea.
+    convertedToIssueAt: new Date("2026-10-01T00:00:00Z"),
     claims: [],
     ...overrides,
   };
@@ -488,45 +490,27 @@ describe("confirmation: the two-reviewer rule (#433)", () => {
     expect(types.filter((type) => type === "issue.confirmed")).toHaveLength(1);
   });
 
-  it("automatically offers a ready issue when the second independent reviewer confirms it (#590)", async () => {
-    vi.useFakeTimers();
+  it("leaves a newly confirmed issue for bids and dispatch instead of offering it (#idea-verdicts)", async () => {
     db.membership.findMany.mockResolvedValue([
       { userId: "bob", user: { agents: [{ id: "agent-bob" }] } },
     ]);
-    const reviewerOne = reviewer("r1", "rob");
-    const reviewerTwo = reviewer("r2", "sam");
-
     await submitValidation(reviewer("t1", "tia", "working"), "bug1", clearTriage);
-    await submitValidation(reviewerOne, "bug1", acceptReal);
-    const result = await submitValidation(reviewerTwo, "bug1", acceptReal);
+    await submitValidation(reviewer("r1", "rob"), "bug1", acceptReal);
+    const result = await submitValidation(reviewer("r2", "sam"), "bug1", acceptReal);
 
     expect(result).toMatchObject({ status: 201, confirmed: true, newlyConfirmed: true });
-    expect(db.issueClaim.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        bugId: "bug1",
-        beneficiaryUserId: "bob",
-        agentId: "agent-bob",
-        status: "offered",
-      }),
-    });
-    expect(db.agentEvent.create.mock.calls.map(([call]) => call.data.type)).toContain("claim.offered");
-    expect(notifications.notifyClaimOffered).toHaveBeenCalledWith(expect.objectContaining({
-      bugId: "bug1",
-      beneficiaryUserId: "bob",
-    }));
+    expect(db.issueClaim.create).not.toHaveBeenCalled();
+    expect(db.agentEvent.create.mock.calls.map(([call]) => call.data.type)).toContain("issue.confirmed");
+    expect(db.agentEvent.create.mock.calls.map(([call]) => call.data.type)).not.toContain("claim.offered");
+    expect(notifications.notifyClaimOffered).not.toHaveBeenCalled();
   });
 
-  it("does not automatically offer a confirmed issue before work-readiness votes are met", async () => {
-    vi.useFakeTimers();
-    db.bug.findUnique.mockResolvedValue(bugRow({ voteCount: 2 }));
-    db.membership.findMany.mockResolvedValue([
-      { userId: "bob", user: { agents: [{ id: "agent-bob" }] } },
-    ]);
-
-    await submitValidation(reviewer("r1", "rob"), "bug1", acceptReal);
-    await submitValidation(reviewer("r2", "sam"), "bug1", acceptReal);
-
-    expect(db.issueClaim.create).not.toHaveBeenCalled();
+  it("refuses `real` and duplicate validations on an idea, which takes verdicts instead (#idea-verdicts)", async () => {
+    db.bug.findFirst.mockResolvedValue(bugRow({ convertedToIssueAt: null }));
+    for (const body of [acceptReal, clearTriage]) {
+      await expect(submitValidation(reviewer("r1", "rob"), "bug1", body)).resolves.toMatchObject({ status: 409, error: "still_an_idea" });
+    }
+    expect(db.issueValidation.create).not.toHaveBeenCalled();
   });
 
   it("one accepting reviewer does not confirm; two do, and the reporter is paid once", async () => {

@@ -2,13 +2,14 @@ import type { MembershipRole } from "@prisma/client";
 import { isOrganizationAdmin } from "@/lib/organization-role";
 import type { AppRole } from "@/lib/roles";
 
+/** Upvotes an issue needed to be ready, before ideas took verdicts. Kept for issue votes only. */
 export const WORK_READINESS_VOTE_THRESHOLD = 3;
 
 export const TICKET_ASSIGN_ERRORS = {
   unauthorized: "Only an owner or admin of this organization can assign issues to other people",
   unauthorizedUpdate: "Only the assignee, or an owner or admin of this organization, can update this issue",
   statusNeedsAssignment: "Assign this issue to yourself first, then change its status.",
-  needsVotes: `This issue must reach at least ${WORK_READINESS_VOTE_THRESHOLD} upvotes before work can be assigned.`,
+  needsVotes: "This is still an idea. A manager agent must convert it to an issue before work can be assigned.",
   needsAgentClaim: "An agent has to be offered this issue, or have its bid awarded, before you can work on it.",
   invalidId: "Invalid issue ID",
   notFound: "Issue not found",
@@ -34,7 +35,7 @@ export function canAssignTicket({
   membershipRole,
   currentAssigneeId,
   targetAssigneeId,
-  voteCount,
+  converted,
   claimed = false,
 }: {
   actorId: string;
@@ -42,7 +43,8 @@ export function canAssignTicket({
   membershipRole?: MembershipRole | null;
   currentAssigneeId?: string | null;
   targetAssigneeId?: string | null;
-  voteCount?: number;
+  /** Whether the report has been converted from an idea to an issue (#idea-verdicts). */
+  converted?: boolean;
   /** True only when this assignment is an accepted offer or an awarded bid. */
   claimed?: boolean;
 }): boolean {
@@ -50,8 +52,8 @@ export function canAssignTicket({
     return true;
   }
 
-  // If assigning work to someone (not unassigning), check work readiness threshold if voteCount is specified (#764)
-  if (targetAssigneeId && typeof voteCount === "number" && voteCount < WORK_READINESS_VOTE_THRESHOLD) {
+  // Work is only assigned on an issue, never on an idea (#764, #idea-verdicts).
+  if (targetAssigneeId && converted === false) {
     return false;
   }
 

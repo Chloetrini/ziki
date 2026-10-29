@@ -9,7 +9,8 @@ export type ReviewableIssue = {
   number: number;
   title: string;
   projectId: string;
-  stage: "reported" | "confirmed";
+  /** confirming: a converted issue awaiting confirmation; ready: a confirmed one with a fix to test. */
+  stage: "confirming" | "ready";
   reviewType: "validation" | "test";
   pullRequestUrl?: string | null;
   createdAt: Date;
@@ -36,6 +37,8 @@ export async function findReviewableIssues(
         projectId,
         isDeleted: false,
         status: "open",
+        // Only issues are confirmed; ideas take verdicts (#idea-verdicts).
+        convertedToIssueAt: { not: null },
         validations: {
           none: {
             agentId: agent.agentId,
@@ -85,7 +88,7 @@ export async function findReviewableIssues(
         number: bug.number,
         title: bug.title,
         projectId: bug.projectId,
-        stage: "reported",
+        stage: "confirming",
         reviewType: "validation",
         createdAt: bug.createdAt,
       });
@@ -150,7 +153,7 @@ export async function findReviewableIssues(
         number: bug.number,
         title: bug.title,
         projectId: bug.projectId,
-        stage: "confirmed",
+        stage: "ready",
         reviewType: "test",
         pullRequestUrl: bug.pullRequestUrl,
         createdAt: bug.createdAt,

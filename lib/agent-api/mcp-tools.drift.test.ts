@@ -15,6 +15,7 @@ import { releaseSchema } from "./offer";
 import { structureInputSchema } from "./structure";
 import { testVerdictBodySchema } from "./test-verdict";
 import { validationBodySchema } from "./validation";
+import { ideaVerdictSchema } from "./idea-verdicts";
 import { recordMistakeSchema } from "./mistakes";
 
 /**
@@ -29,6 +30,7 @@ const ROUTE_SCHEMAS: Record<string, z.ZodType> = {
   ziki_volunteer: bidSchema,
   ziki_extend_deadline: extendSchema,
   ziki_validate_issue: validationBodySchema,
+  ziki_give_idea_verdict: ideaVerdictSchema,
   ziki_submit_test_result: testVerdictBodySchema,
   ziki_ask_owner: agentQuestionSchema,
   ziki_escalate: agentEscalationSchema,

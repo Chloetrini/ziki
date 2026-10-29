@@ -18,6 +18,8 @@ import type { AppRole } from "@/lib/roles";
 import { IssueFilters } from "@/components/issue-filters";
 import { RowAge, RowAssignee } from "@/components/issue-row-meta";
 import { VoteButton } from "@/components/vote-button";
+import { IdeaScoreBadge } from "@/components/idea-verdicts";
+import { workflowFor } from "@/lib/workflow";
 import { severityLabels } from "@/lib/labels";
 import { severities } from "@/lib/validations/issue";
 import { boundSearchTerm, escapeSearchQuery, toSingleQueryParam } from "@/lib/search";
@@ -430,11 +432,11 @@ export default async function BugsPage({
     }
   }
 
-  // New ideas and Drafted ideas in the Inbox are the issues still at the reported stage.
+  // New ideas and Drafted ideas in the Inbox are the reports still at the idea stage.
   const stageView: IssueStage | null = isDeletedView
     ? null
     : inboxView === "ideas" || inboxView === "drafts"
-      ? "reported"
+      ? "idea"
       : parseIssueStageView(toSingleQueryParam(params.stage));
   let stages = new Map<string, IssueStage>();
   if (!isDeletedView) {
@@ -585,6 +587,10 @@ export default async function BugsPage({
         status: true,
         severity: true,
         voteCount: true,
+        projectId: true,
+        // #idea-verdicts: an idea shows its verdict score, not upvotes.
+        convertedToIssueAt: true,
+        ideaScore: true,
         isDeleted: true,
         isBoosted: true,
         duplicateOf: showDuplicates ? { select: { number: true } } : false,
@@ -625,6 +631,19 @@ export default async function BugsPage({
     return issuesQueryError(listed.reference);
   }
   const bugs = listed.bugs;
+
+  // #idea-verdicts: each project's idea threshold, for the ideas on this page.
+  const ideaProjectIds = [...new Set(bugs.filter((bug) => bug.convertedToIssueAt === null).map((bug) => bug.projectId))];
+  const ideaThresholds = new Map<string, number>();
+  await Promise.all(
+    ideaProjectIds.map(async (projectId) => {
+      try {
+        ideaThresholds.set(projectId, (await workflowFor(projectId)).ideaThreshold);
+      } catch (error) {
+        console.error("[bugs] idea threshold lookup failed", error);
+      }
+    }),
+  );
 
   // #301: when searching, show why a row matched. Only rows whose title
   // doesn't already contain the query need their description, so the list
@@ -780,8 +799,8 @@ export default async function BugsPage({
     }),
   ).toString();
 
-  const reportedCount = [...stages.values()].filter((stage) => stage === "reported").length;
-  const confirmedCount = [...stages.values()].filter((stage) => stage === "confirmed").length;
+  const ideaCount = [...stages.values()].filter((stage) => stage === "idea").length;
+  const confirmingCount = [...stages.values()].filter((stage) => stage === "confirming").length;
   const readyCount = [...stages.values()].filter((stage) => stage === "ready").length;
 
   const [statusCounts, escalatedCount, rejectedCount, duplicateCount, readyToMergeCount, liveCount] = isDeletedView || !tenantId ? [[], 0, 0, 0, 0, 0] : await Promise.all([
@@ -822,7 +841,7 @@ export default async function BugsPage({
     loadOrEmpty("design inbox", () => prisma.bug.count({ where: { ...liveTabWhere, redesigns: DESIGN_WHERE } }), 0),
     loadOrEmpty(
       "ideas inbox",
-      async () => [...(await openIssueStages(prisma, liveTabWhere)).values()].filter((stage) => stage === "reported").length,
+      async () => [...(await openIssueStages(prisma, liveTabWhere)).values()].filter((stage) => stage === "idea").length,
       0,
     ),
     loadOrEmpty(
@@ -905,7 +924,7 @@ export default async function BugsPage({
         </div>
         <Suspense fallback={<div className="h-8 w-36 rounded-lg bg-zk-chip" />}>
           <IssueFilters compact tagTypes={tagTypes} platforms={platforms} milestones={milestones} areas={areas} shortcutsEnabled={shortcutsEnabled}
-            stageCounts={isDeletedView ? undefined : { reported: reportedCount, confirmed: confirmedCount, ready: readyCount }}
+            stageCounts={isDeletedView ? undefined : { idea: ideaCount, confirming: confirmingCount, ready: readyCount }}
             trailing={isFirstRun ? null : (
               <>
                 {/* Desktop: New issue is a + just left of the platform menu, which stays rightmost. */}
@@ -1096,7 +1115,7 @@ export default async function BugsPage({
                 : inboxView === "design"
                   ? "No redesign proposals are waiting for a decision."
                   : inboxView === "ideas"
-                    ? "Newly reported issues show up here until they're confirmed."
+                    ? "New ideas show up here until a manager agent converts them to issues."
                     : inboxView === "drafts"
                       ? "No unstructured draft ideas are waiting to be structured."
                       : isWatchingView
@@ -1150,6 +1169,7 @@ export default async function BugsPage({
                     const voterSummary =
                       voterSummaries.get(bug.id) ?? createEmptyVoterSummary();
                     const stage = stages.get(bug.id);
+                    const isIdea = bug.convertedToIssueAt === null;
                     const typeName = bug.type?.name ?? "—";
                     const isSecurity = /security/i.test(typeName);
                     const isFeature = !isSecurity && /feature|improve|enhance|request|idea/i.test(typeName);
@@ -1159,7 +1179,8 @@ export default async function BugsPage({
                       ? { person: claim?.beneficiary?.name ?? bug.assignee?.name ?? null, since: claim ? (claim.claimedAt ?? claim.createdAt) : null }
                       : null;
                     const rowStatus = (
-                      <IssueRowStatus status={bug.status} stage={stage} botConfirmations={botConfirmations.get(bug.id) ?? 0} votes={bug.voteCount} work={work}
+                      <IssueRowStatus status={bug.status} stage={stage} botConfirmations={botConfirmations.get(bug.id) ?? 0} work={work}
+                        idea={isIdea ? { score: bug.ideaScore, threshold: ideaThresholds.get(bug.projectId) ?? null } : null}
                         mergePath={bug.reviewStatus === "merged" ? mergePathOf(bug) : null} />
                     );
 
@@ -1177,15 +1198,19 @@ export default async function BugsPage({
                           </div>
                         ) : null}
                         <div className="issues-vote w-[52px] shrink-0">
-                          <VoteButton
-                            bugId={bug.id}
-                            voteCount={bug.voteCount}
-                            userVote={userVote}
-                            likeCount={voterSummary.likes.count}
-                            size="sm"
-                            chevron
-                            readOnly={isDeletedView}
-                          />
+                          {isIdea ? (
+                            <IdeaScoreBadge score={bug.ideaScore} threshold={ideaThresholds.get(bug.projectId) ?? null} />
+                          ) : (
+                            <VoteButton
+                              bugId={bug.id}
+                              voteCount={bug.voteCount}
+                              userVote={userVote}
+                              likeCount={voterSummary.likes.count}
+                              size="sm"
+                              chevron
+                              readOnly={isDeletedView}
+                            />
+                          )}
                         </div>
                         <Link
                           href={issuePath(bug.number)}

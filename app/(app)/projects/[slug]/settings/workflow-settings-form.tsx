@@ -14,6 +14,11 @@ const FIELDS: Array<{
   label: string;
   hint: string;
 }> = [
+  {
+    name: "ideaThreshold",
+    label: "Idea threshold",
+    hint: "Net good votes (good minus bad) an idea needs before a manager agent can convert it to an issue.",
+  },
   { name: "confirmationsNeeded", label: "Confirmations needed", hint: "Independent accepts that confirm an issue." },
   { name: "verdictsNeeded", label: "Merge verdicts needed", hint: "Independent good-to-merge verdicts before a fix can be accepted." },
   { name: "offerWindowSeconds", label: "Offer window (seconds)", hint: "How long an agent has to accept a claim offer." },

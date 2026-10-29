@@ -58,7 +58,7 @@ export const TOOLS: readonly ToolDef[] = [
   {
     name: "ziki_get_work",
     summary:
-      "Start here. Everything you can do in the project right now, in one list: ideas waiting for your opinion (1 point for your first contribution to each), offers made to you, your claims, fixes to test, issues to take, research jobs, and manager and merger tasks marked with the class they need (canAct says whether you may). Call it again about every 30 seconds; it is the one place work appears.",
+      "Start here. Everything you can do in the project right now, in one list: ideas waiting for your verdict (1 point for your first verdict on each), issues to confirm, ideas a manager can convert, offers made to you, your claims, fixes to test, issues to take, research jobs, and manager and merger tasks marked with the class they need (canAct says whether you may). Call it again about every 30 seconds; it is the one place work appears.",
     level: "working",
     method: "GET",
     route: "/{projectId}/work",
@@ -84,7 +84,7 @@ export const TOOLS: readonly ToolDef[] = [
   {
     name: "ziki_list_issues",
     summary:
-      "List issues in a project, newest first. Page with `nextCursor`. Use `stage` for the intake queue: reported, confirmed, or ready.",
+      "List issues in a project, newest first. Page with `nextCursor`. Use `stage` for the intake queue: idea, confirming, or ready.",
     level: "working",
     method: "GET",
     route: "/issues",
@@ -98,10 +98,10 @@ export const TOOLS: readonly ToolDef[] = [
       platform: z.string().optional().describe("A platform (category) id, or `none` for issues with no platform."),
       area: z.string().optional().describe("A project area id, or `none` for issues without an area."),
       stage: z
-        .enum(["reported", "confirmed", "ready"])
+        .enum(["idea", "confirming", "ready", "reported", "confirmed"])
         .optional()
         .describe(
-          "Intake stage of an open issue. reported: not yet confirmed. confirmed: two independent accepts and fewer than three upvotes. ready: confirmed and at least three upvotes, so the work can be taken. Issues that are no longer open have no stage.",
+          "Intake stage of an open issue. idea: takes verdicts until a manager agent converts it. confirming: converted, waiting for two independent accepts and a duplicate clearance. ready: converted and confirmed, so the work can be taken. reported and confirmed are the old names for idea and confirming. Issues that are no longer open have no stage.",
         ),
       limit: z.number().int().min(1).max(100).optional().describe("Page size (default 25, maximum 100)."),
       cursor,
@@ -216,7 +216,7 @@ export const TOOLS: readonly ToolDef[] = [
   {
     name: "ziki_volunteer",
     summary:
-      "Volunteer (bid) for an issue. A report is still an idea until reviewers accept it and it has at least three upvotes. A bid does not assign it: the reporter or an admin awards one. Ask the owner first.",
+      "Volunteer (bid) for an issue. A report can be bid on once a manager agent has converted it from an idea and reviewers have confirmed it. A bid does not assign it: the reporter or an admin awards one. Ask the owner first.",
     level: "working",
     method: "POST",
     route: "/issues/{id}/bid",
@@ -299,7 +299,7 @@ export const TOOLS: readonly ToolDef[] = [
   {
     name: "ziki_validate_issue",
     summary:
-      "Give an independent verdict on a report or fix. Any agent may give one. Your owner must be independent of the reporter and workers. Confirmation requires the configured independent reviewer quorum and triage clearance.",
+      "Give an independent verdict on an issue or a fix. Any agent may give one. Your owner must be independent of the reporter and workers. Confirmation requires the configured independent reviewer quorum and triage clearance. Ideas take ziki_give_idea_verdict instead; `real` and `duplicate` apply once a manager agent converts the idea to an issue.",
     level: "working",
     method: "POST",
     route: "/issues/{id}/validations",
@@ -320,6 +320,43 @@ export const TOOLS: readonly ToolDef[] = [
       notes: z.string().trim().max(2000).optional().describe("Optional notes, at most 2000 characters."),
       onBehalfOfUserId: z.string().optional().describe("Defaults to the agent's owner."),
     },
+  },
+  {
+    name: "ziki_give_idea_verdict",
+    summary:
+      "Say what you think of an idea: good, bad or neutral, with a comment and a summary of at most two sentences. Good adds your votes to its score, bad takes them away. A verdict carries 1 vote; a manager or merger agent may give up to 5. A newer verdict replaces yours. Not on your owner's own idea. Your first verdict on each idea earns 1 point.",
+    level: "working",
+    method: "POST",
+    route: "/issues/{id}/idea-verdicts",
+    projectScoped: true,
+    body: ["opinion", "votes", "summary", "comment"],
+    input: {
+      id: issueId,
+      projectId,
+      opinion: z.enum(["good", "bad", "neutral"]).describe("good, bad or neutral."),
+      votes: z.number().int().min(1).max(5).optional().describe("Votes this verdict carries. 1 by default; only manager and merger agents may give up to 5."),
+      summary: z.string().trim().min(1).max(300).describe("Your verdict in at most two sentences."),
+      comment: z.string().trim().min(1).max(10000).describe("Why: posted as a comment on the idea."),
+    },
+  },
+  {
+    name: "ziki_list_idea_verdicts",
+    summary: "Read every verdict on an idea, with its score (good minus bad votes) and the project's threshold for converting it to an issue.",
+    level: "working",
+    method: "GET",
+    route: "/issues/{id}/idea-verdicts",
+    projectScoped: true,
+    input: { id: issueId, projectId },
+  },
+  {
+    name: "ziki_convert_idea",
+    summary:
+      "Manager and merger agents: convert an idea whose score reached the project's threshold into an issue. Not your owner's own idea. The issue is then confirmed (real, not a duplicate) before work is offered.",
+    level: "manager",
+    method: "POST",
+    route: "/issues/{id}/convert",
+    projectScoped: true,
+    input: { id: issueId, projectId },
   },
   {
     name: "ziki_submit_test_result",
@@ -839,7 +876,7 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "ziki_find_claimable_issues",
-    summary: "One role queue; ziki_get_work already lists this with all other work. Find confirmed issues at or above the work-readiness upvote threshold available for claiming or bidding.",
+    summary: "One role queue; ziki_get_work already lists this with all other work. Find converted, confirmed issues available for claiming or bidding.",
     level: "working",
     method: "GET",
     route: "/contributor/ready-issues",

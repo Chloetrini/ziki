@@ -45,6 +45,7 @@ const openBug = {
   reporterId: "reporter",
   isDeleted: false,
   voteCount: 3,
+  convertedToIssueAt: new Date("2026-10-01T00:00:00Z"),
   assignee: null,
 };
 
@@ -53,7 +54,7 @@ beforeEach(() => {
   resetWorkflowCache();
   db.$transaction.mockImplementation((fn: (tx: typeof db) => unknown) => fn(db));
   db.$queryRaw.mockResolvedValue([{ id: "issue1" }]);
-  db.bug.findFirst.mockResolvedValue({ id: "issue1", projectId: "project", status: "open", voteCount: 3 });
+  db.bug.findFirst.mockResolvedValue({ id: "issue1", projectId: "project", status: "open", voteCount: 3, convertedToIssueAt: new Date("2026-10-01T00:00:00Z") });
   db.issueClaim.findFirst.mockResolvedValue(null);
   db.issueClaim.count.mockResolvedValue(0);
   db.projectWorkflow.findUnique.mockResolvedValue(null);
@@ -91,17 +92,18 @@ describe("placeBid", () => {
     expect(db.issueBid.create).toHaveBeenCalled();
   });
 
-  it("refuses an idea that reviewers have not accepted or that lacks three upvotes", async () => {
+  it("refuses an issue that is not confirmed, or an idea not yet converted to an issue", async () => {
     vi.mocked(isConfirmed).mockResolvedValue(false);
     await expect(placeBid(caller, "project", "issue1")).rejects.toMatchObject({
       status: 409,
-      message: expect.stringContaining("still an idea"),
+      message: expect.stringContaining("not ready yet"),
     });
     vi.mocked(isConfirmed).mockResolvedValue(true);
-    db.bug.findFirst.mockResolvedValue({ id: "issue1", projectId: "project", status: "open", voteCount: 2 });
+    // Confirmed, but still an idea: a manager agent has not converted it.
+    db.bug.findFirst.mockResolvedValue({ id: "issue1", projectId: "project", status: "open", voteCount: 3, convertedToIssueAt: null });
     await expect(placeBid(caller, "project", "issue1")).rejects.toMatchObject({
       status: 409,
-      message: expect.stringContaining("still an idea"),
+      message: expect.stringContaining("not ready yet"),
     });
     expect(db.issueBid.create).not.toHaveBeenCalled();
   });
@@ -189,11 +191,11 @@ describe("awardBid", () => {
     });
   });
 
-  it("does not award an idea that is still short of three upvotes", async () => {
-    db.issueBid.findUnique.mockResolvedValue({ ...stored, bug: { ...openBug, voteCount: 2 } });
+  it("does not award a bid on an idea that is not yet converted to an issue", async () => {
+    db.issueBid.findUnique.mockResolvedValue({ ...stored, bug: { ...openBug, convertedToIssueAt: null } });
     await expect(awardBid({ id: "reporter" }, "bid1")).rejects.toMatchObject({
       status: 409,
-      message: expect.stringContaining("still an idea"),
+      message: expect.stringContaining("not ready yet"),
     });
     expect(db.issueClaim.create).not.toHaveBeenCalled();
   });
@@ -237,7 +239,7 @@ describe("readable bid references (#587)", () => {
   });
 
   it.each(["587", "ZE-587"])("locks and saves the canonical ID when bidding on %s", async (reference) => {
-    db.bug.findFirst.mockResolvedValue({ id: canonicalId, projectId: "project", status: "open", voteCount: 3 });
+    db.bug.findFirst.mockResolvedValue({ id: canonicalId, projectId: "project", status: "open", voteCount: 3, convertedToIssueAt: new Date("2026-10-01T00:00:00Z") });
     db.$queryRaw.mockResolvedValue([{ id: canonicalId }]);
 
     await placeBid(caller, "project", reference, "I can fix it");
@@ -265,7 +267,7 @@ describe("readable bid references (#587)", () => {
   });
 
   it("keeps canonical references working without a numeric lookup", async () => {
-    db.bug.findFirst.mockResolvedValue({ id: canonicalId, projectId: "project", status: "open", voteCount: 3 });
+    db.bug.findFirst.mockResolvedValue({ id: canonicalId, projectId: "project", status: "open", voteCount: 3, convertedToIssueAt: new Date("2026-10-01T00:00:00Z") });
     db.$queryRaw.mockResolvedValue([{ id: canonicalId }]);
     await placeBid(caller, "project", canonicalId);
     expect(db.bug.findFirst).toHaveBeenCalledTimes(1);

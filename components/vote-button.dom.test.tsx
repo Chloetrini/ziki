@@ -79,7 +79,7 @@ describe("VoteButton interactive optimistic updates (#219)", () => {
     });
   });
 
-  it("displays upvote readiness gate progress and unlocks at 3 upvotes (#764)", async () => {
+  it("no longer shows an upvote readiness gate: upvotes don't gate the work (#idea-verdicts)", async () => {
     mockToggle.mockResolvedValueOnce({
       voteCount: 3,
       likeCount: 3,
@@ -98,15 +98,14 @@ describe("VoteButton interactive optimistic updates (#219)", () => {
       />
     );
 
-    const indicator = screen.getByTestId("readiness-gate-indicator");
-    expect(indicator).toHaveTextContent("2 of 3 upvotes to unlock work");
+    expect(screen.queryByTestId("readiness-gate-indicator")).toBeNull();
+    expect(screen.queryByText(/unlock work/i)).toBeNull();
 
     // The large button's name starts with its visible "Upvote 2" (WCAG 2.5.3).
     const likeButton = screen.getByRole("button", { name: /^upvote 2 votes/i });
     await user.click(likeButton);
 
-    // Optimistically updates to 3 votes and unlocks work
-    expect(indicator).toHaveTextContent("Work unlocked");
+    expect(screen.getByRole("button", { name: /^upvoted 3 votes/i })).toBeInTheDocument();
   });
 
   it("renders accessible error with icon, 12px minimum font, and aria-describedby linkage (#703)", async () => {

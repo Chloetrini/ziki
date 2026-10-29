@@ -120,6 +120,9 @@ class EventStreamBus extends EventEmitter {
 
 export const eventStreamBus = new EventStreamBus();
 
+/** Emitted with a tenant id once an agent write has committed (#work-feed), ahead of its event broadcast. */
+export const TENANT_WRITE = "tenant-write";
+
 /**
  * Create a subscription for SSE streaming with proper filtering.
  * @param agent - Authenticated agent context

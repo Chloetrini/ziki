@@ -132,15 +132,15 @@ export function IssueStageSummary({
   setback = false,
   pullRequestUrl = null,
   severity = null,
-  voteCount,
+  ideaVerdicts,
 }: {
   decisions: ReadonlyArray<AgentDecision>;
   currentStage: DecisionStage;
   setback?: boolean;
   pullRequestUrl?: string | null;
   severity?: Severity | null;
-  /** The issue's upvotes, shown on the Idea stage, where they gate it. */
-  voteCount?: number;
+  /** While it is an idea: its score, the threshold and the good, bad and neutral votes (#idea-verdicts). */
+  ideaVerdicts?: { score: number; threshold: number; votes: { good: number; bad: number; neutral: number } };
 }) {
   const picked = useIssueStage();
   const stage = picked?.stage ?? currentStage;
@@ -165,10 +165,10 @@ export function IssueStageSummary({
   }
   const latest = inStage[inStage.length - 1];
   // The stage's totals in the card's corner: every agent decision up or down,
-  // zeros included, and on the Idea stage the upvotes that gate it.
+  // zeros included, and on the Idea stage the verdicts that gate it.
   const up = inStage.filter((decision) => decisionTone(decision) === "positive").length;
   const down = inStage.length - up;
-  const showVotes = stage === "idea" && typeof voteCount === "number";
+  const verdicts = stage === "idea" ? ideaVerdicts : undefined;
 
   return (
     <div key={stage} className="issue-progress ssum lg" aria-label={`${label} stage update`} role="group">
@@ -195,8 +195,11 @@ export function IssueStageSummary({
               <span className="sr-only"> down</span>
             </span>
           </span>
-          {showVotes ? (
-            <span className="text-[12px] text-zk-muted">{plural(voteCount, "upvote")}</span>
+          {verdicts ? (
+            <span className="text-[12px] text-zk-muted" data-testid="idea-verdict-totals">
+              Score {verdicts.score} of {verdicts.threshold} · {verdicts.votes.good} good · {verdicts.votes.bad} bad ·{" "}
+              {verdicts.votes.neutral} neutral
+            </span>
           ) : null}
         </div>
       </div>

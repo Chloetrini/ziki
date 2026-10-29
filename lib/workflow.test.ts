@@ -17,6 +17,7 @@ const row = {
   maxActiveClaims: 3,
   volunteerWindowSeconds: 300,
   autoMerge: false,
+  ideaThreshold: 5,
 };
 
 describe("workflowFor (#595)", () => {

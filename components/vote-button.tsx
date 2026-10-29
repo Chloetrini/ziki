@@ -4,11 +4,11 @@ import { useState, useTransition } from "react";
 import { toggleVoteAction } from "@/app/actions/issues";
 import type { VoterInfo } from "@/lib/voters";
 import { VoterAvatars } from "@/components/voter-avatars";
-import { WORK_READINESS_VOTE_THRESHOLD } from "@/lib/ticket-assignment";
 
 /**
  * #1059: one upvote control. Downvotes and Dislike are gone; an upvote says
- * "this matters", and three of them unlock the work (#764).
+ * "this matters". Upvotes are for issues only: an idea takes verdicts, and
+ * upvotes no longer gate the work (#idea-verdicts).
  */
 type VoteButtonProps = {
   bugId: string;
@@ -20,7 +20,6 @@ type VoteButtonProps = {
   likeVoters?: VoterInfo[];
   size?: "sm" | "md";
   showAvatars?: boolean;
-  showReadinessGate?: boolean;
   /** Deleted issues: show the count, but it can't be changed. */
   readOnly?: boolean;
   /** Reference-style compact vote control, used only by the Issues list. */
@@ -69,7 +68,6 @@ export function VoteButton({
   likeVoters = [],
   size = "sm",
   showAvatars = false,
-  showReadinessGate = true,
   readOnly = false,
   chevron = false,
 }: VoteButtonProps) {
@@ -80,7 +78,6 @@ export function VoteButton({
   const errorId = `vote-error-${bugId}`;
   const [pending, startTransition] = useTransition();
   const isMd = size === "md";
-  const unlocked = count >= WORK_READINESS_VOTE_THRESHOLD;
 
   const handleVote = (event: React.MouseEvent) => {
     event.preventDefault();
@@ -162,17 +159,6 @@ export function VoteButton({
             </span>
           </button>
           {showAvatars ? <VoterAvatars voters={likeVoters} totalCount={count} size="md" /> : null}
-          {/* Readiness (#764) is a status, not a second control. */}
-          {showReadinessGate ? (
-            <p
-              data-testid="readiness-gate-indicator"
-              className={`text-xs font-medium ${unlocked ? "text-zk-ok-fg" : "text-zk-muted"}`}
-            >
-              {unlocked
-                ? "Work unlocked"
-                : `${count} of ${WORK_READINESS_VOTE_THRESHOLD} upvotes to unlock work`}
-            </p>
-          ) : null}
         </div>
         {errorLine}
       </div>

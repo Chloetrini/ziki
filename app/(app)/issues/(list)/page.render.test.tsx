@@ -38,7 +38,7 @@ vi.mock("@/lib/tenant-context", async (importOriginal) => ({
 }));
 vi.mock("@/lib/issue-stage", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/issue-stage")>()),
-  openIssueStages: vi.fn(async () => new Map([["bug-1", "reported"]])),
+  openIssueStages: vi.fn(async () => new Map([["bug-1", "idea"]])),
 }));
 vi.mock("@/lib/voter-summaries", () => ({
   fetchVoterSummaries: vi.fn(async () =>
@@ -52,6 +52,10 @@ vi.mock("@/lib/voter-summaries", () => ({
       ],
     ]),
   ),
+}));
+vi.mock("@/lib/workflow", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/workflow")>()),
+  workflowFor: vi.fn(async () => ({ ...(await import("@/lib/workflow-config")).DEFAULT_PROJECT_WORKFLOW, ideaThreshold: 4 })),
 }));
 const ownAgents = vi.hoisted(() => vi.fn(async () => [] as unknown[]));
 const workDone = vi.hoisted(() => vi.fn(async () => new Map()));
@@ -167,6 +171,22 @@ describe("issue list layout", () => {
     const html = await renderList({ severity: "critical", status: "all" });
     expect(html).toContain("No issues match these filters.");
     expect(html).not.toContain("No issues yet");
+  });
+
+  it("shows an idea's verdict score in place of the upvote button (#idea-verdicts)", async () => {
+    findMany.mockResolvedValue([{ ...BUG, projectId: "project-acme", convertedToIssueAt: null, ideaScore: 2 }]);
+    const html = await renderList();
+    expect(html).toContain('data-testid="idea-score-badge"');
+    expect(html).toContain('aria-label="Idea score 2 of 4"');
+    expect(html).toContain(">score<");
+    expect(html).not.toMatch(/click to upvote/);
+  });
+
+  it("keeps the upvote button on a converted issue", async () => {
+    findMany.mockResolvedValue([{ ...BUG, projectId: "project-acme", convertedToIssueAt: new Date(), ideaScore: 5 }]);
+    const html = await renderList();
+    expect(html).not.toContain('data-testid="idea-score-badge"');
+    expect(html).toMatch(/click to upvote/);
   });
 
   it("has no stage sidebar beside the list (#1054)", async () => {

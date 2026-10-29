@@ -9,27 +9,34 @@ import { mergePathOf } from "@/lib/merge-history";
 
 afterEach(() => cleanup());
 
-const base = { status: "open", stage: undefined, botConfirmations: 0, votes: 0, work: null } as const;
+const base = { status: "open", stage: undefined, botConfirmations: 0, work: null } as const;
 const text = (ui: React.ReactElement) => render(ui).container.textContent?.replace(/\s+/g, " ").trim();
 
 describe("IssueRowStatus", () => {
-  it("calls a reported issue an Idea", () => {
-    expect(text(<IssueRowStatus {...base} stage="reported" />)).toBe("Idea");
+  it("calls an unconverted report an Idea", () => {
+    expect(text(<IssueRowStatus {...base} stage="idea" />)).toBe("Idea");
   });
 
-  it("shows Confirming with upvotes against the threshold, and the bots in the label", () => {
-    const { container } = render(<IssueRowStatus {...base} stage="confirmed" votes={2} botConfirmations={2} />);
-    expect(container.textContent).toContain("Confirming… (2/3)");
+  it("shows an idea's verdict score against the threshold (#idea-verdicts)", () => {
+    const { container } = render(<IssueRowStatus {...base} stage="idea" idea={{ score: 2, threshold: 3 }} />);
+    expect(container.textContent).toContain("(2/3) score");
+    expect(container.querySelector("[title]")?.getAttribute("title")).toBe("Score 2 of 3");
+  });
+
+  it("shows the score alone when the threshold is unknown", () => {
+    expect(text(<IssueRowStatus {...base} stage="idea" idea={{ score: -1, threshold: null }} />)).toContain("(-1) score");
+  });
+
+  it("shows Confirming with the bots in the label, and no upvote count", () => {
+    const { container } = render(<IssueRowStatus {...base} stage="confirming" botConfirmations={2} />);
+    expect(container.textContent).toContain("Confirming…");
     expect(container.textContent).toContain("Confirmed by 2 bots");
-    expect(container.querySelector("[title]")?.getAttribute("title")).toContain("2 of 3 upvotes");
+    expect(container.textContent).not.toMatch(/upvote|\(\d\/\d\)/);
+    expect(container.querySelector("[title]")?.getAttribute("title")).toBe("Confirmed by 2 bots so far");
   });
 
-  it("never shows more upvotes than the threshold", () => {
-    expect(text(<IssueRowStatus {...base} stage="confirmed" votes={7} botConfirmations={1} />)).toContain("(3/3)");
-  });
-
-  it("says Ready for bids once confirmed with enough upvotes", () => {
-    expect(text(<IssueRowStatus {...base} stage="ready" votes={3} />)).toBe("Ready for bids");
+  it("says Ready for bids once confirmed", () => {
+    expect(text(<IssueRowStatus {...base} stage="ready" />)).toBe("Ready for bids");
   });
 
   it("shows who is working, a hammer, and how long on a second line", () => {

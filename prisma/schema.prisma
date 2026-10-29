@@ -262,6 +262,7 @@ model User {
   jobReviews            JobReview[]           @relation("JobReviewBeneficiary")
   jobReviewOffers       JobReviewOffer[]      @relation("JobReviewOfferBeneficiary")
   approvalsDecided      IssueApproval[]      @relation("ApprovalDecider")
+  ideaVerdicts          IdeaVerdict[]        @relation("IdeaVerdictsGiven")
 }
 
 /// Single-use password reset tokens (~30 min TTL). Store only the SHA-256 hash.
@@ -309,6 +310,12 @@ model Bug {
   typeId            String?
   type              IssueType?         @relation(fields: [typeId], references: [id], onDelete: SetNull)
   voteCount         Int                @default(0)
+  /// Idea stage (#idea-verdicts): good minus bad votes from idea verdicts.
+  ideaScore         Int                @default(0)
+  /// When a manager agent turned the idea into an issue. Null while it is an idea.
+  convertedToIssueAt DateTime?
+  /// The manager agent that converted it, for the audit trail.
+  convertedByAgentId String?
   isBoosted         Boolean            @default(false)
   boostedAt         DateTime?
   /// #289: at most one milestone. Cleared, not cascaded, when it's deleted.
@@ -363,6 +370,7 @@ model Bug {
   bids              IssueBid[]
   interests         IssueInterest[]
   validations       IssueValidation[]
+  ideaVerdicts      IdeaVerdict[]
   testVerdicts      TestVerdict[]
   reviewOffers      ReviewOffer[]
   redesigns         RedesignProposal[]
@@ -486,6 +494,7 @@ model Comment {
   replies     Comment[]    @relation("CommentReplies")
   attachments Attachment[]
 
+  ideaVerdict IdeaVerdict?
   @@index([bugId])
   @@index([bugId, type])
   @@index([bugId, createdAt])
@@ -683,6 +692,8 @@ model ProjectWorkflow {
   maxActiveClaims        Int      @default(2)
   volunteerWindowSeconds Int      @default(120)
   autoMerge              Boolean  @default(true)
+  /// Net idea votes (good minus bad) before a manager agent may convert an idea to an issue.
+  ideaThreshold          Int      @default(3)
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
   project                Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -904,6 +915,7 @@ model Agent {
   goalAllocations      GoalAllocation[]
   recordedMistakes     AgentMistake[]
 
+  ideaVerdicts         IdeaVerdict[]
   @@unique([ownerUserId, defaultProjectId])
   @@index([tenantId])
   @@index([ownerUserId])
@@ -1077,6 +1089,40 @@ model IssueInterest {
   @@unique([bugId, agentId])
   @@index([bugId, withdrawnAt])
   @@index([beneficiaryUserId])
+}
+
+/// What someone thinks of an idea (#idea-verdicts).
+enum IdeaOpinion {
+  good
+  bad
+  neutral
+}
+
+/// One person's verdict on an idea: good, bad or neutral, with a short summary
+/// and a comment. Only ideas take verdicts; they do not carry over to the issue.
+model IdeaVerdict {
+  id               String      @id @default(cuid())
+  bugId            String
+  /// The person the verdict counts for: an agent's owner, or a person in the web app.
+  onBehalfOfUserId String
+  /// The agent that gave it; null when a person gave it in the web app.
+  agentId          String?
+  opinion          IdeaOpinion
+  /// How many votes it carries: 1, or up to 5 for a manager or merger agent.
+  votes            Int         @default(1)
+  /// At most two sentences.
+  summary          String
+  /// The comment posted with it. Null for verdicts migrated from upvotes.
+  commentId        String?     @unique
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  bug              Bug         @relation(fields: [bugId], references: [id], onDelete: Cascade)
+  onBehalfOf       User        @relation("IdeaVerdictsGiven", fields: [onBehalfOfUserId], references: [id], onDelete: Cascade)
+  agent            Agent?      @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  comment          Comment?    @relation(fields: [commentId], references: [id], onDelete: SetNull)
+
+  @@unique([bugId, onBehalfOfUserId])
+  @@index([bugId])
 }
 
 model IssueValidation {

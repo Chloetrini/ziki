@@ -67,7 +67,7 @@ describe("canAssignTicket", () => {
         actorRole: "user",
         currentAssigneeId: null,
         targetAssigneeId: "user-1",
-        voteCount: 3,
+        converted: true,
         claimed: true,
       }),
     ).toBe(true);
@@ -129,14 +129,14 @@ describe("canAssignTicket", () => {
   });
 
   describe("work readiness gate (#764)", () => {
-    it("allows organization admins to assign tickets regardless of vote count", () => {
+    it("allows organization admins to assign tickets even on an idea", () => {
       expect(
         canAssignTicket({
           actorId: "admin-1",
           membershipRole: "admin",
           currentAssigneeId: null,
           targetAssigneeId: "user-1",
-          voteCount: 0,
+          converted: false,
         }),
       ).toBe(true);
 
@@ -146,19 +146,19 @@ describe("canAssignTicket", () => {
           actorRole: "super_admin",
           currentAssigneeId: null,
           targetAssigneeId: "user-1",
-          voteCount: 0,
+          converted: false,
         }),
       ).toBe(true);
     });
 
-    it("blocks assignment when voteCount is below the threshold of 3", () => {
+    it("blocks assigning work on an idea that is not yet converted to an issue", () => {
       expect(
         canAssignTicket({
           actorId: "admin-1",
           actorRole: "admin",
           currentAssigneeId: null,
           targetAssigneeId: "user-1",
-          voteCount: 2,
+          converted: false,
         }),
       ).toBe(false);
 
@@ -168,19 +168,19 @@ describe("canAssignTicket", () => {
           actorRole: "user",
           currentAssigneeId: null,
           targetAssigneeId: "user-1",
-          voteCount: 0,
+          converted: false,
         }),
       ).toBe(false);
     });
 
-    it("lets an organization admin assign at 3 votes, and still refuses a member taking it", () => {
+    it("lets an organization admin assign a converted issue, and still refuses a member taking it", () => {
       expect(
         canAssignTicket({
           actorId: "admin-1",
           membershipRole: "admin",
           currentAssigneeId: null,
           targetAssigneeId: "user-1",
-          voteCount: 3,
+          converted: true,
         }),
       ).toBe(true);
 
@@ -190,19 +190,19 @@ describe("canAssignTicket", () => {
           actorRole: "user",
           currentAssigneeId: null,
           targetAssigneeId: "user-1",
-          voteCount: 5,
+          converted: true,
         }),
       ).toBe(false);
     });
 
-    it("allows unassigning even if voteCount is below 3", () => {
+    it("allows unassigning even on an idea", () => {
       expect(
         canAssignTicket({
           actorId: "user-1",
           actorRole: "user",
           currentAssigneeId: "user-1",
           targetAssigneeId: null,
-          voteCount: 1,
+          converted: false,
         }),
       ).toBe(true);
     });

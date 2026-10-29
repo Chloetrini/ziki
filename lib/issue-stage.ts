@@ -2,77 +2,80 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { reviewerConflict, reviewerCreditConflict, type ReviewedBug } from "@/lib/agents/independence";
 import { workflowFor } from "@/lib/workflow";
 import { DEFAULT_PROJECT_WORKFLOW } from "@/lib/workflow-config";
-import { WORK_READINESS_VOTE_THRESHOLD } from "@/lib/ticket-assignment";
 
-/** Where an open issue sits before someone starts the work. Not a status. */
-export type IssueStage = "reported" | "confirmed" | "ready";
+/**
+ * Where an open report sits before someone starts the work. Not a status.
+ *
+ * - `idea`: people give it good, bad or neutral verdicts until its net score
+ *   reaches the project's `ideaThreshold`; then a manager agent converts it.
+ * - `confirming`: converted to an issue, waiting for independent reviewers to
+ *   confirm it is real and not a duplicate.
+ * - `ready`: a confirmed issue, so it can be passed on.
+ *
+ * Idea verdicts do not carry over: the issue is confirmed on its own.
+ */
+export type IssueStage = "idea" | "confirming" | "ready";
 
 /** List filters. `ready` is the issue that can be passed on. */
-export type IssueStageView = "reported" | "confirmed" | "ready";
+export type IssueStageView = IssueStage;
 
 export const issueStageLabels: Record<IssueStage, string> = {
-  reported: "Reported",
-  confirmed: "Confirmed",
+  idea: "Idea",
+  confirming: "Confirming",
   ready: "Ready",
 };
 
-/**
- * An open report is an idea until reviewers accept it and it has enough
- * upvotes. Then it is an issue and can be passed on.
- */
+/** An open report is an idea until a manager agent converts it to an issue. */
 export type Intake = "idea" | "issue";
 
+/** `?stage=` values, including the names links used before ideas took verdicts. */
 export function parseIssueStageView(raw: string | null | undefined): IssueStageView | null {
-  return raw === "reported" || raw === "confirmed" || raw === "ready" ? raw : null;
+  if (raw === "idea" || raw === "confirming" || raw === "ready") return raw;
+  if (raw === "reported") return "idea";
+  if (raw === "confirmed") return "confirming";
+  return null;
 }
 
 export function intakeOf(stage: IssueStage): Intake {
-  return stage === "ready" ? "issue" : "idea";
+  return stage === "idea" ? "idea" : "issue";
 }
 
 export function intakeLabel(stage: IssueStage): string {
   return intakeOf(stage) === "issue" ? "Issue" : "Idea";
 }
 
-/** Idea until both gates are met, including once the report is no longer open. */
-export function intakeKind(input: {
-  status: string;
-  voteCount: number;
-  confirmed: boolean;
-}): Intake {
-  const stage = issueStage(input);
-  if (stage) return intakeOf(stage);
-  if (input.status === "in_progress" || input.status === "resolved" || input.confirmed) return "issue";
-  return "idea";
+/** Idea until a manager agent converts it, whether or not it is still open. */
+export function intakeKind(input: { converted: boolean }): Intake {
+  return input.converted ? "issue" : "idea";
 }
 
-export function intakeDetail(stage: IssueStage, voteCount: number): string {
-  if (stage === "ready") {
-    return "This is an issue. Reviewers accepted it and it has enough upvotes, so it can be passed on.";
+export function intakeDetail(stage: IssueStage, idea?: { score: number; threshold: number }): string {
+  if (stage === "ready") return "This is an issue. Reviewers confirmed it, so it can be passed on.";
+  if (stage === "confirming") {
+    return "This is an issue. It can be passed on once independent reviewers confirm it is real and not a duplicate.";
   }
-  if (stage === "confirmed") {
-    const left = Math.max(0, WORK_READINESS_VOTE_THRESHOLD - voteCount);
-    const votes = left === 1 ? "1 more upvote" : `${left} more upvotes`;
-    return `This is an idea. Reviewers accepted it. It needs ${votes} before it can be passed on as an issue.`;
-  }
-  return "This is an idea. It becomes an issue when reviewers accept it and three people upvote it. Then it can be passed on.";
+  if (!idea) return "This is an idea. Give it a verdict: good, bad or neutral. A manager agent converts it to an issue once enough people think it is good.";
+  const left = Math.max(0, idea.threshold - idea.score);
+  if (left === 0) return `This is an idea with a score of ${idea.score}. It has reached ${idea.threshold}, so a manager agent can convert it to an issue.`;
+  return `This is an idea with a score of ${idea.score}. It needs ${left} more good vote${left === 1 ? "" : "s"} (net) before a manager agent can convert it to an issue.`;
 }
 
 /**
- * Reported and confirmed are still ideas: reviewers have not accepted it, or
- * it does not yet have three upvotes.
- * Ready is an issue: both gates are met, so it can be passed on.
- * Anything no longer open has no intake tag.
+ * The stage of an open report. Anything no longer open has no stage.
  */
 export function issueStage(input: {
   status: string;
-  voteCount: number;
+  converted: boolean;
   confirmed: boolean;
 }): IssueStage | null {
   if (input.status !== "open") return null;
-  if (!input.confirmed) return "reported";
-  if (input.voteCount < WORK_READINESS_VOTE_THRESHOLD) return "confirmed";
-  return "ready";
+  if (!input.converted) return "idea";
+  return input.confirmed ? "ready" : "confirming";
+}
+
+/** Where a manager agent may convert an idea: open, not converted, at the project's threshold. */
+export function isConvertible(input: { status: string; converted: boolean; ideaScore: number }, threshold: number): boolean {
+  return input.status === "open" && !input.converted && input.ideaScore >= threshold;
 }
 
 type AcceptingReview = { id: string; agentId: string; ownerUserId: string; onBehalfOfUserId?: string };
@@ -116,7 +119,7 @@ export async function openIssueStages(
       id: true,
       projectId: true,
       status: true,
-      voteCount: true,
+      convertedToIssueAt: true,
       beneficiaryUserId: true,
       assigneeId: true,
       reporterId: true,
@@ -202,7 +205,7 @@ export async function openIssueStages(
       }),
       workflows.get(bug.projectId)?.confirmationsNeeded ?? DEFAULT_PROJECT_WORKFLOW.confirmationsNeeded,
     );
-    const stage = issueStage({ status: bug.status, voteCount: bug.voteCount, confirmed });
+    const stage = issueStage({ status: bug.status, converted: bug.convertedToIssueAt !== null, confirmed });
     if (stage) stages.set(bug.id, stage);
   }
   return stages;

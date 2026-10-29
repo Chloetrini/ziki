@@ -12,8 +12,9 @@ import { createBugSchema, commentSchema, statusSchema, severitySchema } from "@/
 import { parsePlatformFilter, platformFilterWhere } from "@/lib/platform-filter";
 import { boundSearchTerm, escapeSearchQuery } from "@/lib/search";
 import { parseProjectAreaFilter, projectAreaFilterWhere } from "@/lib/project-area-filter";
-import { intakeKind, openIssueStages, type IssueStage } from "@/lib/issue-stage";
-import { WORK_READINESS_VOTE_THRESHOLD } from "@/lib/ticket-assignment";
+import { intakeKind, issueStage, openIssueStages, parseIssueStageView, type IssueStage } from "@/lib/issue-stage";
+import { eventStreamBus, TENANT_WRITE } from "@/lib/events/stream-bus";
+import { workflowFor } from "@/lib/workflow";
 import { parseIssueRef } from "@/lib/issue-ref";
 import { createIssueWithPolicy, cursorOrderBy, cursorWhere, decodeCursor, hashCreateRequest, LIMIT_RANGE_ERROR, pageSize, toPage, type IssueCursor } from "@/lib/agent-api/create-policy";
 import { createdSummary, commentedSummary, commentPreview } from "@/lib/activity-log";
@@ -23,7 +24,7 @@ import { attachmentIdsInMarkdown, linkAttachments } from "@/lib/attachment-link"
 import { MAX_ATTACHMENTS_PER_ITEM } from "@/lib/attachments";
 import { publish } from "@/lib/agent-api/events";
 import { pullRequestAttachment } from "@/lib/github/pr-mention";
-import { awardIdeaContribution, isConfirmed } from "@/lib/agent-api/validation";
+import { isConfirmed } from "@/lib/agent-api/validation";
 import { notifyLater } from "@/lib/notify";
 import type { NotificationEvent } from "@/lib/notifications";
 import { logger } from "@/lib/logger";
@@ -34,7 +35,8 @@ export class IssueApiError extends Error {
 }
 
 const idSchema = z.string().trim().min(1).max(191);
-const stageSchema = z.enum(["reported", "confirmed", "ready"]);
+// `reported` and `confirmed` were the stage names before ideas took verdicts (#idea-verdicts).
+const stageSchema = z.enum(["idea", "confirming", "ready", "reported", "confirmed"]);
 
 /** #406: name the bad query parameter instead of returning a pathless Zod dump. */
 function enumFilter<T extends string>(name: string, raw: string | null, allowed: readonly T[]): T | null {
@@ -112,6 +114,11 @@ export async function agentIssueRequest(
       }
     }
   }
+  // A committed agent write changes what the work feed lists. Say so now, so
+  // the agent's next poll is fresh; the event broadcast follows a moment later.
+  if (agent && response.status < 400 && (level !== "read" || options.budget === "write")) {
+    eventStreamBus.emit(TENANT_WRITE, agent.tenantId);
+  }
   // #646/#596: every charged response — success, validation failure, or a
   // domain error thrown after the charge — reports the same quota.
   if (quota) response = withAgentBudgetHeaders(response, quota);
@@ -149,6 +156,9 @@ export const issueSelect = {
   createdByAgentId: true, projectId: true, areaId: true, createdAt: true, updatedAt: true, proofLinks: true,
   // #463: agents can see how close an idea is to the upvote gate.
   voteCount: true,
+  // #idea-verdicts: the idea's score, and whether a manager agent converted it to an issue.
+  ideaScore: true,
+  convertedToIssueAt: true,
   // #544: whether a fix is linked, and at which commit. Without these a
   // reviewer cannot tell a linked fix from an unlinked one, and `proofLinks`
   // is misleading because it is free text set at create/edit, not the field
@@ -175,7 +185,7 @@ export async function listAgentIssues(scope: Scope, params: URLSearchParams) {
   const status = enumFilter("status", params.get("status"), statusSchema.options);
   const severity = enumFilter("severity", params.get("severity"), severitySchema.options);
   const assignee = params.get("assignee");
-  const stage: IssueStage | null = enumFilter("stage", params.get("stage"), stageSchema.options);
+  const stage: IssueStage | null = parseIssueStageView(enumFilter("stage", params.get("stage"), stageSchema.options));
   const reviewStatusParam = params.get("reviewStatus");
   const reviewStatus = enumFilter("reviewStatus", reviewStatusParam, REVIEW_STATUSES);
   let assigneeId: string | null | undefined;
@@ -260,12 +270,14 @@ export async function readAgentIssue(scope: Scope, id: string) {
     }, _count: { select: { comments: { where: { deletedAt: null } } } } },
   });
   if (!issue) throw new IssueApiError(404, "Issue not found.");
-  const confirmed = await isConfirmed(issue.id);
+  const [confirmed, { ideaThreshold }] = await Promise.all([isConfirmed(issue.id), workflowFor(issue.projectId)]);
+  const converted = issue.convertedToIssueAt !== null;
   return {
     ...issue,
-    voteThreshold: WORK_READINESS_VOTE_THRESHOLD,
+    ideaThreshold,
     confirmed,
-    intake: intakeKind({ status: issue.status, voteCount: issue.voteCount, confirmed }),
+    intake: intakeKind({ converted }),
+    stage: issueStage({ status: issue.status, converted, confirmed }),
   };
 }
 
@@ -420,9 +432,6 @@ export async function createAgentIssue(agent: AgentContext, request: NextRequest
   return NextResponse.json({ issue, replayed: result.replayed }, { status: result.status });
 }
 
-/** Shorter comments ("+1", "agreed") are welcome but earn no idea point. */
-export const IDEA_COMMENT_MIN_LENGTH = 40;
-
 export async function commentOnAgentIssue(agent: AgentContext, request: NextRequest, bugId: string) {
   const input = agentCommentSchema.parse(await issueJson(request));
   const scope = await issueProject(agent, request.nextUrl.searchParams, input.projectId);
@@ -535,8 +544,6 @@ export async function commentOnAgentIssue(agent: AgentContext, request: NextRequ
     return { created, attachedPrUrl };
   });
   notifyAgentComment(agent, bug, comment.created, parentAuthorId);
-  // An opinion on an idea earns its owner a point, once per idea (#work-feed).
-  if (input.body.trim().length >= IDEA_COMMENT_MIN_LENGTH) await awardIdeaContribution(agent, bugId);
   return NextResponse.json(
     {
       comment: comment.created,

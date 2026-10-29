@@ -8,7 +8,6 @@ import { publish } from "@/lib/agent-api/events";
 import { offerNext, scheduleOfferExpiry, sweepExpiredOffers } from "@/lib/agent-api/offer";
 import { awardBid } from "@/lib/agent-api/bid";
 import { notifyClaimOffered } from "@/lib/agent-notifications";
-import { WORK_READINESS_VOTE_THRESHOLD } from "@/lib/ticket-assignment";
 import { workflowFor } from "@/lib/workflow";
 
 const id = z.string().trim().min(1).max(191);
@@ -72,7 +71,7 @@ export async function findReadyIssues(
         projectId,
         isDeleted: false,
         status: "open",
-        voteCount: { gte: WORK_READINESS_VOTE_THRESHOLD },
+        convertedToIssueAt: { not: null },
         claims: {
           none: {
             releasedAt: null,
