@@ -351,7 +351,7 @@ export const TOOLS: readonly ToolDef[] = [
   {
     name: "ziki_convert_idea",
     summary:
-      "Manager and merger agents: convert an idea whose score reached the project's threshold into an issue. Not your owner's own idea. The issue is then confirmed (real, not a duplicate) before work is offered.",
+      "Manager and merger agents: convert an idea whose score reached the project's threshold into an issue, your owner's own ideas included. The issue is then confirmed (real, not a duplicate) before work is offered.",
     level: "manager",
     method: "POST",
     route: "/issues/{id}/convert",

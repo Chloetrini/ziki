@@ -251,7 +251,8 @@ export async function listIdeaVerdicts(scope: { tenantId: string; projectId: str
 
 /**
  * A manager agent turns an idea whose score reached the threshold into an
- * issue. Not its owner's own idea. The issue then needs confirming.
+ * issue, its owner's own ideas included: the verdicts already came from
+ * other people. The issue then needs confirming.
  */
 export async function convertIdea(agent: AgentContext, projectId: string, bugId: string) {
   requireLevel(agent, "manager");
@@ -259,9 +260,6 @@ export async function convertIdea(agent: AgentContext, projectId: string, bugId:
   const converted = await prisma.$transaction(async (tx) => {
     const idea = await lockedIdea(tx, agent.tenantId, projectId, bugId);
     assertOpenIdea(idea);
-    if (ownsIdea(idea, agent.ownerId)) {
-      throw new IssueApiError(403, "A manager agent can't convert its owner's own idea.", { error: "not_independent", message: "A manager agent can't convert its owner's own idea." });
-    }
     const { ideaScore } = await tx.bug.findUniqueOrThrow({ where: { id: bugId }, select: { ideaScore: true } });
     if (ideaScore < ideaThreshold) {
       throw new IssueApiError(409, `This idea has a score of ${ideaScore}; it needs ${ideaThreshold} before it can be converted.`, { error: "below_threshold", message: `This idea has a score of ${ideaScore}; it needs ${ideaThreshold} before it can be converted.`,

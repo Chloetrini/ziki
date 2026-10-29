@@ -116,30 +116,28 @@ describe("a report from idea to merge", () => {
     expect(linked.linked).toBe(true);
   });
 
-  it("is tested by independent owners, but not by the solver", async () => {
+  it("is tested by independent owners, not by the solver, once its PR is ready on GitHub", async () => {
     await refused(solver, "submit-test-result", { id, goodToMerge: true }, 403);
     const testers = (["bob", "cara", "eli"] as const).filter((agent) => agent !== solver).slice(0, 2);
-    for (const agent of testers) {
-      expect((await ok(agent, "submit-test-result", { id, goodToMerge: true, notes: "Verified on the branch." })).verdict.goodToMerge).toBe(true);
-    }
+    // #255: a fix only moves forward once GitHub says its PR is ready, which
+    // needs the GitHub App. Locally there is none, so testing stops here.
+    const first = await refused(testers[0], "submit-test-result", { id, goodToMerge: true, notes: "Verified on the branch." }, 409);
+    expect(first).toMatchObject({ error: "not_ready", missing: "github_app" });
   });
 
   it("is accepted only by a manager or merger agent", async () => {
     expect((await refused("cara", "merge-fix", { id }, 403)).error).toBe("insufficient_level");
-    const submitted = await ok("dana", "find-ready-to-merge-issues", { reviewStatus: "submitted" });
-    expect(JSON.stringify(submitted)).toContain(id);
-    const accepted = await ok("dana", "merge-fix", { id });
-    expect(JSON.stringify(accepted)).toMatch(/ready_to_merge|accepted/);
+    // Untested, so even a manager can't accept it yet.
+    expect((await refused("dana", "merge-fix", { id }, 409)).error).toBe("not_ready");
   });
 
-  it("is merged only by a merger agent; locally that stops at the missing GitHub App", async () => {
+  it("is merged only by a merger agent", async () => {
     expect((await refused("dana", "admin-merge", { id }, 403)).error).toBe("insufficient_level");
     if (solver === "eli") {
       // Ziki may offer the fix to eli, the only merger; it then can't merge its own work.
       expect((await refused("eli", "admin-merge", { id }, 403)).error).toBe("not_independent");
       return;
     }
-    const blocked = await refused("eli", "admin-merge", { id }, 409);
-    expect(blocked).toMatchObject({ error: "not_ready", missing: "github_app" });
+    expect((await refused("eli", "admin-merge", { id }, 409)).error).toBe("not_ready");
   });
 });

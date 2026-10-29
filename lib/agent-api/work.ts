@@ -87,7 +87,21 @@ export type WorkFeed = {
   ask: string[];
   inbox: { unread: number; path: string };
   counts: Partial<Record<WorkKind, number>>;
+  /**
+   * Open work this agent's class can't do, by kind and the class it needs.
+   * The items are in `items` with `canAct: false`; this says it in one place
+   * so no agent mistakes "nothing for me" for "nothing to do".
+   */
+  waiting: { kind: WorkKind; count: number; minimumRole: AgentLevel; what: string }[];
   items: WorkItem[];
+};
+
+/** How each kind of class-gated work reads in a sentence, for one item and for several. */
+const WAITING_WORDS: Partial<Record<WorkKind, [string, string]>> = {
+  convert_idea: ["idea to convert to an issue", "ideas to convert to issues"],
+  accept_fix: ["tested fix to accept or reject", "tested fixes to accept or reject"],
+  dispatch: ["dispatch to hand out ready issues", "dispatches to hand out ready issues"],
+  merge_fix: ["accepted fix to merge", "accepted fixes to merge"],
 };
 
 type IssueRef = { id: string; number: number; title: string };
@@ -486,7 +500,8 @@ export function itemsFor(agent: AgentContext, work: ProjectWork, mine: AgentWork
       title: `Convert idea #${idea.number} to an issue`,
       detail: `Its score is ${idea.ideaScore}, at or past the project's threshold of ${work.ideaThreshold}. Read the verdicts, then convert it so it can be confirmed and worked on.`,
       minimumRole: "manager",
-      ...roleGate("manager", idea.id),
+      // A manager may convert its owner's own idea: the verdicts came from other people.
+      ...roleGate("manager"),
       issue: issueRef(idea),
       actions: [
         { name: "list_idea_verdicts", minimumRole: "working", method: "GET", path: apiPath(idea.id, "idea-verdicts", pid), cli: `list-idea-verdicts --id ${idea.id}` },
@@ -532,6 +547,35 @@ export function itemsFor(agent: AgentContext, work: ProjectWork, mine: AgentWork
   return items;
 }
 
+/**
+ * Open work this agent's class can't do, grouped by kind, with one plain line
+ * per class that can. A working agent learns that ideas wait to be converted
+ * and fixes wait to be accepted or merged, even though it can't do it.
+ */
+export function waitingForOthers(level: AgentLevel, items: readonly WorkItem[]): { waiting: WorkFeed["waiting"]; lines: string[] } {
+  const byKind = new Map<WorkKind, { kind: WorkKind; count: number; minimumRole: AgentLevel }>();
+  for (const item of items) {
+    if (item.canAct || !WAITING_WORDS[item.kind] || hasLevel(level, item.minimumRole)) continue;
+    const entry = byKind.get(item.kind) ?? { kind: item.kind, count: 0, minimumRole: item.minimumRole };
+    entry.count += 1;
+    byKind.set(item.kind, entry);
+  }
+  const waiting = [...byKind.values()].map((entry) => {
+    const [one, many] = WAITING_WORDS[entry.kind]!;
+    return { ...entry, what: `${entry.count} ${entry.count === 1 ? one : many}` };
+  });
+  const lines: string[] = [];
+  for (const role of ["manager", "merger"] as const) {
+    const forRole = waiting.filter((entry) => entry.minimumRole === role);
+    if (!forRole.length) continue;
+    const list = forRole.map((entry) => entry.what);
+    const joined = list.length === 1 ? list[0] : `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
+    const single = forRole.length === 1 && forRole[0].count === 1;
+    lines.push(`Also open in this project, for a ${role} agent: ${joined}. You can't do ${single ? "it" : "these"} as a ${level} agent, but ${single ? "it is" : "they are"} work waiting to be done.`);
+  }
+  return { waiting, lines };
+}
+
 /** The whole feed for one agent. */
 export async function workFeed(agent: AgentContext, project: { id: string; slug: string; name: string }, now = Date.now()): Promise<WorkFeed> {
   const work = await projectWork(agent.tenantId, project, now);
@@ -548,8 +592,13 @@ export async function workFeed(agent: AgentContext, project: { id: string; slug:
     ask.push(`${newIdeas} idea${newIdeas === 1 ? " needs" : "s need"} your verdict: good, bad or neutral, with a summary of at most two sentences and a full description. Each earns ${IDEA_CONTRIBUTION_POINTS} point.`);
   }
   const toConvert = items.filter((item) => item.kind === "convert_idea" && item.canAct).length;
-  if (toConvert) ask.push(`${toConvert} idea${toConvert === 1 ? " has" : "s have"} reached the threshold. As a manager agent, read the verdicts and convert ${toConvert === 1 ? "it" : "them"} to issues.`);
-  if (!items.some((item) => item.canAct)) ask.push(`Nothing for you right now. Check again in ${WORK_POLL_SECONDS} seconds.`);
+  if (toConvert) ask.push(`${toConvert} idea${toConvert === 1 ? " has" : "s have"} reached the threshold. As a manager agent, read the verdicts and convert ${toConvert === 1 ? "it to an issue" : "them to issues"}.`);
+
+  // Work above this agent's class is still open work: say what it is and who can do it.
+  const { waiting, lines } = waitingForOthers(agent.level, items);
+  ask.push(...lines);
+
+  if (!items.some((item) => item.canAct)) ask.push(`Nothing you can do right now. Check again in ${WORK_POLL_SECONDS} seconds.`);
 
   return {
     project,
@@ -559,6 +608,7 @@ export async function workFeed(agent: AgentContext, project: { id: string; slug:
     ask,
     inbox: { unread: mine.unread, path: "/api/v1/inbox?unread=1" },
     counts,
+    waiting,
     items,
   };
 }

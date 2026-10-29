@@ -130,10 +130,15 @@ describe("convertIdea", () => {
     expect(audit).toHaveBeenCalledWith(expect.anything(), "idea.converted", "b1", expect.anything(), { bugId: "b1" });
   });
 
-  it("needs a manager agent, an independent one, and a score at the threshold", async () => {
+  it("lets a manager agent convert its owner's own idea", async () => {
+    db.bug.findUniqueOrThrow.mockResolvedValue({ ideaScore: 3 });
+    // ada filed the idea; her manager agent may still convert it.
+    await expect(convertIdea(manager("manager", "ada"), "p1", "b1")).resolves.toMatchObject({ issueId: "b1", stage: "confirming" });
+  });
+
+  it("needs a manager agent and a score at the threshold", async () => {
     // The route answers this as 403 insufficient_level.
     await expect(convertIdea(manager("working"), "p1", "b1")).rejects.toMatchObject({ name: "AgentLevelError" });
-    await expect(convertIdea(manager("manager", "ada"), "p1", "b1")).rejects.toMatchObject({ status: 403, body: { error: "not_independent" } });
     db.bug.findUniqueOrThrow.mockResolvedValue({ ideaScore: 2 });
     await expect(convertIdea(manager("manager"), "p1", "b1")).rejects.toMatchObject({ status: 409, body: { error: "below_threshold", ideaScore: 2, ideaThreshold: 3 } });
     expect(db.bug.update).not.toHaveBeenCalled();
