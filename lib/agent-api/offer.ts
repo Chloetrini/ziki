@@ -166,7 +166,9 @@ export async function offerIssue(agent: AgentContext, projectId: string, bugId: 
       await assertApprovalOpen(bugId, "before_offer", { db: tx, tenantId: agent.tenantId, agent });
       const current = await tx.issueClaim.findFirst({ where: { bugId, releasedAt: null } });
       if (current) {
-        if (current.status === "offered" && !isOfferExpired(current.offeredAt)) {
+        // The project's offer window, as the expiry sweep and accept use.
+        const { offerWindowSeconds } = await workflowFor(projectId, tx);
+        if (current.status === "offered" && !isOfferExpired(current.offeredAt, Date.now(), offerWindowSeconds * 1000)) {
           return { claim: current, beneficiaryUserId: current.beneficiaryUserId, bugTitle: bug.title, created: false };
         }
         if (current.status === "active") throw new IssueApiError(409, "This issue already has an active claim.");

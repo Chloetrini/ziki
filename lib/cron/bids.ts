@@ -1,8 +1,9 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { awardBid } from "@/lib/agent-api/bid";
-import { isConfirmed } from "@/lib/agent-api/validation";
-import { openIssueStages } from "@/lib/issue-stage";
-import type { PrismaClient } from "@prisma/client";
+import { confirmedIssueIds } from "@/lib/issue-stage";
+import { isOfferExpired } from "@/lib/agent-api/offer";
+import { workflowFor } from "@/lib/workflow";
 import { commentedSummary } from "@/lib/activity-log";
 import { publish } from "@/lib/agent-api/events";
 import { logger } from "@/lib/logger";
@@ -53,26 +54,19 @@ export async function sweepPendingBids(options?: {
     errors: [],
   };
 
-  // Find candidate issues: open, confirmed, unassigned, with pending bids and no live claim
+  // Open, unassigned issues with pending bids and no active claim.
+  const withBids: Prisma.BugWhereInput = {
+    status: "open",
+    assigneeId: null,
+    claims: { none: { releasedAt: null, status: "active" } },
+    bids: { some: { withdrawnAt: null, awardedAt: null } },
+  };
+  // Readiness from one bulk read, before the limit, so unconfirmed issues
+  // can't fill the page (#714).
+  const confirmed = await confirmedIssueIds(prisma, withBids);
+  if (confirmed.size === 0) return result;
   const candidateIssues = await prisma.bug.findMany({
-    where: {
-      status: "open",
-      isDeleted: false,
-      assigneeId: null,
-      convertedToIssueAt: { not: null },
-      claims: {
-        none: {
-          releasedAt: null,
-          OR: [{ status: "active" }, { status: "offered" }],
-        },
-      },
-      bids: {
-        some: {
-          withdrawnAt: null,
-          awardedAt: null,
-        },
-      },
-    },
+    where: { ...withBids, id: { in: [...confirmed] }, isDeleted: false },
     select: {
       id: true,
       title: true,
@@ -82,6 +76,7 @@ export async function sweepPendingBids(options?: {
       reporterId: true,
       severity: true,
       voteCount: true,
+      claims: { where: { releasedAt: null, status: "offered" }, select: { offeredAt: true } },
     },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit,
@@ -89,14 +84,10 @@ export async function sweepPendingBids(options?: {
 
   for (const issue of candidateIssues) {
     try {
-      let isConfirmedIssue = await isConfirmed(issue.id);
-      if (!isConfirmedIssue && typeof (prisma as unknown as { bug?: { findMany?: unknown } }).bug?.findMany === "function") {
-        try {
-          const stage = (await openIssueStages(prisma as unknown as PrismaClient, { id: issue.id })).get(issue.id);
-          isConfirmedIssue = stage === "ready";
-        } catch {}
-      }
-      if (!isConfirmedIssue) continue;
+      // A live offer still holds the issue; one past the project's offer
+      // window does not, as everywhere else offers are judged.
+      const { offerWindowSeconds } = await workflowFor(issue.projectId);
+      if (issue.claims.some((claim) => !isOfferExpired(claim.offeredAt, now.getTime(), offerWindowSeconds * 1000))) continue;
 
       // Find all open, unawarded bids on this issue
       const openBids = await prisma.issueBid.findMany({

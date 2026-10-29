@@ -116,20 +116,21 @@ export type IssueConfirmation = {
   triageCleared: boolean;
 };
 
+type ReadConfirmation = Omit<IssueConfirmation, "stage"> & { status: string; converted: boolean; confirmed: boolean };
+
 /**
- * Stage and confirmation state of every open issue matching `where`, in a
- * fixed number of queries. This is the one place "confirmed" is decided for
- * lists and the work feed, under the same rule as `isConfirmed()`: enough
+ * Confirmation state of every issue matching `where`, in a fixed number of
+ * queries. This is the one place "confirmed" is decided for lists, the work
+ * feed and the merge queue, under the same rule as `isConfirmed()`: enough
  * independent real accepts AND an independent not-a-duplicate clearance, each
- * counted only after the latest edit and unless undone. A missing validation
- * table leaves the map empty so the list still renders.
+ * counted only after the latest edit and unless undone.
  */
-export async function openIssueConfirmations(
+async function readConfirmations(
   db: PrismaClient,
   where: Prisma.BugWhereInput,
-): Promise<Map<string, IssueConfirmation>> {
+): Promise<Map<string, ReadConfirmation>> {
   const bugs = await db.bug.findMany({
-    where: { ...where, status: "open", isDeleted: false },
+    where,
     select: {
       id: true,
       projectId: true,
@@ -141,7 +142,7 @@ export async function openIssueConfirmations(
       createdByAgent: { select: { ownerUserId: true } },
     },
   });
-  const result = new Map<string, IssueConfirmation>();
+  const result = new Map<string, ReadConfirmation>();
   if (bugs.length === 0) return result;
 
   const ids = bugs.map((bug) => bug.id);
@@ -221,10 +222,36 @@ export async function openIssueConfirmations(
     const triageCleared = confirmationCount({ createdByAgentId: bug.createdByAgentId, accepts: clearsByBug.get(bug.id) ?? [], undoneIds, bug: reviewed }) > 0;
     const needed = workflows.get(bug.projectId)?.confirmationsNeeded ?? DEFAULT_PROJECT_WORKFLOW.confirmationsNeeded;
     const confirmed = isConfirmedCount(accepts, needed) && triageCleared;
-    const stage = issueStage({ status: bug.status, converted: bug.convertedToIssueAt !== null, confirmed });
-    if (stage) result.set(bug.id, { stage, accepts, needed, triageCleared });
+    result.set(bug.id, { status: bug.status, converted: bug.convertedToIssueAt !== null, confirmed, accepts, needed, triageCleared });
   }
   return result;
+}
+
+/**
+ * Stage and confirmation state of every open issue matching `where`, from one
+ * bulk read (see `readConfirmations`). A missing validation table leaves the
+ * map empty so the list still renders.
+ */
+export async function openIssueConfirmations(
+  db: PrismaClient,
+  where: Prisma.BugWhereInput,
+): Promise<Map<string, IssueConfirmation>> {
+  const read = await readConfirmations(db, { ...where, status: "open", isDeleted: false });
+  const result = new Map<string, IssueConfirmation>();
+  for (const [id, { status, converted, confirmed, accepts, needed, triageCleared }] of read) {
+    const stage = issueStage({ status, converted, confirmed });
+    if (stage) result.set(id, { stage, accepts, needed, triageCleared });
+  }
+  return result;
+}
+
+/**
+ * Ids of the converted, confirmed issues matching `where`, whatever their
+ * status (an issue being worked on is `in_progress`), from one bulk read.
+ */
+export async function confirmedIssueIds(db: PrismaClient, where: Prisma.BugWhereInput): Promise<Set<string>> {
+  const read = await readConfirmations(db, { ...where, isDeleted: false, convertedToIssueAt: { not: null } });
+  return new Set([...read].filter(([, c]) => c.converted && c.confirmed).map(([id]) => id));
 }
 
 /** Stage of every open issue matching `where` (see `openIssueConfirmations`). */

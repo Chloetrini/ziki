@@ -29,6 +29,10 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/agent-api/bid", () => ({ awardBid: mockAwardBid }));
 vi.mock("@/lib/agent-api/validation", () => ({ isConfirmed: mockIsConfirmed }));
+// Readiness comes from one bulk read (#714); these issues are all confirmed.
+const mockConfirmedIssueIds = vi.hoisted(() => vi.fn(async () => new Set(["bug-1", "bug-2", "bug-3"])));
+vi.mock("@/lib/issue-stage", () => ({ confirmedIssueIds: mockConfirmedIssueIds }));
+vi.mock("@/lib/workflow", () => ({ workflowFor: vi.fn(async () => ({ offerWindowSeconds: 1800 })) }));
 vi.mock("@/lib/agent-api/events", () => ({ publish: mockPublish }));
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
@@ -48,6 +52,7 @@ describe("sweepPendingBids - Direct Fair Bid Auto-Assignment", () => {
     reporterId: "user-reporter",
     severity: "high",
     voteCount: 5,
+    claims: [] as { offeredAt: Date | null }[],
   };
 
   const sampleBidA = {

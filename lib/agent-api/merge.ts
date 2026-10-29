@@ -1,12 +1,13 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { audit } from "@/lib/agents/audit";
-import { reviewerConflict, reviewerCreditConflict, ReviewerNotIndependentError, type ReviewedBug } from "@/lib/agents/independence";
+import { reviewerConflict, ReviewerNotIndependentError, type ReviewedBug } from "@/lib/agents/independence";
 import { hasLevel } from "@/lib/agents/levels";
 import type { AgentContext } from "@/lib/agents/require-agent";
 import { IssueApiError } from "@/lib/agent-api/issues";
 import { publish } from "@/lib/agent-api/events";
 import { isConfirmed } from "@/lib/agent-api/validation";
+import { countedMergeVerdicts } from "@/lib/agent-api/merge-verdicts";
 import { award, awardDispatcher } from "@/lib/points/award";
 import { pointSourceKey, reviewerPointsAt } from "@/lib/points/rules";
 import {
@@ -316,24 +317,10 @@ export async function acceptFix(
     select: { id: true, headSha: true, onBehalfOfUserId: true, agent: { select: { id: true, ownerUserId: true } } },
   });
 
-  const owners = new Set<string>();
-  const reviewers: string[] = [];
-  // #489: the acceptance is bound to the code the reviewers signed off on.
-  let acceptedHeadSha: string | null = bug.pullRequestHeadSha ?? null;
-  for (const verdict of verdicts) {
-    // Checked again now, not only when submitted: a claim taken since, or a
-    // verdict from the claim holder's own side, no longer counts.
-    if (claim && (verdict.agent.id === claim.agentId || verdict.agent.ownerUserId === claim.agent.ownerUserId)) {
-      continue;
-    }
-    if (reviewerConflict({ id: verdict.agent.id, ownerUserId: verdict.agent.ownerUserId }, reviewed)) continue;
-    if (reviewerCreditConflict(verdict.onBehalfOfUserId, reviewed)) continue;
-    if (owners.has(verdict.agent.ownerUserId)) continue;
-    owners.add(verdict.agent.ownerUserId);
-    reviewers.push(verdict.onBehalfOfUserId);
-    // The last counted verdict names the commit that may merge.
-    if (verdict.headSha) acceptedHeadSha = verdict.headSha;
-  }
+  // Checked again now, not only when submitted: a claim taken since, or a
+  // verdict from the claim holder's own side, no longer counts. #489: the
+  // acceptance is bound to the code the reviewers signed off on.
+  const { reviewers, acceptedHeadSha } = countedMergeVerdicts(verdicts, claim, reviewed, bug.pullRequestHeadSha ?? null);
 
   const { verdictsNeeded } = await workflowFor(bug.projectId);
   if (reviewers.length < verdictsNeeded) {

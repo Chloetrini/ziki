@@ -17,6 +17,11 @@ vi.mock("@/lib/workflow", () => ({
 vi.mock("@/lib/agent-api/validation", () => ({
   isConfirmed: vi.fn(async () => true),
 }));
+// The merge queue reads confirmation in one bulk call (#714); these are confirmed.
+vi.mock("@/lib/issue-stage", async (original) => ({
+  ...(await original<typeof import("@/lib/issue-stage")>()),
+  confirmedIssueIds: vi.fn(async () => new Set(["bug-1", "bug-accepted", "bug-blocked", "bug-self"])),
+}));
 
 import { findReadyToMergeIssues } from "./merger";
 import { findReviewableIssues } from "./reviewer";
@@ -51,7 +56,7 @@ describe("Role-based discovery functions", () => {
           beneficiaryUserId: "user-1",
           createdByAgentId: null,
           createdAt: new Date(),
-          claims: [{ agentId: "solver-1", beneficiaryUserId: "user-2", agent: { ownerUserId: "user-2" } }],
+          claims: [{ status: "active", releasedAt: null, agentId: "solver-1", beneficiaryUserId: "user-2", agent: { ownerUserId: "user-2" } }],
           testVerdicts: [
             { id: "v1", onBehalfOfUserId: "rev-1", pullRequestUrl: "https://github.com/org/repo/pull/1", agent: { id: "a1", ownerUserId: "rev-1" } },
             { id: "v2", onBehalfOfUserId: "rev-2", pullRequestUrl: "https://github.com/org/repo/pull/1", agent: { id: "a2", ownerUserId: "rev-2" } },
@@ -66,6 +71,31 @@ describe("Role-based discovery functions", () => {
         number: 101,
         verdictsCount: 2,
       });
+    });
+
+    it("counts verdicts by the merge gate's rule: the reporter's verdict doesn't count", async () => {
+      db.bug.findMany.mockResolvedValue([
+        {
+          id: "bug-self",
+          number: 104,
+          title: "Reporter tested it",
+          projectId: "p1",
+          pullRequestUrl: "https://github.com/org/repo/pull/4",
+          pullRequestHeadSha: "sha-4",
+          reviewStatus: null,
+          reporterId: "user-1",
+          beneficiaryUserId: "user-1",
+          createdByAgentId: null,
+          createdAt: new Date(),
+          claims: [{ status: "active", releasedAt: null, agentId: "solver-1", beneficiaryUserId: "user-2", agent: { ownerUserId: "user-2" } }],
+          testVerdicts: [
+            { id: "v1", onBehalfOfUserId: "user-1", pullRequestUrl: "https://github.com/org/repo/pull/4", agent: { id: "a0", ownerUserId: "user-1" } },
+            { id: "v2", onBehalfOfUserId: "rev-2", pullRequestUrl: "https://github.com/org/repo/pull/4", agent: { id: "a2", ownerUserId: "rev-2" } },
+          ],
+        },
+      ]);
+      // One independent verdict of the two needed: the gate would refuse, so the queue doesn't list it.
+      await expect(findReadyToMergeIssues(merger, "p1")).resolves.toEqual([]);
     });
 
     it("filters by reviewStatus parameter when provided", async () => {

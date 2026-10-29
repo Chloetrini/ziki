@@ -112,9 +112,9 @@ describe("placeBid", () => {
     vi.mocked(isConfirmed).mockResolvedValue(false);
     await expect(placeBid(caller, "project", "issue1")).rejects.toMatchObject({ status: 409 });
     vi.mocked(isConfirmed).mockResolvedValue(true);
-    db.issueClaim.findFirst.mockResolvedValue({ id: "claim", status: "active", offeredAt: null });
+    db.issueClaim.findFirst.mockResolvedValue({ id: "claim", status: "active", offeredAt: null, bug: { tenantId: "tenant", projectId: "project" } });
     await expect(placeBid(caller, "project", "issue1")).rejects.toMatchObject({ status: 409 });
-    db.issueClaim.findFirst.mockResolvedValue({ id: "offer", status: "offered", offeredAt: new Date() });
+    db.issueClaim.findFirst.mockResolvedValue({ id: "offer", status: "offered", offeredAt: new Date(), bug: { tenantId: "tenant", projectId: "project" } });
     await expect(placeBid(caller, "project", "issue1")).rejects.toMatchObject({
       status: 409,
       message: expect.stringContaining("pending offer"),
