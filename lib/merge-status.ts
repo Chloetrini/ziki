@@ -24,9 +24,20 @@ export type MergeOutcomeStatus = typeof MERGE_BLOCKED | typeof MERGE_FAILED;
 export const REVIEW_STATUSES = ["submitted", "ready_to_merge", "rejected", MERGE_BLOCKED, MERGE_FAILED, "merged"] as const;
 
 /** The comment posted with a merge status, so the issue says what happened and what didn't. */
-export function mergeOutcomeComment(status: MergeOutcomeStatus, reason: string): string {
+export function mergeOutcomeComment(status: MergeOutcomeStatus, reason: string, todo?: string): string {
   const lead = status === MERGE_BLOCKED ? "Merge blocked" : "Merge failed";
-  return `${lead}: ${reason} Nothing was merged on GitHub, the issue was not resolved, and no points were paid.`;
+  const next = todo ? ` What to do: ${todo}` : "";
+  return `${lead}: ${reason} Nothing was merged on GitHub, the issue was not resolved, and no points were paid.${next}`;
+}
+
+/** The comment posted when a tester's "good to merge" wasn't recorded, so the author knows what to fix. */
+export function verdictBlockedComment(reason: string, todo: string): string {
+  return `Good-to-merge verdict not recorded: ${reason} The fix stays In Review. What to do: ${todo}`;
+}
+
+/** The comment posted when a manager's accept stopped, so the author knows what to fix. */
+export function acceptBlockedComment(reason: string, todo: string): string {
+  return `Accept blocked: ${reason} The fix was not accepted and stays In Review. What to do: ${todo}`;
 }
 
 /**
@@ -40,10 +51,12 @@ export async function recordMergeOutcome(
     bug: { id: string; tenantId: string; pullRequestUrl: string | null };
     status: MergeOutcomeStatus;
     reason: string;
+    /** What the fix's author has to do next, appended to the comment. */
+    todo?: string;
   },
 ): Promise<void> {
-  const { agent, bug, status, reason } = input;
-  const body = mergeOutcomeComment(status, reason);
+  const { agent, bug, status, reason, todo } = input;
+  const body = mergeOutcomeComment(status, reason, todo);
   await db.$transaction(async (tx) => {
     await tx.bug.update({ where: { id: bug.id }, data: { reviewStatus: status } });
     const comment = await tx.comment.create({
@@ -65,6 +78,62 @@ export async function recordMergeOutcome(
       payload: { issueId: bug.id, reviewStatus: status, reason, pullRequestUrl: bug.pullRequestUrl },
       actorAgentId: agent.agentId,
       bugId: bug.id,
+    });
+  });
+}
+
+/**
+ * Post the "accept blocked" comment on the issue. It changes no status: the
+ * fix stays In Review, and the comment says why and what to do.
+ */
+export async function recordAcceptBlocked(
+  db: PrismaClient,
+  input: {
+    agent: AgentContext;
+    bug: { id: string };
+    reason: string;
+    todo: string;
+  },
+): Promise<void> {
+  const { agent, bug, reason, todo } = input;
+  const body = acceptBlockedComment(reason, todo);
+  await db.$transaction(async (tx) => {
+    const comment = await tx.comment.create({
+      data: { bugId: bug.id, authorId: agent.ownerId, agentId: agent.agentId, body, type: "comment" },
+      select: { id: true },
+    });
+    await tx.bugActivity.create({
+      data: {
+        bugId: bug.id,
+        actorId: agent.ownerId,
+        type: "commented",
+        summary: commentedSummary(body),
+        metadata: { commentId: comment.id, commentPreview: commentPreview(body), acceptBlocked: true },
+      },
+    });
+  });
+}
+
+/** Post the "verdict not recorded" comment on the issue. No status changes. */
+export async function recordVerdictBlocked(
+  db: PrismaClient,
+  input: { agent: AgentContext; bug: { id: string }; reason: string; todo: string },
+): Promise<void> {
+  const { agent, bug, reason, todo } = input;
+  const body = verdictBlockedComment(reason, todo);
+  await db.$transaction(async (tx) => {
+    const comment = await tx.comment.create({
+      data: { bugId: bug.id, authorId: agent.ownerId, agentId: agent.agentId, body, type: "comment" },
+      select: { id: true },
+    });
+    await tx.bugActivity.create({
+      data: {
+        bugId: bug.id,
+        actorId: agent.ownerId,
+        type: "commented",
+        summary: commentedSummary(body),
+        metadata: { commentId: comment.id, commentPreview: commentPreview(body), verdictBlocked: true },
+      },
     });
   });
 }

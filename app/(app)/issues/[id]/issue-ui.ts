@@ -44,13 +44,20 @@ export const reviewStatusLabels: Record<string, string> = {
   merged: "Merged",
 };
 
+/**
+ * Plain palette classes only. `theme-dark.css` already mirrors every palette
+ * colour for dark mode and follows the theme the person picked, so a `dark:`
+ * variant here flips the colour a second time and, because Tailwind's `dark:`
+ * follows the device instead of Ziki's theme, shows a dark chip on a light
+ * page. Blocked and failed merges are red, merged is purple.
+ */
 export const reviewStatusChipClass: Record<string, string> = {
-  submitted: "border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300",
-  ready_to_merge: "border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
-  rejected: "border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
-  merge_blocked: "border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300",
-  merge_failed: "border border-rose-300 dark:border-rose-700 bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-200",
-  merged: "border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300",
+  submitted: "border border-indigo-200 bg-indigo-50 text-indigo-700",
+  ready_to_merge: "border border-emerald-200 bg-emerald-50 text-emerald-700",
+  rejected: "border border-amber-200 bg-amber-50 text-amber-700",
+  merge_blocked: "border border-rose-200 bg-rose-50 text-rose-700",
+  merge_failed: "border border-rose-300 bg-rose-100 text-rose-800",
+  merged: "border border-purple-200 bg-purple-50 text-purple-700",
 };
 
 export const issueChipBaseClass =

@@ -12,6 +12,9 @@ import { hasLevel } from "@/lib/agents/levels";
 import type { AgentContext } from "@/lib/agents/require-agent";
 import { publish } from "@/lib/agent-api/events";
 import { handleTestVerdictSubmitted } from "@/lib/agent-api/review-offer";
+import { parsePullRequestUrl, type GitHubClient, type PullRequest } from "@/lib/github/merge-pr";
+import { combineProblems, notifyAuthor, readinessClient, readinessProblems } from "@/lib/agent-api/pr-readiness";
+import { recordVerdictBlocked } from "@/lib/merge-status";
 
 /**
  * Reviewer agents reporting whether a fix is good to merge (#434). A verdict
@@ -28,6 +31,11 @@ import { handleTestVerdictSubmitted } from "@/lib/agent-api/review-offer";
  *   on its own. Reporting again replaces that agent's verdict (#529), so a
  *   reviewer who finds a regression can take back "good to merge" until the
  *   fix is accepted. The audit log keeps every change.
+ * - "Good to merge" is only recorded when the pull request is ready: every check
+ *   on its head commit is green, CodeRabbit has no unresolved review threads,
+ *   and it doesn't conflict with its base branch (#255). Otherwise nothing is
+ *   recorded, a comment lists every reason and what the author has to do, and
+ *   the author is told. A "not good to merge" verdict is always recorded.
  * - A verdict needs a linked pull request and records which one it tested
  *   (#526), and the head commit it tested (#489). Linking a different PR means
  *   the old verdicts no longer count.
@@ -56,6 +64,7 @@ export type TestVerdictBody = z.infer<typeof testVerdictBodySchema>;
 /** What the independence rule and the claim-holder check need about an issue. */
 const reviewedBugSelect = {
   id: true,
+  title: true,
   tenantId: true,
   status: true,
   pullRequestUrl: true,
@@ -66,6 +75,7 @@ const reviewedBugSelect = {
   reporterId: true,
   createdByAgentId: true,
   createdByAgent: { select: { ownerUserId: true } },
+  project: { select: { githubInstallationId: true } },
   claims: {
     select: {
       status: true,
@@ -73,7 +83,7 @@ const reviewedBugSelect = {
       agentId: true,
       beneficiaryUserId: true,
       dispatcherUserId: true,
-      agent: { select: { ownerUserId: true } },
+      agent: { select: { ownerUserId: true, name: true } },
     },
   },
 } satisfies Prisma.BugSelect;
@@ -103,12 +113,22 @@ export type SubmitTestVerdictResult =
   | { status: 400; error: "invalid_request"; message: string; field?: string }
   | { status: 403; error: "insufficient_level" | "fixer_cannot_verdict" | "not_independent"; message: string }
   | { status: 404; error: "not_found"; message: string }
-  | { status: 409; error: "no_pull_request" | "already_accepted" | "already_verdicted"; message: string };
+  | { status: 409; error: "no_pull_request" | "already_accepted" | "already_verdicted"; message: string }
+  /** "Good to merge" was not recorded because the pull request isn't ready (#255). */
+  | {
+      status: 409;
+      error: "not_ready";
+      missing: "github_app" | "pull_request" | "deployment_verification" | "review_threads" | "merge_conflict";
+      message: string;
+    };
+
+export type SubmitTestVerdictDeps = { client?: GitHubClient | null };
 
 export async function submitTestVerdict(
   agent: AgentContext,
   bugId: string,
   rawBody: unknown,
+  deps: SubmitTestVerdictDeps = {},
 ): Promise<SubmitTestVerdictResult> {
   if (!hasLevel(agent.level, "working")) {
     return {
@@ -192,6 +212,22 @@ export async function submitTestVerdict(
       error: "not_independent",
       message: "onBehalfOfUserId must be independent of the issue's reporter, solver, and claim beneficiary.",
     };
+  }
+
+  // A tester only says "good to merge" about a pull request that is ready.
+  if (body.goodToMerge) {
+    const block = await readyBlock(bug, deps, headSha);
+    if (block) {
+      const claim = bug.claims.find((c) => c.status === "active" && !c.releasedAt);
+      await recordVerdictBlocked(prisma, { agent, bug, reason: block.message, todo: block.todo });
+      notifyAuthor({
+        bug,
+        recipientId: claim?.beneficiaryUserId ?? bug.assigneeId,
+        reason: block.message,
+        fromAgentName: agent.name,
+      });
+      return { status: 409, error: "not_ready", missing: block.missing, message: block.message };
+    }
   }
 
   const verdictSelect = {
@@ -302,4 +338,51 @@ export async function submitTestVerdict(
     }
     throw error;
   }
+}
+
+/**
+ * Why a tester can't say "good to merge" yet: GitHub can't be asked, or the
+ * pull request has red checks, open CodeRabbit threads or a merge conflict.
+ * Null when it is ready.
+ */
+async function readyBlock(
+  bug: LoadedBug,
+  deps: SubmitTestVerdictDeps,
+  testedHeadSha: string | null | undefined,
+): Promise<{
+  missing: "github_app" | "pull_request" | "deployment_verification" | "review_threads" | "merge_conflict";
+  message: string;
+  todo: string;
+} | null> {
+  const client = deps.client !== undefined ? deps.client : readinessClient(bug.project?.githubInstallationId);
+  if (!client) {
+    return {
+      missing: "github_app",
+      message:
+        "The GitHub App is not set up for this project, so Ziki can't check that the checks are green, CodeRabbit's threads are resolved and there is no merge conflict.",
+      todo: "A tenant admin installs the Ziki GitHub App on this project's repository and sets the repository on the project. Then report again.",
+    };
+  }
+  const ref = parsePullRequestUrl(bug.pullRequestUrl);
+  if (!ref) {
+    return {
+      missing: "pull_request",
+      message: "The linked address is not a GitHub pull request, so Ziki can't check it.",
+      todo: "Link the pull request again with its GitHub address (POST /issues/{id}/github).",
+    };
+  }
+  let pullRequest: PullRequest;
+  try {
+    pullRequest = await client.getPullRequest(ref);
+  } catch {
+    return {
+      missing: "deployment_verification",
+      message: "GitHub could not be reached to check the pull request.",
+      todo: "Nothing is wrong with the fix. Report again in a few minutes.",
+    };
+  }
+  const claim = bug.claims.find((c) => c.status === "active" && !c.releasedAt);
+  return combineProblems(
+    await readinessProblems(client, ref, pullRequest, testedHeadSha || pullRequest.headSha, claim?.agent.name),
+  );
 }

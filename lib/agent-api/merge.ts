@@ -19,7 +19,6 @@ import { statusChangedSummary, commentedSummary, commentPreview } from "@/lib/ac
 import { workflowFor } from "@/lib/workflow";
 import {
   clientForInstallation,
-  codeRabbitThreadsMessage,
   isPullRequestClosedUnmerged,
   parseGitHubRepoUrl,
   parsePullRequestUrl,
@@ -29,8 +28,15 @@ import {
   type PullRequest,
 } from "@/lib/github/merge-pr";
 import { recordMistake, type RecordMistakeInput } from "@/lib/agent-api/mistakes";
+import { checksProblem, combineProblems, notifyAuthor, readinessProblems } from "@/lib/agent-api/pr-readiness";
 import { notifyMergeFailed } from "@/lib/agent-notifications";
-import { MERGE_BLOCKED, MERGE_FAILED, recordMergeOutcome, type MergeOutcomeStatus } from "@/lib/merge-status";
+import {
+  MERGE_BLOCKED,
+  MERGE_FAILED,
+  recordAcceptBlocked,
+  recordMergeOutcome,
+  type MergeOutcomeStatus,
+} from "@/lib/merge-status";
 
 /**
  * A merger accepting a fix (#434). The gate: the issue is confirmed, no
@@ -68,7 +74,7 @@ const mergeBugSelect = {
       agentId: true,
       beneficiaryUserId: true,
       dispatcherUserId: true,
-      agent: { select: { ownerUserId: true } },
+      agent: { select: { ownerUserId: true, name: true } },
     },
   },
 } satisfies Prisma.BugSelect;
@@ -107,7 +113,8 @@ export type AcceptFixResult =
         | "deployment_verification"
         | "github_merge_failed"
         | "github_app"
-        | "review_threads";
+        | "review_threads"
+        | "merge_conflict";
       message: string;
     };
 
@@ -343,6 +350,18 @@ export async function acceptFix(
   const isAdminMerge = forceAdminMerge || agent.level === "merger";
 
   if (!isAdminMerge) {
+    // Before a manager says yes, GitHub has to say the fix won't break the
+    // code: no conflict with the base branch, checks green on the commit the testers approved. Nothing is
+    // accepted otherwise; a comment says why. A merge conflict is the same:
+    // no "ready to merge", a comment, and the author is told to resolve it.
+    const block = await acceptCheck(githubClientFor(bug, deps), ref, acceptedHeadSha, claim?.agent.name);
+    if (block) {
+      if (block.missing === "merge_conflict" || block.missing === "review_threads" || block.missing === "deployment_verification") {
+        notifyAuthor({ bug, recipientId: claim?.beneficiaryUserId ?? bug.assigneeId, reason: block.message, fromAgentName: agent.name });
+      }
+      await recordAcceptBlocked(prisma, { agent, bug, reason: block.message, todo: block.todo });
+      return { status: 409 as const, error: "not_ready" as const, missing: block.missing, message: block.message };
+    }
     return prisma.$transaction(async (tx) => {
       // Merger role: Accepts fix, marks ready to merge without resolving or awarding points
       await tx.bug.update({
@@ -420,21 +439,19 @@ export async function acceptFix(
     };
   }
 
-  const hasAppConfig = Boolean(process.env.GITHUB_APP_ID && process.env.GITHUB_APP_PRIVATE_KEY);
-  const ghClient = deps.client !== undefined
-    ? deps.client
-    : (hasAppConfig ? clientForInstallation(bug.project?.githubInstallationId) : null);
+  const ghClient = githubClientFor(bug, deps);
 
   // Every way the merge can stop records a merge status and a comment, so the
   // issue says exactly where it is. None of them resolves it or pays points.
   const stop = async (
     status: MergeOutcomeStatus,
-    missing: "pull_request" | "deployment_verification" | "github_merge_failed" | "github_app" | "review_threads",
+    missing: "pull_request" | "deployment_verification" | "github_merge_failed" | "github_app" | "review_threads" | "merge_conflict",
     message: string,
+    todo?: string,
   ) => {
     // #1446: a failed check is logged so the issue page lists it under Ready to merge.
     await audit(agent, "github.merge_failed", `bug:${bug.id}`, { reason: message, missing }, { bugId: bug.id, db: prisma });
-    await recordMergeOutcome(prisma, { agent, bug, status, reason: message });
+    await recordMergeOutcome(prisma, { agent, bug, status, reason: message, todo });
     return { status: 409 as const, error: "not_ready" as const, missing, message };
   };
 
@@ -445,6 +462,7 @@ export async function acceptFix(
       MERGE_BLOCKED,
       "github_app",
       "The GitHub App is not set up for this project, so Ziki can't check or merge the pull request.",
+      GITHUB_APP_TODO,
     );
   }
 
@@ -466,22 +484,31 @@ export async function acceptFix(
 
   const headToVerify = acceptedHeadSha || pullRequest.headSha;
   if (pullRequest.headSha && headToVerify && pullRequest.headSha !== headToVerify) {
-    return stop(MERGE_BLOCKED, "pull_request", "The pull request's head commit changed since verification. Please re-review.");
-  }
-
-  // 2. Verify CI/CD checks
-  let green = false;
-  try {
-    green = await ghClient.checksGreen(ref, headToVerify);
-  } catch {
-    green = false;
-  }
-  if (!green) {
     return stop(
       MERGE_BLOCKED,
-      "deployment_verification",
-      "GitHub Actions CI/CD checks or deployment runs have not passed for this pull request head commit.",
+      "pull_request",
+      "The pull request's head commit changed since verification. Please re-review.",
+      "Testers check the new commit and report again, then a manager accepts it again. Ziki only merges the exact commit the testers approved.",
     );
+  }
+
+  // 2. The fix must not break the code and must be ready to go: every check
+  // on the head commit green, CodeRabbit's threads resolved, no conflict with
+  // the base branch. The same three things testers and managers check; they
+  // are read again here because time has passed. Every problem is listed in
+  // one comment, and the author is told. A merged pull request is already in,
+  // so only its checks are read.
+  if (pullRequest.merged) {
+    const checks = combineProblems(
+      [await checksProblem(ghClient, ref, headToVerify)].filter((problem) => problem !== null),
+    );
+    if (checks) return stop(MERGE_BLOCKED, checks.missing, checks.message, checks.todo);
+  } else {
+    const block = combineProblems(await readinessProblems(ghClient, ref, pullRequest, headToVerify, claim?.agent.name));
+    if (block) {
+      notifyAuthor({ bug, recipientId: claim?.beneficiaryUserId ?? bug.assigneeId, reason: block.message, fromAgentName: agent.name });
+      return stop(MERGE_BLOCKED, block.missing, block.message, block.todo);
+    }
   }
 
   // The merge commit comes only from GitHub's answer, never from the request.
@@ -489,22 +516,6 @@ export async function acceptFix(
 
   // 3. Execute GitHub merge if not already merged
   if (!pullRequest.merged) {
-    // Every review thread CodeRabbit opened must be resolved first. When the
-    // threads can't be read, the merge waits rather than guessing.
-    let openThreads: number;
-    try {
-      openThreads = await ghClient.unresolvedCodeRabbitThreads(ref);
-    } catch (error) {
-      const detail = error instanceof Error && error.message ? error.message : "GitHub could not be reached to read CodeRabbit's review threads.";
-      const message = detail.startsWith("GitHub could not be reached")
-        ? detail
-        : `GitHub could not be reached to read CodeRabbit's review threads: ${detail}`;
-      return stop(MERGE_BLOCKED, "review_threads", message);
-    }
-    if (openThreads > 0) {
-      return stop(MERGE_BLOCKED, "review_threads", codeRabbitThreadsMessage(openThreads));
-    }
-
     let mergeResult: MergePullResult;
     try {
       mergeResult = await ghClient.mergePullRequest(ref, headToVerify);
@@ -666,4 +677,64 @@ export async function acceptFix(
       rewardedReviewerUserIds,
     };
   });
+}
+
+const GITHUB_APP_TODO =
+  "A tenant admin installs the Ziki GitHub App on this project's repository and sets the repository on the project. Then try again.";
+
+/** The GitHub client for this issue's project, or null when the app isn't set up. */
+function githubClientFor(bug: LoadedBug, deps: AcceptFixDeps): GitHubClient | null {
+  if (deps.client !== undefined) return deps.client;
+  const hasAppConfig = Boolean(process.env.GITHUB_APP_ID && process.env.GITHUB_APP_PRIVATE_KEY);
+  return hasAppConfig ? clientForInstallation(bug.project?.githubInstallationId) : null;
+}
+
+/**
+ * What stops a manager from accepting a fix: GitHub can't be asked, the pull
+ * request moved after the testers approved it, its checks are not green, it
+ * conflicts with its base branch, or CodeRabbit has unresolved review threads.
+ * Null when the fix is safe to accept.
+ */
+async function acceptCheck(
+  client: GitHubClient | null,
+  ref: ReturnType<typeof parsePullRequestUrl>,
+  acceptedHeadSha: string | null,
+  author?: string,
+): Promise<{
+  missing: "pull_request" | "deployment_verification" | "github_app" | "merge_conflict" | "review_threads";
+  message: string;
+  todo: string;
+} | null> {
+  if (!client) {
+    return {
+      missing: "github_app",
+      message: "The GitHub App is not set up for this project, so Ziki can't check that the fix won't break the code.",
+      todo: GITHUB_APP_TODO,
+    };
+  }
+  if (!ref) {
+    return {
+      missing: "pull_request",
+      message: "The linked address is not a GitHub pull request, so Ziki can't check it.",
+      todo: "Link the pull request again with its GitHub address (POST /issues/{id}/github).",
+    };
+  }
+  let pullRequest: PullRequest;
+  try {
+    pullRequest = await client.getPullRequest(ref);
+  } catch {
+    return {
+      missing: "deployment_verification",
+      message: "GitHub could not be reached to check the pull request.",
+      todo: "Nothing is wrong with the fix. Try accepting again in a few minutes.",
+    };
+  }
+  if (pullRequest.headSha && acceptedHeadSha && pullRequest.headSha !== acceptedHeadSha) {
+    return {
+      missing: "pull_request",
+      message: "The pull request's head commit changed after the testers approved it.",
+      todo: "Testers check the new commit and report again. Then a manager can accept it.",
+    };
+  }
+  return combineProblems(await readinessProblems(client, ref, pullRequest, acceptedHeadSha || pullRequest.headSha, author));
 }
