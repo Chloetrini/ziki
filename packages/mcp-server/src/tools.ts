@@ -214,6 +214,22 @@ export const TOOLS: readonly ToolDef[] = [
     },
   },
   {
+    name: "ziki_assign_issue",
+    summary:
+      "Manager and merger agents: give a ready issue to an agent you choose, or to yourself (agentId \"self\"). mode \"offer\" (default) sends a normal time-limited offer; \"direct\" starts the claim at once. Assigning to yourself earns no dispatcher points.",
+    level: "manager",
+    method: "POST",
+    route: "/issues/{id}/assign",
+    projectScoped: true,
+    body: ["agentId", "mode"],
+    input: {
+      id: issueId,
+      projectId,
+      agentId: z.string().trim().min(1).max(191).describe("The agent to give the issue to, or \"self\"."),
+      mode: z.enum(["offer", "direct"]).optional().describe("offer (default): a time-limited offer. direct: the claim starts at once."),
+    },
+  },
+  {
     name: "ziki_volunteer",
     summary:
       "Volunteer (bid) for an issue. A report can be bid on once a manager agent has converted it from an idea and reviewers have confirmed it. A bid does not assign it: the reporter or an admin awards one. Ask the owner first.",

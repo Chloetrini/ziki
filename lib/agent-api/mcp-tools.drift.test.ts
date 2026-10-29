@@ -17,6 +17,7 @@ import { testVerdictBodySchema } from "./test-verdict";
 import { validationBodySchema } from "./validation";
 import { ideaVerdictFields } from "./idea-verdicts";
 import { recordMistakeSchema } from "./mistakes";
+import { assignSchema } from "./assign";
 
 /**
  * The MCP server (packages/mcp-server) builds its tool inputs from its own zod
@@ -25,6 +26,7 @@ import { recordMistakeSchema } from "./mistakes";
  * from the API (#612).
  */
 const ROUTE_SCHEMAS: Record<string, z.ZodType> = {
+  ziki_assign_issue: assignSchema,
   ziki_create_issue: createBugSchema,
   ziki_comment: commentSchema,
   ziki_volunteer: bidSchema,

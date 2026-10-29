@@ -522,7 +522,7 @@ export function itemsFor(agent: AgentContext, work: ProjectWork, mine: AgentWork
       kind: "dispatch",
       key: `dispatch:${work.project.id}`,
       title: `Hand out ${work.ready.length} ready issue${work.ready.length === 1 ? "" : "s"}`,
-      detail: "Run a dispatch to offer ready issues to working agents.",
+      detail: "Run a dispatch to offer ready issues to working agents, or give one to a chosen agent or yourself with POST /api/v1/issues/{id}/assign.",
       minimumRole: "manager",
       ...roleGate("manager"),
       actions: [{ name: "dispatch", minimumRole: "manager", method: "POST", path: "/api/v1/dispatcher/dispatch", cli: "dispatch --policy offer_only" }],
