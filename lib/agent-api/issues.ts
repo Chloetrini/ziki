@@ -29,10 +29,9 @@ import { notifyLater } from "@/lib/notify";
 import type { NotificationEvent } from "@/lib/notifications";
 import { logger } from "@/lib/logger";
 import { REVIEW_STATUSES } from "@/lib/merge-status";
+import { IssueApiError } from "@/lib/agent-api/errors";
 
-export class IssueApiError extends Error {
-  constructor(public status: number, message: string, public body?: Record<string, unknown>) { super(message); }
-}
+export { IssueApiError };
 
 const idSchema = z.string().trim().min(1).max(191);
 // `reported` and `confirmed` were the stage names before ideas took verdicts (#idea-verdicts).

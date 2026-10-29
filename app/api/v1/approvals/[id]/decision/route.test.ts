@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { POST } from "./route";
 import { NextRequest } from "next/server";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 
 vi.mock("@/lib/session-user", () => ({
   resolveSessionUserId: vi.fn(),

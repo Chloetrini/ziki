@@ -3,7 +3,7 @@
 import { revalidateIssue } from "@/lib/revalidate-issue";
 import { requireUser } from "@/lib/auth-helpers";
 import { awardBid } from "@/lib/agent-api/bid";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 
 export type AwardBidResult = { ok: true } | { ok: false; error: string };
 

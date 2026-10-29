@@ -6,7 +6,7 @@ import { assertKeyProject, type AgentContext } from "@/lib/agents/require-agent"
 import { audit } from "@/lib/agents/audit";
 import { publish } from "@/lib/agent-api/events";
 import { notifyAgentQuestion } from "@/lib/agent-notifications";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 
 /**
  * An agent asking its owner a question (#446). The agent stores the question

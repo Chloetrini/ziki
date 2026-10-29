@@ -41,7 +41,7 @@ vi.mock("@/lib/prisma", () => ({ prisma: db }));
 import { GET as listGET, POST as createPOST } from "./route";
 import { GET as readGET, PATCH as patchPATCH } from "./[id]/route";
 import { GET as allocationsGET, POST as splitPOST } from "./[id]/allocations/route";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 
 const agent = {
   agentId: "agent1",

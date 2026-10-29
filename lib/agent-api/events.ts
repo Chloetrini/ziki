@@ -138,6 +138,10 @@ export async function broadcastWhenCommitted(
         select: { id: true, projectId: true },
       });
     } catch (error) {
+      // A TypeError means the lookup can't be made at all (a client without
+      // the model, as in a unit test's partial Prisma mock). Waiting won't
+      // fix it, so give up now instead of retrying for a second.
+      if (error instanceof TypeError) return false;
       // The row cannot be read, so its visibility is unknown. Treat it as
       // not visible yet and try again; broadcasting here would send an event
       // whose row may never exist.

@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { AgentContext } from "@/lib/agents/require-agent";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 import { assertKeyProject } from "@/lib/agents/require-agent";
 import { audit } from "@/lib/agents/audit";
 import { publish } from "@/lib/agent-api/events";

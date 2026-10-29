@@ -3,7 +3,7 @@
 import { fromZodError } from "@/lib/form-errors";
 import { revalidatePath } from "next/cache";
 import { revalidateIssue } from "@/lib/revalidate-issue";
-import { expireTag, TAGS } from "@/lib/lookups";
+import { expireTag, TAGS } from "@/lib/cache-tags";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth-helpers";
 import { platformScopeFor } from "@/lib/categories";

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import type { AgentContext } from "@/lib/agents/require-agent";
 import { hasLevel, requireLevel } from "@/lib/agents/levels";
 import { audit } from "@/lib/agents/audit";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 import { publish } from "@/lib/agent-api/events";
 import { award } from "@/lib/points/award";
 import { IDEA_CONTRIBUTION_POINTS, ideaContributionSourceKey } from "@/lib/points/rules";

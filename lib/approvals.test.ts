@@ -8,7 +8,7 @@ import {
   createApprovalRule,
   deleteApprovalRule,
 } from "./approvals";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 
 // Hoist mockDb
 const db = vi.hoisted(() => ({

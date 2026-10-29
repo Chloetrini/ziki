@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 
 const id = z.string().trim().min(1).max(191);
 export const claimSchema = z.object({ projectId: id.optional(), beneficiaryUserId: id.optional() }).strict();

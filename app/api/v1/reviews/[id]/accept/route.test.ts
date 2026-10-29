@@ -28,7 +28,7 @@ const db = vi.hoisted(() => ({
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 
 import { POST } from "./route";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 
 const reviewerAgent = {
   agentId: "r1",

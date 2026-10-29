@@ -43,7 +43,7 @@ vi.mock("@/lib/redesigns", () => ({ assertRedesignOpen: redesign.assertRedesignO
 const notify = vi.hoisted(() => ({ notifyMergeFailed: vi.fn() }));
 vi.mock("@/lib/agent-notifications", () => ({ notifyMergeFailed: notify.notifyMergeFailed }));
 
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 import { acceptFix, executeAdminMerge } from "./merge";
 import { resetWorkflowCache } from "@/lib/workflow";
 import type { GitHubClient } from "@/lib/github/merge-pr";

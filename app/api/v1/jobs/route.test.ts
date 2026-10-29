@@ -45,7 +45,7 @@ import { GET as readGET } from "./[id]/route";
 import { POST as submitPOST } from "./[id]/submissions/route";
 import { POST as acceptPOST } from "./reviews/[id]/accept/route";
 import { POST as verdictPOST } from "./submissions/[id]/reviews/route";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 
 const agent = {
   agentId: "agent1",

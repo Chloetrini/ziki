@@ -43,7 +43,7 @@ vi.mock("@/lib/prisma", () => {
 
 import { prisma } from "@/lib/prisma";
 import { updateTag } from "next/cache";
-import { TAGS } from "@/lib/lookups";
+import { TAGS } from "@/lib/cache-tags";
 import { requireUser } from "@/lib/auth-helpers";
 import { currentTenantIdFor } from "@/lib/tenant-context";
 import { createCategoryAction, updateCategoryAction } from "./categories";

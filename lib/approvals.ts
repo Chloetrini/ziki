@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 import { publish } from "@/lib/agent-api/events";
 import { isTenantAdminRole } from "@/lib/agents/membership";
 import { notifyLater } from "@/lib/notify";

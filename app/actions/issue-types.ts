@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { expireTag, TAGS } from "@/lib/lookups";
+import { expireTag, TAGS } from "@/lib/cache-tags";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth-helpers";
 import { canDeleteIssueType, issueTypeInputSchema, issueTypeScopeFor } from "@/lib/issue-types";

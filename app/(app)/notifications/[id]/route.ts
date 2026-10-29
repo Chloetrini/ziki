@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveSessionUserId } from "@/lib/session-user";
 import { BASE_PATH } from "@/lib/base-path";
 import { safeNotificationPath } from "@/lib/notification-links";
-import { expireTag, TAGS } from "@/lib/lookups";
+import { expireTag, TAGS } from "@/lib/cache-tags";
 import { memberTenantById, readActiveTenantCookie, setActiveTenantCookie } from "@/lib/tenants";
 import { setActiveProjectCookie } from "@/lib/project-context";
 
