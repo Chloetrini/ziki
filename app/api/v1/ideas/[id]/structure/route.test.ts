@@ -15,14 +15,10 @@ const mocks = vi.hoisted(() => ({
     });
   }),
   issueJson: vi.fn(),
+  issueProject: vi.fn(async () => ({ tenantId: "tenant-1", projectId: "proj-1" })),
+  findIdea: vi.fn(),
   prisma: {
-    bug: {
-      findUnique: vi.fn(),
-      update: vi.fn(),
-    },
-    bugRevision: {
-      create: vi.fn(),
-    },
+    idea: { findUniqueOrThrow: vi.fn(), update: vi.fn() },
     $transaction: vi.fn(async (cb) => cb(mocks.prisma)),
   },
   audit: vi.fn(),
@@ -31,67 +27,63 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/agent-api/issues", () => ({
   agentIssueRequest: mocks.agentIssueRequest,
   issueJson: mocks.issueJson,
-  IssueApiError: class extends Error {
-    constructor(public status: number, message: string) {
-      super(message);
-    }
-  },
+  issueProject: mocks.issueProject,
 }));
-
+vi.mock("@/lib/agent-api/ideas", () => ({ findIdea: mocks.findIdea }));
 vi.mock("@/lib/prisma", () => ({ prisma: mocks.prisma }));
 vi.mock("@/lib/agents/audit", () => ({ audit: mocks.audit }));
 
-describe("POST /api/v1/ideas/[id]/structure", () => {
+const draft = {
+  id: "idea-1",
+  number: 12,
+  title: "Quick idea",
+  description: "Allow users to download their activity data as CSV.",
+  status: "open",
+};
+
+function post() {
+  return POST(new NextRequest("http://localhost/api/v1/ideas/12/structure?projectId=proj-1", { method: "POST" }), {
+    params: Promise.resolve({ id: "12" }),
+  });
+}
+
+describe("POST /api/v1/ideas/[id]/structure (#idea-table)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it("structures an unstructured draft idea and records revision", async () => {
-    mocks.prisma.bug.findUnique.mockResolvedValueOnce({
-      id: "bug-1",
-      number: 101,
-      title: "Quick idea",
-      description: "Allow users to download their activity data as CSV.",
-      status: "open",
-      tenantId: "tenant-1",
-      projectId: "proj-1",
-      createdByAgentId: null,
-    });
-
-    mocks.issueJson.mockResolvedValueOnce({
+    mocks.findIdea.mockResolvedValue({ id: "idea-1" });
+    mocks.prisma.idea.findUniqueOrThrow.mockResolvedValue(draft);
+    mocks.prisma.idea.update.mockImplementation(async ({ data }) => ({ ...draft, ...data, updatedAt: new Date() }));
+    mocks.issueJson.mockResolvedValue({
       summary: "CSV export for user activity data",
       problem: "Users cannot export their activity data.",
       proposedSolution: "Add a CSV export button on activity dashboard.",
       acceptanceCriteria: ["CSV export button works", "Data is downloaded properly"],
     });
+  });
 
-    mocks.prisma.bug.update.mockResolvedValueOnce({
-      id: "bug-1",
-      number: 101,
-      title: "Quick idea",
-      description: "## Summary\n...",
-      status: "open",
-    });
-
-    const request = new NextRequest("http://localhost/api/v1/ideas/bug-1/structure", {
-      method: "POST",
-    });
-
-    const response = await POST(request, { params: Promise.resolve({ id: "bug-1" }) });
+  it("structures an open draft idea, found by number in the project, and audits the text before", async () => {
+    const response = await post();
     expect(response.status).toBe(200);
+    expect(mocks.findIdea).toHaveBeenCalledWith({ tenantId: "tenant-1", projectId: "proj-1" }, "12");
+    const saved = mocks.prisma.idea.update.mock.calls[0][0];
+    expect(saved.where).toEqual({ id: "idea-1" });
+    expect(saved.data.description).toContain("## Summary");
+    expect(saved.data.description).toContain("CSV export for user activity data");
+    expect(mocks.audit).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: "agent-1" }),
+      "idea.structured",
+      "idea:idea-1",
+      expect.objectContaining({ beforeDescription: draft.description }),
+      expect.anything(),
+    );
+    expect((await response.json()).idea).toMatchObject({ id: "idea-1", number: 12 });
+  });
 
-    expect(mocks.prisma.bugRevision.create).toHaveBeenCalledWith({
-      data: {
-        bugId: "bug-1",
-        title: "Quick idea",
-        description: "Allow users to download their activity data as CSV.",
-        editedById: "user-1",
-      },
-    });
-
-    expect(mocks.prisma.bug.update).toHaveBeenCalled();
-    const updateCall = mocks.prisma.bug.update.mock.calls[0][0];
-    expect(updateCall.data.description).toContain("## Summary\nCSV export for user activity data");
-    expect(updateCall.data.description).toContain("## Acceptance Criteria\n- [ ] CSV export button works");
+  it("refuses an idea that is not open, or not in the project", async () => {
+    mocks.prisma.idea.findUniqueOrThrow.mockResolvedValueOnce({ ...draft, status: "converted" });
+    await expect(post()).rejects.toMatchObject({ status: 400 });
+    mocks.findIdea.mockResolvedValueOnce(null);
+    await expect(post()).rejects.toMatchObject({ status: 404 });
+    expect(mocks.prisma.idea.update).not.toHaveBeenCalled();
   });
 });

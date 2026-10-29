@@ -28,6 +28,7 @@ export const FINISHED_STATUS_VALUES = ["resolved", "closed"] as const;
  */
 const STATUS_FILTER_LABELS: Record<string, string> = {
   escalated: "Inbox",
+  ideas: "Ideas",
   open: "Open",
   in_progress: "In progress",
   resolved: "Done",

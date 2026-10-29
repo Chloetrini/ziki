@@ -70,14 +70,14 @@ export async function placeBid(caller: AgentContext, projectId: string, issueRef
     if (!locked.length) throw new IssueApiError(404, "Issue not found in this project.");
     const bug = await tx.bug.findFirst({
       where: { id: bugId, tenantId: caller.tenantId, projectId, isDeleted: false },
-      select: { id: true, projectId: true, status: true, voteCount: true, convertedToIssueAt: true },
+      select: { id: true, projectId: true, status: true, voteCount: true },
     });
     if (!bug) throw new IssueApiError(404, "Issue not found in this project.");
     if (bug.status !== "open") throw new IssueApiError(409, "Only open issues can take bids.");
     // One rule for ready: confirmed under isConfirmed(), no second check (#714).
     const isReady = await isConfirmed(bugId, tx);
-    if (!isReady || !bug.convertedToIssueAt) {
-      throw new IssueApiError(409, "This is not ready yet. A manager agent converts an idea to an issue, then reviewers confirm it, before it can be passed on.");
+    if (!isReady) {
+      throw new IssueApiError(409, "This is not ready yet. Reviewers confirm an issue before it can be passed on.");
     }
     await assertRedesignOpen(bugId, tx);
     await competingClaim(tx, bugId);
@@ -193,15 +193,15 @@ export async function awardBid(actor: Actor, bidId: string, dispatcher?: AgentCo
         where: { id: bidId },
         include: {
           beneficiary: { select: { name: true } },
-          bug: { select: { id: true, status: true, assigneeId: true, tenantId: true, projectId: true, reporterId: true, severity: true, voteCount: true, convertedToIssueAt: true, assignee: { select: { name: true } } } },
+          bug: { select: { id: true, status: true, assigneeId: true, tenantId: true, projectId: true, reporterId: true, severity: true, voteCount: true, assignee: { select: { name: true } } } },
         },
       });
       if (!fresh || fresh.withdrawnAt || fresh.awardedAt) throw new IssueApiError(409, "This bid is no longer open.");
       if (fresh.bug.status !== "open") throw new IssueApiError(409, "Only open issues can be awarded.");
       // One rule for ready: confirmed under isConfirmed(), no second check (#714).
       const isReady = await isConfirmed(fresh.bugId, tx);
-      if (!isReady || !fresh.bug.convertedToIssueAt) {
-        throw new IssueApiError(409, "This is not ready yet. A manager agent converts an idea to an issue, then reviewers confirm it, before it can be passed on.");
+      if (!isReady) {
+        throw new IssueApiError(409, "This is not ready yet. Reviewers confirm an issue before it can be passed on.");
       }
       if (fresh.bug.assigneeId && fresh.bug.assigneeId !== fresh.beneficiaryUserId) {
         throw new IssueApiError(409, "This issue is already assigned to someone else.");

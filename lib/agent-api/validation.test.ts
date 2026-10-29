@@ -505,14 +505,6 @@ describe("confirmation: the two-reviewer rule (#433)", () => {
     expect(notifications.notifyClaimOffered).not.toHaveBeenCalled();
   });
 
-  it("refuses `real` and duplicate validations on an idea, which takes verdicts instead (#idea-verdicts)", async () => {
-    db.bug.findFirst.mockResolvedValue(bugRow({ convertedToIssueAt: null }));
-    for (const body of [acceptReal, clearTriage]) {
-      await expect(submitValidation(reviewer("r1", "rob"), "bug1", body)).resolves.toMatchObject({ status: 409, error: "still_an_idea" });
-    }
-    expect(db.issueValidation.create).not.toHaveBeenCalled();
-  });
-
   it("one accepting reviewer does not confirm; two do, and the reporter is paid once", async () => {
     await submitValidation(reviewer("t1", "tia", "working"), "bug1", clearTriage);
     const first = await submitValidation(reviewer("r1", "rob"), "bug1", acceptReal);

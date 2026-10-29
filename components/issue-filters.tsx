@@ -138,25 +138,18 @@ function IssuesSort({ value, onChange }: { value: ReturnType<typeof parseBugSort
 
 /**
  * #1054: the intake stage used to be a sidebar beside the list. It is a
- * filter now. An idea takes verdicts until a manager agent converts it to an
- * issue; the issue is then confirmed, then ready (#idea-verdicts). The old
- * `reported` and `confirmed` values still pick Ideas and Requires confirmation.
+ * filter now. An issue is confirmed, then ready. Ideas are not issues: they
+ * have their own tab (#idea-table).
  */
 const STAGE_PARAM = "stage";
 const STAGE_OPTIONS = [
-  { value: "idea", label: "Ideas" },
   { value: "confirming", label: "Requires confirmation" },
   { value: "ready", label: "Ready" },
 ] as const;
 type StageFilter = (typeof STAGE_OPTIONS)[number]["value"];
 
-/**
- * The `?stage=` choice, old names included. Mirrors `parseIssueStageView` in
- * lib/issue-stage, which this client file can't import: it reaches Prisma.
- */
+/** The `?stage=` choice. Mirrors `parseIssueStageView` in lib/issue-stage, which this client file can't import. */
 function stageFilterValue(raw: string | null): StageFilter | "" {
-  if (raw === "reported") return "idea";
-  if (raw === "confirmed") return "confirming";
   return STAGE_OPTIONS.find((option) => option.value === raw)?.value ?? "";
 }
 
@@ -667,7 +660,7 @@ export function IssueFilters({
                   <div>
                     <label htmlFor="stage" className={fieldLabelClass}>Kind</label>
                     <FilterSelect compact={compact} aria-label="Kind" id="stage" className={selectClass} value={currentStage} onValueChange={(value) => update(STAGE_PARAM, value)}>
-                      <option value="">Ideas and issues</option>
+                      <option value="">All issues</option>
                       {STAGE_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>{stageCounts ? `${option.label} (${stageCounts[option.value]})` : option.label}</option>
                       ))}

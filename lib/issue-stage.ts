@@ -4,78 +4,38 @@ import { workflowFor } from "@/lib/workflow";
 import { DEFAULT_PROJECT_WORKFLOW } from "@/lib/workflow-config";
 
 /**
- * Where an open report sits before someone starts the work. Not a status.
+ * Where an open issue sits before someone starts the work. Not a status.
+ * Ideas are not issues (#idea-table): they live in their own table and have
+ * no stage here.
  *
- * - `idea`: people give it good, bad or neutral verdicts until its net score
- *   reaches the project's `ideaThreshold`; then a manager agent converts it.
- * - `confirming`: converted to an issue, waiting for independent reviewers to
- *   confirm it is real and not a duplicate.
+ * - `confirming`: converted from an idea, waiting for independent reviewers
+ *   to confirm it is real and not a duplicate.
  * - `ready`: a confirmed issue, so it can be passed on.
- *
- * Idea verdicts do not carry over: the issue is confirmed on its own.
  */
-export type IssueStage = "idea" | "confirming" | "ready";
+export type IssueStage = "confirming" | "ready";
 
 /** List filters. `ready` is the issue that can be passed on. */
 export type IssueStageView = IssueStage;
 
 export const issueStageLabels: Record<IssueStage, string> = {
-  idea: "Idea",
   confirming: "Requires confirmation",
   ready: "Ready",
 };
 
-/** An open report is an idea until a manager agent converts it to an issue. */
-export type Intake = "idea" | "issue";
-
-/** `?stage=` values, including the names links used before ideas took verdicts. */
+/** `?stage=` values. */
 export function parseIssueStageView(raw: string | null | undefined): IssueStageView | null {
-  if (raw === "idea" || raw === "confirming" || raw === "ready") return raw;
-  if (raw === "reported") return "idea";
-  if (raw === "confirmed") return "confirming";
-  return null;
+  return raw === "confirming" || raw === "ready" ? raw : null;
 }
 
-export function intakeOf(stage: IssueStage): Intake {
-  return stage === "idea" ? "idea" : "issue";
+export function stageDetail(stage: IssueStage): string {
+  if (stage === "ready") return "Reviewers confirmed this issue, so it can be passed on.";
+  return "This issue can be passed on once independent reviewers confirm it is real and not a duplicate.";
 }
 
-export function intakeLabel(stage: IssueStage): string {
-  return intakeOf(stage) === "issue" ? "Issue" : "Idea";
-}
-
-/** Idea until a manager agent converts it, whether or not it is still open. */
-export function intakeKind(input: { converted: boolean }): Intake {
-  return input.converted ? "issue" : "idea";
-}
-
-export function intakeDetail(stage: IssueStage, idea?: { score: number; threshold: number }): string {
-  if (stage === "ready") return "This is an issue. Reviewers confirmed it, so it can be passed on.";
-  if (stage === "confirming") {
-    return "This is an issue. It can be passed on once independent reviewers confirm it is real and not a duplicate.";
-  }
-  if (!idea) return "This is an idea. Give it a verdict: good, bad or neutral. A manager agent converts it to an issue once enough people think it is good.";
-  const left = Math.max(0, idea.threshold - idea.score);
-  if (left === 0) return `This is an idea with a score of ${idea.score}. It has reached ${idea.threshold}, so a manager agent can convert it to an issue.`;
-  return `This is an idea with a score of ${idea.score}. It needs ${left} more good vote${left === 1 ? "" : "s"} (net) before a manager agent can convert it to an issue.`;
-}
-
-/**
- * The stage of an open report. Anything no longer open has no stage.
- */
-export function issueStage(input: {
-  status: string;
-  converted: boolean;
-  confirmed: boolean;
-}): IssueStage | null {
+/** The stage of an open issue. Anything no longer open has no stage. */
+export function issueStage(input: { status: string; confirmed: boolean }): IssueStage | null {
   if (input.status !== "open") return null;
-  if (!input.converted) return "idea";
   return input.confirmed ? "ready" : "confirming";
-}
-
-/** Where a manager agent may convert an idea: open, not converted, at the project's threshold. */
-export function isConvertible(input: { status: string; converted: boolean; ideaScore: number }, threshold: number): boolean {
-  return input.status === "open" && !input.converted && input.ideaScore >= threshold;
 }
 
 type AcceptingReview = { id: string; agentId: string; ownerUserId: string; onBehalfOfUserId?: string };
@@ -116,7 +76,7 @@ export type IssueConfirmation = {
   triageCleared: boolean;
 };
 
-type ReadConfirmation = Omit<IssueConfirmation, "stage"> & { status: string; converted: boolean; confirmed: boolean };
+type ReadConfirmation = Omit<IssueConfirmation, "stage"> & { status: string; confirmed: boolean };
 
 /**
  * Confirmation state of every issue matching `where`, in a fixed number of
@@ -135,7 +95,6 @@ async function readConfirmations(
       id: true,
       projectId: true,
       status: true,
-      convertedToIssueAt: true,
       beneficiaryUserId: true,
       reporterId: true,
       createdByAgentId: true,
@@ -222,7 +181,7 @@ async function readConfirmations(
     const triageCleared = confirmationCount({ createdByAgentId: bug.createdByAgentId, accepts: clearsByBug.get(bug.id) ?? [], undoneIds, bug: reviewed }) > 0;
     const needed = workflows.get(bug.projectId)?.confirmationsNeeded ?? DEFAULT_PROJECT_WORKFLOW.confirmationsNeeded;
     const confirmed = isConfirmedCount(accepts, needed) && triageCleared;
-    result.set(bug.id, { status: bug.status, converted: bug.convertedToIssueAt !== null, confirmed, accepts, needed, triageCleared });
+    result.set(bug.id, { status: bug.status, confirmed, accepts, needed, triageCleared });
   }
   return result;
 }
@@ -238,20 +197,20 @@ export async function openIssueConfirmations(
 ): Promise<Map<string, IssueConfirmation>> {
   const read = await readConfirmations(db, { ...where, status: "open", isDeleted: false });
   const result = new Map<string, IssueConfirmation>();
-  for (const [id, { status, converted, confirmed, accepts, needed, triageCleared }] of read) {
-    const stage = issueStage({ status, converted, confirmed });
+  for (const [id, { status, confirmed, accepts, needed, triageCleared }] of read) {
+    const stage = issueStage({ status, confirmed });
     if (stage) result.set(id, { stage, accepts, needed, triageCleared });
   }
   return result;
 }
 
 /**
- * Ids of the converted, confirmed issues matching `where`, whatever their
- * status (an issue being worked on is `in_progress`), from one bulk read.
+ * Ids of the confirmed issues matching `where`, whatever their status (an
+ * issue being worked on is `in_progress`), from one bulk read.
  */
 export async function confirmedIssueIds(db: PrismaClient, where: Prisma.BugWhereInput): Promise<Set<string>> {
-  const read = await readConfirmations(db, { ...where, isDeleted: false, convertedToIssueAt: { not: null } });
-  return new Set([...read].filter(([, c]) => c.converted && c.confirmed).map(([id]) => id));
+  const read = await readConfirmations(db, { ...where, isDeleted: false });
+  return new Set([...read].filter(([, c]) => c.confirmed).map(([id]) => id));
 }
 
 /** Stage of every open issue matching `where` (see `openIssueConfirmations`). */

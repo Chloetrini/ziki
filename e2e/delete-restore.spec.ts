@@ -1,10 +1,10 @@
-import { test, expect, reportIssue, expectNoHorizontalScroll } from "./fixtures";
+import { test, expect, fileIssue, expectNoHorizontalScroll } from "./fixtures";
 
 test.use({ as: "admin" });
 
 test("deletes an issue, finds it among deleted ones, and restores it", async ({ page, uniq }) => {
   const title = uniq("Delete and restore check");
-  const url = await reportIssue(page, title);
+  const url = await fileIssue(page, title);
 
   await page.getByRole("button", { name: "Delete issue" }).first().click();
   const confirm = page.getByRole("dialog");
@@ -32,7 +32,7 @@ test("deletes an issue, finds it among deleted ones, and restores it", async ({ 
 test.describe("as a normal user", () => {
   test.use({ as: "user" });
   test("there is no delete control", async ({ page, uniq }) => {
-    await reportIssue(page, uniq("No delete for users"));
+    await fileIssue(page, uniq("No delete for users"));
     await expect(page.getByRole("button", { name: "Delete issue" })).toHaveCount(0);
   });
 });

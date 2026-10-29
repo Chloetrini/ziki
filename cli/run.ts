@@ -33,7 +33,7 @@ Calling the API:
   pnpm ziki request <METHOD> <path> [--body <json>] [--as <agent>]   Any /api/v1 route
 
 Examples:
-  pnpm ziki create-issue --title "Save fails" --description "Steps: ..." --as ada
+  pnpm ziki create-idea --title "Save fails" --description "Steps: ..." --as ada
   pnpm ziki validate-issue --id <issueId> --kind real --verdict accept --as bob
   pnpm ziki work --as dana
 

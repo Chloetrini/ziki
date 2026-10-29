@@ -263,6 +263,8 @@ model User {
   jobReviewOffers       JobReviewOffer[]      @relation("JobReviewOfferBeneficiary")
   approvalsDecided      IssueApproval[]      @relation("ApprovalDecider")
   ideaVerdicts          IdeaVerdict[]        @relation("IdeaVerdictsGiven")
+  reportedIdeas         Idea[]               @relation("IdeaReporter")
+  beneficiaryIdeas      Idea[]               @relation("IdeaBeneficiary")
 }
 
 /// Single-use password reset tokens (~30 min TTL). Store only the SHA-256 hash.
@@ -290,6 +292,7 @@ model IssueType {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   bugs          Bug[]
+  ideas         Idea[]
   approvalRules ApprovalRule[]
 
   @@unique([tenantId, name])
@@ -310,12 +313,6 @@ model Bug {
   typeId            String?
   type              IssueType?         @relation(fields: [typeId], references: [id], onDelete: SetNull)
   voteCount         Int                @default(0)
-  /// Idea stage (#idea-verdicts): good minus bad votes from idea verdicts.
-  ideaScore         Int                @default(0)
-  /// When a manager agent turned the idea into an issue. Null while it is an idea.
-  convertedToIssueAt DateTime?
-  /// The manager agent that converted it, for the audit trail.
-  convertedByAgentId String?
   isBoosted         Boolean            @default(false)
   boostedAt         DateTime?
   /// #289: at most one milestone. Cleared, not cascaded, when it's deleted.
@@ -370,7 +367,8 @@ model Bug {
   bids              IssueBid[]
   interests         IssueInterest[]
   validations       IssueValidation[]
-  ideaVerdicts      IdeaVerdict[]
+  /// The idea this issue was converted from (#idea-table). Every issue starts as one.
+  idea              Idea?
   testVerdicts      TestVerdict[]
   reviewOffers      ReviewOffer[]
   redesigns         RedesignProposal[]
@@ -415,6 +413,7 @@ model Category {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   bugs      Bug[]
+  ideas     Idea[]
 
   @@unique([tenantId, name])
   @@index([tenantId])
@@ -518,10 +517,14 @@ model Attachment {
   createdAt   DateTime @default(now())
   uploader    User     @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
   bug         Bug?     @relation(fields: [bugId], references: [id], onDelete: Cascade)
+  /// Set on an idea's attachments (#idea-table). Converting the idea also sets `bugId`.
+  ideaId      String?
+  idea        Idea?    @relation(fields: [ideaId], references: [id], onDelete: Cascade)
   comment     Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
   redesignProposal RedesignProposal? @relation(fields: [redesignProposalId], references: [id], onDelete: Cascade)
 
   @@index([bugId])
+  @@index([ideaId])
   @@index([commentId])
   @@index([redesignProposalId])
   @@index([uploaderId, createdAt])
@@ -609,6 +612,8 @@ model Tenant {
   /// #517: the next issue number this tenant hands out. The insert trigger
   /// increments it under a row lock, so concurrent creates stay unique.
   nextIssueNumber Int             @default(1)
+  /// The next idea number this tenant hands out (#idea-table). Ideas are numbered apart from issues.
+  nextIdeaNumber  Int             @default(1)
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
   projects      Project[]
@@ -618,6 +623,7 @@ model Tenant {
   memberships   Membership[]
   agents        Agent[]
   bugs          Bug[]
+  ideas         Idea[]
   auditEvents   AgentAuditEvent[]
   redesigns     RedesignProposal[]
   pointEntries  PointEntry[]
@@ -660,6 +666,7 @@ model Project {
   updatedAt            DateTime           @updatedAt
   tenant               Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   bugs                 Bug[]
+  ideas                Idea[]
   areas                ProjectArea[]
   redesigns            RedesignProposal[]
   apiKeys              AgentApiKey[]
@@ -711,6 +718,7 @@ model ProjectArea {
   updatedAt        DateTime               @updatedAt
   project          Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
   bugs             Bug[]
+  ideas            Idea[]
   agentPreferences AgentAreaPreference[]
 
   @@unique([projectId, slug])
@@ -895,6 +903,7 @@ model Agent {
   apiKeys              AgentApiKey[]
   auditEvents          AgentAuditEvent[]
   createdBugs          Bug[]                 @relation("AgentCreatedBugs")
+  createdIdeas         Idea[]                @relation("AgentCreatedIdeas")
   comments             Comment[]
   claims               IssueClaim[]
   bids                 IssueBid[]
@@ -1101,9 +1110,77 @@ enum IdeaOpinion {
 /// One person's verdict on an idea: good, bad or neutral, with a short summary
 /// and a full description. It is all an idea takes: ideas have no comments.
 /// Verdicts stay with the idea; they do not carry over to the issue.
+/// Where an idea stands (#idea-table). An idea is not an issue: converting it
+/// creates the issue, and the idea stays as the record of how it got there.
+enum IdeaStatus {
+  open
+  converted
+  closed
+}
+
+/// A report waiting for verdicts (#idea-table). People and agents give it one
+/// verdict each; when its score reaches the project's `ideaThreshold`, a
+/// manager agent converts it, which creates an issue. Ideas are numbered
+/// apart from issues, per tenant.
+model Idea {
+  id                 String          @id @default(cuid())
+  /// Idea #1, #2, ... per tenant. The trigger `Idea_assign_tenant_number`
+  /// replaces the sequence value with `Tenant.nextIdeaNumber`.
+  number             Int             @default(autoincrement())
+  title              String
+  description        String
+  status             IdeaStatus      @default(open)
+  /// Good minus bad votes from its verdicts.
+  score              Int             @default(0)
+  typeId             String?
+  type               IssueType?      @relation(fields: [typeId], references: [id], onDelete: SetNull)
+  categoryId         String?
+  category           Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  areaId             String?
+  area               ProjectArea?    @relation(fields: [areaId], references: [id], onDelete: SetNull)
+  proofLinks         String[]        @default([])
+  tenantId           String
+  tenant             Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  projectId          String
+  project            Project         @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  reporterId         String
+  reporter           User            @relation("IdeaReporter", fields: [reporterId], references: [id])
+  /// The person it is for: the reporter unless an agent filed it for someone else.
+  beneficiaryUserId  String
+  beneficiary        User            @relation("IdeaBeneficiary", fields: [beneficiaryUserId], references: [id])
+  /// Set when an agent filed it. Null for people.
+  createdByAgentId   String?
+  createdByAgent     Agent?          @relation("AgentCreatedIdeas", fields: [createdByAgentId], references: [id], onDelete: SetNull)
+  /// When a manager agent converted it, and which one.
+  convertedAt        DateTime?
+  convertedByAgentId String?
+  /// The issue converting it created.
+  issueId            String?         @unique
+  issue              Bug?            @relation(fields: [issueId], references: [id], onDelete: SetNull)
+  /// An idea that was an issue row before ideas had their own table keeps
+  /// that row's id and number, so old links still find it.
+  legacyBugNumber    Int?
+  /// Comments it took back when ideas still took comments: [{authorId, body, createdAt}].
+  legacyComments     Json?
+  isDeleted          Boolean         @default(false)
+  deletedAt          DateTime?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  verdicts           IdeaVerdict[]
+  attachments        Attachment[]
+  pointEntries       PointEntry[]
+  idempotencyKeys    IdempotencyKey[]
+
+  @@unique([tenantId, number])
+  @@unique([tenantId, legacyBugNumber])
+  @@index([tenantId, projectId, status])
+  @@index([reporterId])
+  @@index([createdByAgentId])
+}
+
 model IdeaVerdict {
   id               String      @id @default(cuid())
-  bugId            String
+  ideaId           String
   /// The person the verdict counts for: an agent's owner, or a person in the web app.
   onBehalfOfUserId String
   /// The agent that gave it; null when a person gave it in the web app.
@@ -1119,13 +1196,13 @@ model IdeaVerdict {
   commentId        String?     @unique
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
-  bug              Bug         @relation(fields: [bugId], references: [id], onDelete: Cascade)
+  idea             Idea        @relation(fields: [ideaId], references: [id], onDelete: Cascade)
   onBehalfOf       User        @relation("IdeaVerdictsGiven", fields: [onBehalfOfUserId], references: [id], onDelete: Cascade)
   agent            Agent?      @relation(fields: [agentId], references: [id], onDelete: SetNull)
   comment          Comment?    @relation(fields: [commentId], references: [id], onDelete: SetNull)
 
-  @@unique([bugId, onBehalfOfUserId])
-  @@index([bugId])
+  @@unique([ideaId, onBehalfOfUserId])
+  @@index([ideaId])
 }
 
 model IssueValidation {
@@ -1414,6 +1491,9 @@ model PointEntry {
   tenant      Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   bug         Bug?           @relation(fields: [bugId], references: [id], onDelete: SetNull)
+  /// The idea an `idea` entry was earned on (#idea-table).
+  ideaId      String?
+  idea        Idea?          @relation(fields: [ideaId], references: [id], onDelete: SetNull)
   disputes    PointDispute[]
 
   @@index([tenantId, userId])
@@ -1548,6 +1628,9 @@ model IdempotencyKey {
   createdAt   DateTime @default(now())
   agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
   bug         Bug?     @relation(fields: [bugId], references: [id], onDelete: SetNull)
+  /// The idea an agent's create made (#idea-table); creates make ideas, not issues.
+  ideaId      String?
+  idea        Idea?    @relation(fields: [ideaId], references: [id], onDelete: SetNull)
 
   @@unique([agentId, key])
   @@index([createdAt])

@@ -29,7 +29,7 @@ The sandbox agents have the burst budget (4000 reads an hour instead of 600), be
 pnpm ziki help                       # overview
 pnpm ziki commands --search goal     # find a command
 pnpm ziki help validate-issue        # a command's flags, types and which are required
-pnpm ziki create-issue --title "Save does nothing" --description "Steps: …" --as bob
+pnpm ziki create-idea --title "Save does nothing" --description "Steps: …" --as bob
 pnpm ziki use dana                   # change the default agent
 pnpm ziki request GET /api/v1/agents/me   # any route, for paths without a command
 ```
@@ -49,8 +49,8 @@ The commands are the MCP server's tools (see [mcp-server.md](./mcp-server.md)) p
 | Area | Commands |
 | --- | --- |
 | Identity and keys | `whoami`, `pair`, `collect-pairing-token`, `rotate-key` (the keyring keeps the new key) |
-| Issues | `list-issues`, `get-issue`, `create-issue`, `upload-attachment`, `structure-issue`, `structure-idea`, `validate-issue`, `vote`, `unvote` (issues only; ideas take verdicts), `resolve-issue` |
-| Ideas | `give-idea-verdict`, `list-idea-verdicts`, `convert-idea` (manager or merger) |
+| Ideas | `create-idea` (every report is an idea), `list-ideas`, `get-idea`, `structure-idea`, `give-idea-verdict`, `list-idea-verdicts`, `convert-idea` (manager or merger; creates the issue) |
+| Issues | `list-issues`, `get-issue`, `upload-attachment`, `structure-issue`, `validate-issue`, `vote`, `unvote`, `resolve-issue` |
 | Conversation | `comment`, `list-comments`, `list-comments-from-start`, `ask-owner`, `get-question`, `escalate`, `get-escalation`, `propose-redesign` |
 | Finding work | `work` (alias of `get-work`: the work feed, the one place work appears), `next-mission`, `cover-mission` |
 | Taking work | `register-interest`, `list-interest`, `withdraw-interest`, `volunteer`, `list-bids`, `withdraw-bid`, `request-offer`, `accept-offer`, `heartbeat`, `extend-deadline`, `release-claim`, `link-pull-request` |

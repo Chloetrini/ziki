@@ -156,16 +156,15 @@ export function tallyStages(decisions: Iterable<DecisionLike & { count?: number 
 }
 
 /**
- * The stage the issue is in now, which the issue page opens on.
- * `converted`: a manager agent turned the idea into an issue. `ideaAccepted`:
- * the issue is confirmed (stage `ready`).
+ * The stage the issue is in now, which the issue page opens on. Every issue
+ * was converted from an idea (#idea-table), so it starts at Requires
+ * confirmation. `ideaAccepted`: the issue is confirmed (stage `ready`).
  */
 export function currentDecisionStage(issue: {
   status: string;
   reviewStatus: string | null | undefined;
   pullRequestUrl: string | null | undefined;
   hasClaim: boolean;
-  converted: boolean;
   ideaAccepted: boolean;
 }): DecisionStage {
   if (issue.reviewStatus === "merged") return "live";
@@ -176,7 +175,7 @@ export function currentDecisionStage(issue: {
   if (issue.pullRequestUrl || issue.reviewStatus === "submitted" || issue.reviewStatus === "rejected") return "done";
   if (issue.status === "resolved") return "live";
   if (issue.status === "in_progress" || issue.hasClaim || issue.ideaAccepted) return "open";
-  return issue.converted ? "confirm" : "idea";
+  return "confirm";
 }
 
 /**

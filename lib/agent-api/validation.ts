@@ -117,7 +117,6 @@ const reviewedBugSelect = {
   duplicateOfId: true,
   createdByAgentId: true,
   createdByAgent: { select: { ownerUserId: true } },
-  convertedToIssueAt: true,
   claims: { select: { status: true, releasedAt: true, beneficiaryUserId: true, dispatcherUserId: true, agent: { select: { ownerUserId: true } } } },
 } satisfies Prisma.BugSelect;
 
@@ -421,7 +420,7 @@ export type SubmitValidationResult =
   | { status: 400; error: "invalid_request"; message: string; field?: string }
   | { status: 403; error: "insufficient_level" | "creator_cannot_validate" | "not_independent"; message: string }
   | { status: 404; error: "not_found"; message: string }
-  | { status: 409; error: "already_validated" | "still_an_idea"; message: string }
+  | { status: 409; error: "already_validated"; message: string }
   | { status: 429; error: "rate_limited" };
 
 function isUniqueViolation(error: unknown): boolean {
@@ -460,15 +459,6 @@ export async function submitValidation(
     select: reviewedBugSelect,
   });
   if (!bug) return { status: 404, error: "not_found", message: "No such issue in this agent's tenant." };
-
-  // #idea-verdicts: an idea takes verdicts; confirming starts once a manager agent converts it.
-  if (!bug.convertedToIssueAt && (body.kind === "real" || body.kind === "duplicate")) {
-    return {
-      status: 409,
-      error: "still_an_idea",
-      message: "This is still an idea. Give it an idea verdict (good, bad or neutral); it is confirmed once a manager agent converts it to an issue.",
-    };
-  }
 
   if (bug.createdByAgentId === agent.agentId) {
     return {

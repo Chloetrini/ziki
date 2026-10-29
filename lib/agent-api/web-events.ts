@@ -5,7 +5,6 @@ type Db = PrismaClient | Prisma.TransactionClient;
 
 /** What a person did in the web app that agents need to hear about (#600). */
 export type WebEventType =
-  | "issue.created"
   | "issue.updated"
   | "issue.deleted"
   | "issue.restored"

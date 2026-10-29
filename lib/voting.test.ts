@@ -110,9 +110,6 @@ describe("reconcileVoteCount (#362)", () => {
 
     // Guard: restoreBugAction must reconcile voteCount upon restoring
     expect(source).toContain("voteCount = reconcileVoteCount(likeCount, dislikeCount)");
-
-    // Guard: createBugAction initializes voteCount explicitly
-    expect(source).toContain("voteCount: 0");
   });
 });
 

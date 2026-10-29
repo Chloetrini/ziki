@@ -1,10 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { revalidateIssue } from "@/lib/revalidate-issue";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth-helpers";
-import { bugInTenant, currentTenantIdFor } from "@/lib/tenant-context";
+import { currentTenantIdFor } from "@/lib/tenant-context";
+import { ideaPath } from "@/lib/issue-ref";
 import { giveIdeaVerdict, ideaVerdictSchema } from "@/lib/agent-api/idea-verdicts";
 import { IssueApiError } from "@/lib/agent-api/errors";
 import { ACTION_RATE_LIMITS, consumeRateLimit, RATE_LIMIT_MESSAGE } from "@/lib/rate-limit";
@@ -24,7 +24,7 @@ export type IdeaVerdictActionResult = {
  * Always one vote. A newer verdict replaces their earlier one.
  */
 export async function giveIdeaVerdictAction(
-  bugId: string,
+  ideaId: string,
   formData: FormData,
 ): Promise<IdeaVerdictActionResult> {
   const user = await requireUser();
@@ -34,13 +34,13 @@ export async function giveIdeaVerdictAction(
   if (!limit.allowed) return { error: RATE_LIMIT_MESSAGE };
 
   const tenantId = await currentTenantIdFor(userId);
-  if (!tenantId || typeof bugId !== "string" || !bugId) return { error: "Issue not found" };
+  if (!tenantId || typeof ideaId !== "string" || !ideaId) return { error: "Idea not found" };
 
-  const bug = await prisma.bug.findUnique({
-    where: { id: bugId, ...bugInTenant(tenantId) },
-    select: { id: true, projectId: true, isDeleted: true },
+  const idea = await prisma.idea.findFirst({
+    where: { id: ideaId, tenantId, isDeleted: false },
+    select: { id: true, number: true, projectId: true },
   });
-  if (!bug || bug.isDeleted) return { error: "Issue not found" };
+  if (!idea) return { error: "Idea not found" };
 
   const parsed = ideaVerdictSchema.safeParse({
     opinion: formData.get("opinion") ?? undefined,
@@ -54,9 +54,9 @@ export async function giveIdeaVerdictAction(
   }
 
   try {
-    const given = await giveIdeaVerdict({ tenantId, userId }, bug.projectId, bug.id, parsed.data);
+    const given = await giveIdeaVerdict({ tenantId, userId }, idea.projectId, idea.id, parsed.data);
     revalidatePath("/issues");
-    revalidateIssue(bug.id);
+    revalidatePath(ideaPath(idea.number));
     return { ok: true, replaced: given.replaced, ideaScore: given.ideaScore, ideaThreshold: given.ideaThreshold };
   } catch (error) {
     if (error instanceof IssueApiError) return { error: error.message };

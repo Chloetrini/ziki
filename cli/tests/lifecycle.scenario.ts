@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { confirm, feedItem, fileIssue, offeredTo, ok, refused, type Agent } from "./helpers";
+import { confirm, feedItem, fileIdea, offeredTo, ok, refused, type Agent } from "./helpers";
 
 /**
  * One report from idea to merge, through the CLI, with each agent class doing
@@ -9,25 +9,30 @@ import { confirm, feedItem, fileIssue, offeredTo, ok, refused, type Agent } from
  * owners test; dana accepts; eli (merger) merges.
  */
 describe("a report from idea to merge", () => {
+  /** The idea, then (once converted) the issue it became. */
+  let ideaId: string;
   let id: string;
   let solver: Agent;
   const agentIds = new Map<string, Agent>();
 
   beforeAll(async () => {
     for (const agent of ["ada", "bob", "cara", "dana", "eli"] as const) agentIds.set((await ok(agent, "whoami")).id, agent);
-    id = await fileIssue("ada", "CLI lifecycle: Save does nothing");
+    ideaId = await fileIdea("ada", "CLI lifecycle: Save does nothing");
+    id = ideaId;
   });
 
-  it("starts as an idea that every agent can read", async () => {
-    const issue = (await ok("bob", "get-issue", { id })).issue;
-    expect(issue).toMatchObject({ status: "open", intake: "idea", stage: "idea", ideaScore: 0, ideaThreshold: 3, convertedToIssueAt: null });
-    const listed = await ok("cara", "list-issues", { limit: 50, stage: "idea" });
+  it("starts as an idea, apart from the issues, that every agent can read", async () => {
+    const idea = (await ok("bob", "get-idea", { id })).idea;
+    expect(idea).toMatchObject({ status: "open", score: 0, ideaThreshold: 3, convertible: false, issueId: null });
+    const listed = await ok("cara", "list-ideas", { limit: 50, status: "open" });
     expect(listed.items.map((item: { id: string }) => item.id)).toContain(id);
+    // An idea is not an issue.
+    await refused("bob", "get-issue", { id }, 404);
   });
 
   it("takes verdicts, not upvotes or confirmations, while it is an idea", async () => {
-    expect((await refused("bob", "vote", { id }, 409)).error).toBe("use_idea_verdict");
-    expect((await refused("bob", "validate-issue", { id, kind: "real", verdict: "accept", severity: "high" }, 409)).error).toBe("still_an_idea");
+    await refused("bob", "vote", { id }, 404);
+    await refused("bob", "validate-issue", { id, kind: "real", verdict: "accept", severity: "high" }, 404);
     expect((await refused("ada", "give-idea-verdict", { id, opinion: "good", summary: "Mine.", description: "My own idea." }, 403)).error).toBe("own_idea");
     expect((await refused("dana", "convert-idea", { id }, 409)).error).toBe("below_threshold");
   });
@@ -47,16 +52,21 @@ describe("a report from idea to merge", () => {
     const reached = await ok("eli", "give-idea-verdict", { id, opinion: "good", votes: 2, summary: "Clear bug. Worth fixing.", description: "Merger agents may give up to 5 votes." });
     expect(reached).toMatchObject({ ideaScore: 3, convertible: true });
     const listed = await ok("ada", "list-idea-verdicts", { id });
-    expect(listed).toMatchObject({ idea: true, ideaScore: 3, ideaThreshold: 3, convertible: true, votes: { good: 3, bad: 0, neutral: 1 } });
+    expect(listed).toMatchObject({ ideaId, status: "open", ideaScore: 3, ideaThreshold: 3, convertible: true, votes: { good: 3, bad: 0, neutral: 1 } });
     expect(listed.verdicts).toHaveLength(3);
   });
 
-  it("is converted to an issue by a manager agent, not a working one", async () => {
-    await refused("bob", "convert-idea", { id }, 403);
-    const converted = await ok("dana", "convert-idea", { id });
-    expect(converted).toMatchObject({ issueId: id, stage: "confirming", ideaScore: 3 });
-    expect((await ok("ada", "get-issue", { id })).issue).toMatchObject({ intake: "issue", stage: "confirming", confirmed: false });
-    expect((await refused("bob", "give-idea-verdict", { id, opinion: "good", summary: "Late.", description: "Too late." }, 409)).error).toBe("not_an_idea");
+  it("is converted by a manager agent, not a working one, which creates the issue", async () => {
+    await refused("bob", "convert-idea", { id: ideaId }, 403);
+    const converted = await ok("dana", "convert-idea", { id: ideaId });
+    expect(converted).toMatchObject({ ideaId, ideaScore: 3 });
+    expect(converted.issueId).not.toBe(ideaId);
+    id = converted.issueId;
+    const issue = (await ok("ada", "get-issue", { id })).issue;
+    expect(issue).toMatchObject({ stage: "confirming", confirmed: false, idea: { id: ideaId } });
+    expect((await ok("bob", "get-idea", { id: ideaId })).idea).toMatchObject({ status: "converted", issueId: id, issueNumber: converted.issueNumber });
+    const late = await refused("bob", "give-idea-verdict", { id: ideaId, opinion: "good", summary: "Late.", description: "Too late." }, 409);
+    expect(late.error).toBe("idea_converted");
   });
 
   it("can't be confirmed by the agent that filed it", async () => {

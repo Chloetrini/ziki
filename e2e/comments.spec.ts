@@ -1,27 +1,14 @@
-import { test, expect, reportIssue } from "./fixtures";
-import { e2eDb } from "./db";
+import { test, expect, fileIssue, reportIssue } from "./fixtures";
 
-/** A new report is an idea; a manager agent converting it makes it an issue that takes comments. */
-async function convertToIssue(url: string) {
-  const number = Number(new URL(url).pathname.split("/").pop());
-  const prisma = e2eDb();
-  try {
-    await prisma.bug.updateMany({ where: { number, convertedToIssueAt: null }, data: { convertedToIssueAt: new Date() } });
-  } finally {
-    await prisma.$disconnect();
-  }
-}
-
-test("an idea takes verdicts, not comments", async ({ page, uniq }) => {
+test("a report is an idea, on its own page, that takes verdicts, not comments", async ({ page, uniq }) => {
   await reportIssue(page, uniq("Idea verdict check"));
+  await expect(page).toHaveURL(/\/ideas\/\d+$/);
   await expect(page.getByRole("heading", { name: /Idea verdicts/i })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add comment" })).toHaveCount(0);
 });
 
 test("comments on an issue and replies to the comment", async ({ page, uniq }) => {
-  const url = await reportIssue(page, uniq("Comment thread check"));
-  await convertToIssue(url);
-  await page.reload();
+  await fileIssue(page, uniq("Comment thread check"));
 
   // The comments themselves, not the activity log that quotes them.
   const thread = page.locator("[id^='comment-']");

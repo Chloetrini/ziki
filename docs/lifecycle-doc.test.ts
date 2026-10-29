@@ -33,7 +33,7 @@ describe("agent lifecycle walkthrough (#614)", () => {
   });
 
   it("names the event that tells each actor to move on", () => {
-    for (const event of ["issue.created", "issue.confirmed", "claim.offered", "issue.validated"]) {
+    for (const event of ["idea.created", "issue.converted", "issue.confirmed", "claim.offered", "issue.validated"]) {
       expect(llms).toContain(event);
     }
   });

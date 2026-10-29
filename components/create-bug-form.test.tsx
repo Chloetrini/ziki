@@ -145,48 +145,6 @@ describe("CreateBugForm optimistic submission", () => {
     expect(titleInput().value).toBe("App crashes on launch");
   });
 
-  it("sends severity and assignee when rendered as admin", async () => {
-    mockedCreateBug.mockImplementationOnce((formData) => {
-      capturedFormData = formData;
-      return Promise.resolve({ ok: true });
-    });
-
-    renderForm({ ...defaultProps, isAdmin: true });
-
-    await fillValidForm(user);
-    await user.selectOptions(screen.getByLabelText("Severity"), "critical");
-
-    // Assignee is a searchable combobox (#174), not a <select>: open it, then
-    // click the matching person in the listbox.
-    await user.click(screen.getByLabelText("Assignee"));
-    await user.click(
-      await screen.findByRole("option", { name: "Alice" }),
-    );
-
-    await user.click(submitButton());
-    await waitFor(() => expect(mockedCreateBug).toHaveBeenCalledTimes(1));
-
-    expect(capturedFormData?.get("severity")).toBe("critical");
-    expect(capturedFormData?.get("assigneeId")).toBe("u1");
-  });
-
-  it("assigns the bug to the current user when the checkbox is checked", async () => {
-    mockedCreateBug.mockImplementationOnce((formData) => {
-      capturedFormData = formData;
-      return Promise.resolve({ ok: true });
-    });
-
-    renderForm({ ...defaultProps, currentUserId: "u1" });
-
-    await fillValidForm(user);
-    await user.click(screen.getByLabelText("Assign this issue to myself"));
-
-    await user.click(submitButton());
-    await waitFor(() => expect(mockedCreateBug).toHaveBeenCalledTimes(1));
-
-    expect(capturedFormData?.get("assigneeId")).toBe("u1");
-  });
-
   it("does not assign anyone when the checkbox is left unchecked", async () => {
     mockedCreateBug.mockImplementationOnce((formData) => {
       capturedFormData = formData;

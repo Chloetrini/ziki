@@ -22,14 +22,14 @@ function sentences(text: string): number {
  * the earlier one.
  */
 export function IdeaVerdictForm({
-  bugId,
+  ideaId,
   summaryMaxChars,
   initialOpinion = null,
   initialSummary = "",
   initialDescription = "",
   onSaved,
 }: {
-  bugId: string;
+  ideaId: string;
   summaryMaxChars: number;
   initialOpinion?: Opinion | null;
   initialSummary?: string;
@@ -60,7 +60,7 @@ export function IdeaVerdictForm({
     data.set("summary", summary);
     data.set("description", description);
     startTransition(async () => {
-      const result = await giveIdeaVerdictAction(bugId, data);
+      const result = await giveIdeaVerdictAction(ideaId, data);
       if (result.error) {
         setError(result.error);
         return;

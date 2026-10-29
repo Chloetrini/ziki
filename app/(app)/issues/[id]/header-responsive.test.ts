@@ -78,24 +78,14 @@ describe("Bug detail header hierarchy (#687)", () => {
   });
 });
 
-describe("Idea page (#idea-verdicts)", () => {
-  it("shows the idea's score in place of the upvote button while it is an idea", () => {
-    expect(pageSource).toContain("const isIdea = bug.convertedToIssueAt === null;");
-    expect(pageSource).toMatch(/\{isIdea \?[\s\S]*?ideaScoreText\([\s\S]*?\) : \([\s\S]*?<VoteButton/);
+describe("an issue is never an idea (#idea-table)", () => {
+  it("always shows the upvote button and the conversation: ideas have their own page", () => {
+    expect(pageSource).not.toContain("isIdea");
+    expect(pageSource).not.toContain("IdeaVerdictsPanel");
+    expect(pageSource).toMatch(/<section\s+id="conversation"/);
   });
 
-  it("shows the Idea verdicts panel in the main column, only for an idea", () => {
-    const main = pageSource.slice(pageSource.indexOf("{/* MAIN COLUMN */}"), pageSource.indexOf("{/* SIDE RAIL */}"));
-    expect(main).toMatch(/\{isIdea \? \(\s*ideaVerdicts \? \(\s*<IdeaVerdictsPanel/);
-    expect(pageSource).toMatch(/isIdea && !bug\.isDeleted\s*\?\s*await loadOptional<IdeaVerdictsData \| null>\("idea verdicts"/);
-  });
-
-  it("puts an idea's verdicts where an issue's conversation goes: no comments on an idea", () => {
-    expect(pageSource).toMatch(/<IdeaVerdictsPanel[\s\S]*?\) : null\s*\) : \(\s*<section\s+id="conversation"/);
-    expect(pageSource).toMatch(/if \(!isIdea\) \{\s*for \(const comment of commentTree\)/);
-  });
-
-  it("only lets an issue be assigned once converted", () => {
-    expect(pageSource).toContain("converted: bug.convertedToIssueAt !== null,");
+  it("links back to the idea it was converted from", () => {
+    expect(pageSource).toMatch(/sourceIdea \? \(\s*<Link\s+href=\{ideaPath\(sourceIdea\.number\)\}/);
   });
 });

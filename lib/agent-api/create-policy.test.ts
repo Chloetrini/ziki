@@ -6,6 +6,7 @@ const db = vi.hoisted(() => {
     idempotencyKey: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
     issueType: { findUnique: vi.fn() },
     bug: { findMany: vi.fn() },
+    idea: { findMany: vi.fn() },
     $queryRaw: vi.fn(),
     $transaction: vi.fn(),
   };
@@ -14,7 +15,7 @@ const db = vi.hoisted(() => {
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 
 import {
-  createIssueWithPolicy,
+  createIdeaWithPolicy,
   cursorWhere,
   decodeCursor,
   encodeCursor,
@@ -61,15 +62,15 @@ beforeEach(() => {
   insert.mockResolvedValue({ id: "new-bug" });
 });
 
-describe("createIssueWithPolicy: idempotency (#441)", () => {
+describe("createIdeaWithPolicy: idempotency (#441)", () => {
   it("requires a key: a missing one is 400 and nothing is written", async () => {
     for (const idempotencyKey of [undefined, null, "", "   "]) {
-      expect(await createIssueWithPolicy(input({ idempotencyKey }))).toMatchObject({
+      expect(await createIdeaWithPolicy(input({ idempotencyKey }))).toMatchObject({
         status: 400,
         error: "missing_idempotency_key",
       });
     }
-    expect(await createIssueWithPolicy(input({ idempotencyKey: "has space" }))).toMatchObject({
+    expect(await createIdeaWithPolicy(input({ idempotencyKey: "has space" }))).toMatchObject({
       status: 400,
       error: "invalid_idempotency_key",
     });
@@ -77,17 +78,17 @@ describe("createIssueWithPolicy: idempotency (#441)", () => {
   });
 
   it("creates once and records the key against the new issue", async () => {
-    expect(await createIssueWithPolicy(input())).toEqual({ status: 201, bugId: "new-bug", replayed: false });
+    expect(await createIdeaWithPolicy(input())).toEqual({ status: 201, ideaId: "new-bug", replayed: false });
     expect(db.idempotencyKey.create).toHaveBeenCalledWith({
       data: { agentId: "agent1", key: "3f1c-key", requestHash: "request-hash", createdAt: NOW },
       select: { id: true },
     });
-    expect(db.idempotencyKey.update).toHaveBeenCalledWith({ where: { id: "ik1" }, data: { bugId: "new-bug" } });
+    expect(db.idempotencyKey.update).toHaveBeenCalledWith({ where: { id: "ik1" }, data: { ideaId: "new-bug" } });
   });
 
   it("rejects a different request body for a key within 24 hours", async () => {
-    db.idempotencyKey.findUnique.mockResolvedValue({ bugId: "first-bug", requestHash: "original-hash", createdAt: new Date(NOW.getTime() - 23 * HOUR) });
-    expect(await createIssueWithPolicy(input({ requestHash: "different-hash" }))).toEqual({
+    db.idempotencyKey.findUnique.mockResolvedValue({ ideaId: "first-bug", requestHash: "original-hash", createdAt: new Date(NOW.getTime() - 23 * HOUR) });
+    expect(await createIdeaWithPolicy(input({ requestHash: "different-hash" }))).toEqual({
       status: 409,
       error: "idempotency_conflict",
       message: "This Idempotency-Key was already used with a different request body.",
@@ -100,8 +101,8 @@ describe("createIssueWithPolicy: idempotency (#441)", () => {
   });
 
   it("treats a key older than 24 hours as new, and clears the old row", async () => {
-    db.idempotencyKey.findUnique.mockResolvedValue({ bugId: "old-bug", createdAt: new Date(NOW.getTime() - 25 * HOUR) });
-    expect(await createIssueWithPolicy(input())).toMatchObject({ status: 201, bugId: "new-bug" });
+    db.idempotencyKey.findUnique.mockResolvedValue({ ideaId: "old-bug", createdAt: new Date(NOW.getTime() - 25 * HOUR) });
+    expect(await createIdeaWithPolicy(input())).toMatchObject({ status: 201, ideaId: "new-bug" });
     expect(db.idempotencyKey.deleteMany).toHaveBeenCalledWith({
       where: { agentId: "agent1", key: "3f1c-key", createdAt: { lte: new Date(NOW.getTime() - 24 * HOUR) } },
     });
@@ -113,26 +114,26 @@ describe("createIssueWithPolicy: idempotency (#441)", () => {
     );
     db.idempotencyKey.findUnique
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ bugId: "winner-bug", requestHash: "request-hash", createdAt: NOW });
-    expect(await createIssueWithPolicy(input())).toEqual({ status: 200, bugId: "winner-bug", replayed: true });
+      .mockResolvedValueOnce({ ideaId: "winner-bug", requestHash: "request-hash", createdAt: NOW });
+    expect(await createIdeaWithPolicy(input())).toEqual({ status: 200, ideaId: "winner-bug", replayed: true });
     expect(insert).not.toHaveBeenCalled();
   });
 
   it("rethrows other database errors", async () => {
     insert.mockRejectedValue(new Error("db down"));
-    await expect(createIssueWithPolicy(input())).rejects.toThrow("db down");
+    await expect(createIdeaWithPolicy(input())).rejects.toThrow("db down");
   });
 
   it("scopes keys to the agent: another agent's key is not a replay", async () => {
-    await createIssueWithPolicy(input({ agent: { agentId: "agent2", tenantId: "tenant_zedu" } }));
+    await createIdeaWithPolicy(input({ agent: { agentId: "agent2", tenantId: "tenant_zedu" } }));
     expect(db.idempotencyKey.findUnique.mock.calls[0][0].where.agentId_key.agentId).toBe("agent2");
   });
 });
 
-describe("createIssueWithPolicy: similar issues (#441)", () => {
+describe("createIdeaWithPolicy: similar issues (#441)", () => {
   it("is 409 with the matches until acknowledged", async () => {
     db.$queryRaw.mockResolvedValue([similarRow]);
-    const result = await createIssueWithPolicy(input());
+    const result = await createIdeaWithPolicy(input());
     expect(result).toMatchObject({ status: 409, error: "similar_issues" });
     expect(result.status === 409 && "matches" in result ? result.matches : []).toEqual([
       { id: "b1", number: 12, title: "Login button does nothing in Safari", status: "open", voteCount: 3 },
@@ -141,7 +142,7 @@ describe("createIssueWithPolicy: similar issues (#441)", () => {
     // Nothing was held, so the agent can repeat the same key.
     expect(db.idempotencyKey.create).not.toHaveBeenCalled();
 
-    expect(await createIssueWithPolicy(input({ acknowledgeSimilar: true }))).toMatchObject({ status: 201 });
+    expect(await createIdeaWithPolicy(input({ acknowledgeSimilar: true }))).toMatchObject({ status: 201 });
     expect(insert).toHaveBeenCalledTimes(1);
   });
 
@@ -149,13 +150,13 @@ describe("createIssueWithPolicy: similar issues (#441)", () => {
     db.$queryRaw.mockResolvedValue([similarRow]);
     db.idempotencyKey.findUnique
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ bugId: "b1", requestHash: "request-hash", createdAt: NOW });
-    expect(await createIssueWithPolicy(input())).toEqual({ status: 200, bugId: "b1", replayed: true });
+      .mockResolvedValueOnce({ ideaId: "b1", requestHash: "request-hash", createdAt: NOW });
+    expect(await createIdeaWithPolicy(input())).toEqual({ status: 200, ideaId: "b1", replayed: true });
     expect(insert).not.toHaveBeenCalled();
   });
 
   it("only searches this tenant and project", async () => {
-    await createIssueWithPolicy(input());
+    await createIdeaWithPolicy(input());
     const values = (db.$queryRaw.mock.calls[0] as unknown[]).slice(1);
     expect(values).toContain("tenant_zedu");
     expect(values).toContain("project_zedu");
@@ -163,7 +164,7 @@ describe("createIssueWithPolicy: similar issues (#441)", () => {
 
   it("ignores weak matches", async () => {
     db.$queryRaw.mockResolvedValue([{ ...similarRow, score: 0.1 }]);
-    expect(await createIssueWithPolicy(input())).toMatchObject({ status: 201 });
+    expect(await createIdeaWithPolicy(input())).toMatchObject({ status: 201 });
   });
 
   it("retries trigram matching after a transient error", async () => {
@@ -171,9 +172,10 @@ describe("createIssueWithPolicy: similar issues (#441)", () => {
       .mockRejectedValueOnce(new Error("temporary database error"))
       .mockResolvedValueOnce([similarRow]);
     db.bug.findMany.mockResolvedValue([]);
+    db.idea.findMany.mockResolvedValue([]);
 
-    expect(await createIssueWithPolicy(input())).toMatchObject({ status: 201 });
-    expect(await createIssueWithPolicy(input({ idempotencyKey: "retry-key" }))).toMatchObject({
+    expect(await createIdeaWithPolicy(input())).toMatchObject({ status: 201 });
+    expect(await createIdeaWithPolicy(input({ idempotencyKey: "retry-key" }))).toMatchObject({
       status: 409,
       error: "similar_issues",
     });
@@ -189,22 +191,22 @@ describe("createIssueWithPolicy: similar issues (#441)", () => {
   });
 });
 
-describe("createIssueWithPolicy: fields (#441)", () => {
-  it("discards a client-supplied severity and stores medium", async () => {
-    await createIssueWithPolicy(input({ severity: "critical" }));
-    expect(insert.mock.calls[0][1]).toEqual({ severity: "medium", typeId: null });
+describe("createIdeaWithPolicy: fields (#441)", () => {
+  it("ignores a client-supplied severity: ideas have none", async () => {
+    await createIdeaWithPolicy(input({ severity: "critical" }));
+    expect(insert.mock.calls[0][1]).toEqual({ typeId: null });
   });
 
   it("accepts an active type and rejects an unknown or inactive one", async () => {
     db.issueType.findUnique.mockResolvedValue({ isActive: true });
-    await createIssueWithPolicy(input({ typeId: "type-fix" }));
-    expect(insert.mock.calls[0][1]).toEqual({ severity: "medium", typeId: "type-fix" });
+    await createIdeaWithPolicy(input({ typeId: "type-fix" }));
+    expect(insert.mock.calls[0][1]).toEqual({ typeId: "type-fix" });
 
     db.issueType.findUnique.mockResolvedValue(null);
-    expect(await createIssueWithPolicy(input({ typeId: "nope" }))).toMatchObject({ status: 422, error: "invalid_type" });
+    expect(await createIdeaWithPolicy(input({ typeId: "nope" }))).toMatchObject({ status: 422, error: "invalid_type" });
     db.issueType.findUnique.mockResolvedValue({ isActive: false });
-    expect(await createIssueWithPolicy(input({ typeId: "retired" }))).toMatchObject({ status: 422 });
-    expect(await createIssueWithPolicy(input({ typeId: 42 }))).toMatchObject({ status: 422 });
+    expect(await createIdeaWithPolicy(input({ typeId: "retired" }))).toMatchObject({ status: 422 });
+    expect(await createIdeaWithPolicy(input({ typeId: 42 }))).toMatchObject({ status: 422 });
     expect(insert).toHaveBeenCalledTimes(1);
   });
 });

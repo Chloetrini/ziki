@@ -8,14 +8,14 @@ import { agentMentionId } from "@/lib/mentions";
 import { requireUser } from "@/lib/auth-helpers";
 import { bugInTenant, currentTenantIdFor } from "@/lib/tenant-context";
 import { viewerBugScope } from "@/lib/tenant-viewer";
-import { issuePath, parseIssueRef, queryString, resolveIssueRef } from "@/lib/issue-ref";
+import { ideaPath, issuePath, parseIssueRef, queryString, resolveIssueRef } from "@/lib/issue-ref";
 import { resolveSessionUserId } from "@/lib/session-user";
 import { LocalTime } from "@/components/local-time";
 import { ClearDuplicateButton, MarkDuplicateButton } from "@/components/duplicate-controls";
 import { currentResolution, isFinishedStatus, type StatusChangeActivity } from "@/lib/resolution-note";
 import { statusLabel as resolutionStatusLabel } from "@/lib/labels";
 import { formatIssueNumber } from "@/lib/issue-number";
-import { intakeDetail, openIssueConfirmations, type IssueConfirmation, type IssueStage } from "@/lib/issue-stage";
+import { openIssueConfirmations, stageDetail, type IssueConfirmation, type IssueStage } from "@/lib/issue-stage";
 import { buildCommentTree } from "@/lib/comments";
 import {
   COMMENT_PARAM,
@@ -56,8 +56,8 @@ import { IssueBids } from "@/components/issue-bids";
 import { GoalBudgetSection } from "@/components/goal-budgets";
 import { Badge } from "@/components/ui/badge";
 import { VoteButton } from "@/components/vote-button";
-import { IdeaVerdictsPanel, IdeaVoteTotals, ideaScoreText, type IdeaVerdictBlock, type IdeaVerdictsData } from "@/components/idea-verdicts";
-import { IDEA_SUMMARY_MAX_CHARS, listIdeaVerdicts } from "@/lib/agent-api/idea-verdicts";
+import { type IdeaVerdictsData } from "@/components/idea-verdicts";
+import { listIdeaVerdicts } from "@/lib/agent-api/idea-verdicts";
 import { UpdateIssueForm } from "@/components/update-issue-form";
 import { AddCommentDialog } from "@/components/add-comment-dialog";
 import type { DisputeRole } from "@/components/comment-form";
@@ -302,6 +302,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
         type: { select: { id: true, name: true, isActive: true } },
         reporter: { select: { name: true, email: true, role: true, image: true } },
         createdByAgent: { select: { id: true, name: true, ownerUserId: true } },
+        idea: { select: { id: true, number: true, convertedAt: true } },
         milestone: { select: { id: true, title: true, dueDate: true, isClosed: true } },
         assignee: { select: { id: true, name: true, role: true, image: true } },
         category: { select: { id: true, name: true, isActive: true } },
@@ -336,6 +337,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
           type: { select: { id: true, name: true, isActive: true } },
           reporter: { select: { name: true, email: true, role: true, image: true } },
           createdByAgent: { select: { id: true, name: true, ownerUserId: true } },
+          idea: { select: { id: true, number: true, convertedAt: true } },
           assignee: { select: { id: true, name: true, role: true, image: true } },
           category: { select: { id: true, name: true, isActive: true } },
           area: { select: { id: true, name: true } },
@@ -713,23 +715,13 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
       console.error("[bugs] issue stage lookup failed", error);
     }
   }
-  // #idea-verdicts: an idea takes verdicts until a manager agent converts it.
-  const isIdea = bug.convertedToIssueAt === null;
-  // A deleted idea has no verdicts to show.
-  const ideaVerdicts: IdeaVerdictsData | null = isIdea && !bug.isDeleted
+  // #idea-table: the verdicts of the idea this issue was converted from, for the Idea stage.
+  const sourceIdea = bug.idea;
+  const ideaVerdicts: IdeaVerdictsData | null = sourceIdea
     ? await loadOptional<IdeaVerdictsData | null>("idea verdicts", null, () =>
-        listIdeaVerdicts({ tenantId: bug.tenantId, projectId: bug.projectId }, bug.id),
+        listIdeaVerdicts({ tenantId: bug.tenantId, projectId: bug.projectId }, sourceIdea.id),
       )
     : null;
-  const ownIdea =
-    bug.reporterId === userId || bug.beneficiaryUserId === userId || bug.createdByAgent?.ownerUserId === userId;
-  const verdictBlock: IdeaVerdictBlock = bug.isDeleted
-    ? "deleted"
-    : bug.status !== "open"
-      ? "closed"
-      : ownIdea
-        ? "own"
-        : null;
   const isAssignee = !!userId && bug.assigneeId === userId;
   const canUpdateStatus = canTriage || isAssignee;
   const canEdit =
@@ -747,7 +739,6 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
       membershipRole: access.membershipRole,
       currentAssigneeId: bug.assigneeId,
       targetAssigneeId: isAssignee ? null : userId,
-      converted: bug.convertedToIssueAt !== null,
     });
   const userVote =
     Array.isArray(bug.votes) && bug.votes.length > 0
@@ -760,17 +751,13 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
     reviewStatus: bug.reviewStatus,
     pullRequestUrl: bug.pullRequestUrl,
     hasClaim: agentDecisions.some((d) => d.kind === "claimed"),
-    converted: bug.convertedToIssueAt !== null,
     ideaAccepted: intakeStage === "ready",
   });
   // When each stage began, so every comment lands in the stage it was posted in.
-  const starts = stageStarts(agentDecisions, bug.convertedToIssueAt);
+  const starts = stageStarts(agentDecisions, sourceIdea?.convertedAt ?? null);
   const stageCommentCounts: Record<DecisionStage, number> = { idea: 0, confirm: 0, open: 0, done: 0, ready: 0, live: 0 };
-  // An idea shows only its verdicts, so old comments on it are not counted either.
-  if (!isIdea) {
-    for (const comment of commentTree) {
-      stageCommentCounts[stageOfComment(comment.type, comment.createdAt, starts)] += 1;
-    }
+  for (const comment of commentTree) {
+    stageCommentCounts[stageOfComment(comment.type, comment.createdAt, starts)] += 1;
   }
   // #489: the Admin label follows each person's role in this issue's
   // organization, not their account-wide role, the same rule as admin powers.
@@ -1020,30 +1007,16 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
 
           <div className="flex shrink-0 flex-wrap items-center gap-2 self-start print:hidden">
             <div className="hidden sm:contents">{headerActions}</div>
-            {isIdea ? (
-              // An idea takes verdicts, not upvotes (#idea-verdicts).
-              ideaVerdicts ? (
-                <a
-                  href="#idea-verdicts"
-                  data-testid="idea-score-link"
-                  className="inline-flex h-11 items-center gap-2 rounded-full border border-zk-border bg-zk-surface px-4 text-sm font-bold text-zk-text hover:bg-zk-chip"
-                >
-                  <span className="tabular-nums">{ideaScoreText(ideaVerdicts.ideaScore, ideaVerdicts.ideaThreshold)}</span>
-                  <IdeaVoteTotals votes={ideaVerdicts.votes} />
-                </a>
-              ) : null
-            ) : (
-              <VoteButton
-                bugId={bug.id}
-                voteCount={bug.voteCount}
-                userVote={userVote}
-                likeCount={voterSummary.likes.count}
-                likeVoters={voterSummary.likes.voters}
-                size="md"
-                showAvatars={false}
-                readOnly={bug.isDeleted}
-              />
-            )}
+            <VoteButton
+              bugId={bug.id}
+              voteCount={bug.voteCount}
+              userVote={userVote}
+              likeCount={voterSummary.likes.count}
+              likeVoters={voterSummary.likes.voters}
+              size="md"
+              showAvatars={false}
+              readOnly={bug.isDeleted}
+            />
           </div>
         </div>
       </div>
@@ -1102,18 +1075,6 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
             commentCounts={stageCommentCounts}
           />
 
-              {/* #idea-verdicts: an idea takes only verdicts. They sit where an issue's conversation does. */}
-              {isIdea ? (
-                ideaVerdicts ? (
-                  <IdeaVerdictsPanel
-                    bugId={bug.id}
-                    data={ideaVerdicts}
-                    viewerId={userId ?? null}
-                    block={verdictBlock}
-                    summaryMaxChars={IDEA_SUMMARY_MAX_CHARS}
-                  />
-                ) : null
-              ) : (
               <section
                 id="conversation"
                 className="scroll-mt-24 rounded-[20px] border border-zk-border bg-zk-surface p-5 sm:p-[22px]"
@@ -1194,7 +1155,6 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
                   stageStarts={starts}
                 />
               </section>
-              )}
 
           {canUpdateStatus && !bug.isDeleted ? (
             <UpdateIssueForm
@@ -1268,14 +1228,20 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
               {intakeStage ? (
                 // What the stage means stays one hover away now the note under the chips is gone.
                 <span
-                  title={intakeDetail(
-                    intakeStage,
-                    ideaVerdicts ? { score: ideaVerdicts.ideaScore, threshold: ideaVerdicts.ideaThreshold } : undefined,
-                  )} className="inline-flex">
+                  title={stageDetail(intakeStage)} className="inline-flex">
                   <Badge className={`${issueChipBaseClass} ${issueStageChipClass[intakeStage]}`}>
                     {issueStageLabels[intakeStage]}
                   </Badge>
                 </span>
+              ) : null}
+              {sourceIdea ? (
+                <Link
+                  href={ideaPath(sourceIdea.number)}
+                  data-testid="source-idea-link"
+                  className={`${issueChipBaseClass} bg-zk-chip text-zk-text2 hover:underline`}
+                >
+                  From idea #{sourceIdea.number}
+                </Link>
               ) : null}
               {bug.isBoosted && !bug.isDeleted ? (
                 <span className={`${issueChipBaseClass} border border-zk-warn-bd bg-zk-warn-bg text-zk-warn-fg`}>Boosted</span>

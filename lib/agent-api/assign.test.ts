@@ -90,7 +90,6 @@ describe("assignIssue (#715)", () => {
   });
 
   it.each([
-    ["an idea", { convertedToIssueAt: null }, "still an idea"],
     ["a closed issue", { status: "closed" }, "Only open issues"],
     ["an issue assigned to someone else", { assigneeId: "cara" }, "assigned to someone else"],
   ])("refuses %s", async (_label, bug, message) => {

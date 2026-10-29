@@ -14,7 +14,7 @@ import { listJobs } from "@/lib/jobs/create";
 import { workflowFor } from "@/lib/workflow";
 import { IDEA_CONTRIBUTION_POINTS } from "@/lib/points/rules";
 import { absoluteUrl } from "@/lib/site-url";
-import { issuePath } from "@/lib/issue-ref";
+import { ideaPath, issuePath } from "@/lib/issue-ref";
 import { eventStreamBus, TENANT_WRITE, type StreamEvent } from "@/lib/events/stream-bus";
 
 /**
@@ -72,6 +72,8 @@ export type WorkItem = {
   /** Why `canAct` is false. */
   blockedReason?: string;
   issue?: { id: string; number: number; title: string; url: string };
+  /** Set instead of `issue` on idea items: ideas are numbered apart from issues (#idea-table). */
+  idea?: { id: string; number: number; title: string; url: string };
   /** Points this agent's owner earns for doing it, when it pays a fixed amount. */
   points?: number;
   dueAt?: string;
@@ -112,6 +114,10 @@ type IssueFacts = ReviewedBug & {
   pullRequestUrl: string | null;
   validatorOwners: { kind: string; ownerUserId: string; onBehalfOfUserId: string }[];
   testerOwners: { ownerUserId: string; pullRequestUrl: string | null }[];
+};
+
+/** Who filed an idea and who already gave it a verdict (#idea-table). */
+type IdeaFacts = ReviewedBug & {
   /** Who already gave the idea a verdict. */
   verdictOwners: string[];
 };
@@ -123,9 +129,9 @@ export type ProjectWork = {
   tenantId: string;
   project: { id: string; slug: string; name: string };
   /** Open ideas, with their verdict score. */
-  ideas: (IssueRef & { ideaScore: number })[];
+  ideas: (IssueRef & { score: number })[];
   /** Open ideas at or past the project's threshold, waiting for a manager agent to convert them. */
-  toConvert: (IssueRef & { ideaScore: number })[];
+  toConvert: (IssueRef & { score: number })[];
   /** Converted issues still being confirmed. */
   toConfirm: (IssueRef & { needs: ConfirmNeed[] })[];
   ideaThreshold: number;
@@ -135,6 +141,7 @@ export type ProjectWork = {
   toMerge: (IssueRef & { reviewStatus: string | null })[];
   jobs: { id: string; brief: string; pointsPerAccepted: number; open: number }[];
   facts: Map<string, IssueFacts>;
+  ideaFacts: Map<string, IdeaFacts>;
   offerWindowSeconds: number;
 };
 
@@ -180,7 +187,7 @@ async function buildProjectWork(tenantId: string, project: { id: string; slug: s
   const caller = neutralCaller(tenantId, project.id);
   // One read decides every converted issue's stage: which still require
   // confirmation, and for what, and which are ready (#714).
-  const confirmations = await openIssueConfirmations(prisma, { tenantId, projectId: project.id, convertedToIssueAt: { not: null } });
+  const confirmations = await openIssueConfirmations(prisma, { tenantId, projectId: project.id });
   const [tests, ready, toAccept, toMerge, ideas, jobs, workflow] = await Promise.all([
     findReviewableIssues(caller, project.id, "test", PER_KIND_LIMIT),
     findClaimableIssues(caller, project.id, PER_KIND_LIMIT, confirmations),
@@ -210,7 +217,7 @@ async function buildProjectWork(tenantId: string, project: { id: string; slug: s
   });
 
   const toConvert = await convertibleIdeas(tenantId, project.id, workflow.ideaThreshold);
-  const ids = new Set([...ideas.map((i) => i.id), ...toConvert.map((i) => i.id), ...toConfirm.map((i) => i.id), ...tests.map((t) => t.id), ...toAccept.map((t) => t.id), ...toMerge.map((t) => t.id)]);
+  const ids = new Set([...toConfirm.map((i) => i.id), ...tests.map((t) => t.id), ...toAccept.map((t) => t.id), ...toMerge.map((t) => t.id)]);
   return {
     tenantId,
     project,
@@ -224,28 +231,56 @@ async function buildProjectWork(tenantId: string, project: { id: string; slug: s
     toMerge: toMerge.map((t) => ({ id: t.id, number: t.number, title: t.title, reviewStatus: t.reviewStatus })),
     jobs,
     facts: await loadFacts([...ids]),
+    ideaFacts: await loadIdeaFacts(ideas.map((idea) => idea.id)),
     offerWindowSeconds: workflow.offerWindowSeconds,
   };
 }
 
 /** Open ideas, highest score first so the ones nearest conversion lead. */
 async function openIdeas(tenantId: string, projectId: string): Promise<ProjectWork["ideas"]> {
-  return prisma.bug.findMany({
-    where: { tenantId, projectId, isDeleted: false, status: "open", convertedToIssueAt: null },
-    orderBy: [{ ideaScore: "desc" }, { createdAt: "asc" }],
+  return prisma.idea.findMany({
+    where: { tenantId, projectId, isDeleted: false, status: "open" },
+    orderBy: [{ score: "desc" }, { createdAt: "asc" }],
     take: PER_KIND_LIMIT,
-    select: { id: true, number: true, title: true, ideaScore: true },
+    select: { id: true, number: true, title: true, score: true },
   });
 }
 
 /** Open ideas whose score reached the threshold, highest first. */
 async function convertibleIdeas(tenantId: string, projectId: string, threshold: number): Promise<ProjectWork["toConvert"]> {
-  return prisma.bug.findMany({
-    where: { tenantId, projectId, isDeleted: false, status: "open", convertedToIssueAt: null, ideaScore: { gte: threshold } },
-    orderBy: [{ ideaScore: "desc" }, { createdAt: "asc" }],
+  return prisma.idea.findMany({
+    where: { tenantId, projectId, isDeleted: false, status: "open", score: { gte: threshold } },
+    orderBy: [{ score: "desc" }, { createdAt: "asc" }],
     take: CONVERT_LIMIT,
-    select: { id: true, number: true, title: true, ideaScore: true },
+    select: { id: true, number: true, title: true, score: true },
   });
+}
+
+async function loadIdeaFacts(ids: string[]): Promise<Map<string, IdeaFacts>> {
+  if (!ids.length) return new Map();
+  const ideas = await prisma.idea.findMany({
+    where: { id: { in: ids } },
+    select: {
+      id: true,
+      reporterId: true,
+      beneficiaryUserId: true,
+      createdByAgent: { select: { ownerUserId: true } },
+      verdicts: { select: { onBehalfOfUserId: true } },
+    },
+  });
+  return new Map(
+    ideas.map((idea) => [
+      idea.id,
+      {
+        reporterId: idea.reporterId,
+        beneficiaryUserId: idea.beneficiaryUserId,
+        assigneeId: null,
+        createdByAgent: idea.createdByAgent,
+        claims: [],
+        verdictOwners: idea.verdicts.map((v) => v.onBehalfOfUserId),
+      },
+    ]),
+  );
 }
 
 /** Jobs that still take submissions. */
@@ -274,7 +309,6 @@ async function loadFacts(ids: string[]): Promise<Map<string, IssueFacts>> {
       claims: { select: { status: true, releasedAt: true, beneficiaryUserId: true, dispatcherUserId: true, agent: { select: { ownerUserId: true } } } },
       validations: { select: { kind: true, onBehalfOfUserId: true, agent: { select: { ownerUserId: true } } } },
       testVerdicts: { select: { pullRequestUrl: true, agent: { select: { ownerUserId: true } } } },
-      ideaVerdicts: { select: { onBehalfOfUserId: true } },
     },
   });
   return new Map(
@@ -290,7 +324,6 @@ async function loadFacts(ids: string[]): Promise<Map<string, IssueFacts>> {
         claims: bug.claims,
         validatorOwners: bug.validations.map((v) => ({ kind: v.kind, ownerUserId: v.agent.ownerUserId, onBehalfOfUserId: v.onBehalfOfUserId })),
         testerOwners: bug.testVerdicts.map((v) => ({ ownerUserId: v.agent.ownerUserId, pullRequestUrl: v.pullRequestUrl })),
-        verdictOwners: bug.ideaVerdicts.map((v) => v.onBehalfOfUserId),
       },
     ]),
   );
@@ -325,7 +358,9 @@ async function agentWork(agent: AgentContext, projectId: string, offerWindowSeco
 }
 
 const apiPath = (id: string, tail: string, projectId: string) => `/api/v1/issues/${id}/${tail}?projectId=${projectId}`;
+const ideaApiPath = (id: string, tail: string, projectId: string) => `/api/v1/ideas/${id}/${tail}?projectId=${projectId}`;
 const issueRef = (issue: IssueRef) => ({ id: issue.id, number: issue.number, title: issue.title, url: absoluteUrl(issuePath(issue.number)) });
+const ideaRef = (idea: IssueRef) => ({ id: idea.id, number: idea.number, title: idea.title, url: absoluteUrl(ideaPath(idea.number)) });
 const plus = (ms: number) => new Date(ms).toISOString();
 
 /** Every item this agent sees, in the order it should act on them. */
@@ -337,6 +372,10 @@ export function itemsFor(agent: AgentContext, work: ProjectWork, mine: AgentWork
   const can = (role: AgentLevel) => hasLevel(agent.level, role);
   const independent = (id: string) => {
     const facts = work.facts.get(id);
+    return !facts || !reviewerConflict(actor, facts);
+  };
+  const independentOfIdea = (id: string) => {
+    const facts = work.ideaFacts.get(id);
     return !facts || !reviewerConflict(actor, facts);
   };
 
@@ -403,23 +442,23 @@ export function itemsFor(agent: AgentContext, work: ProjectWork, mine: AgentWork
   // 2. Ideas waiting for a verdict. Each person gives one, and earns once per idea.
   const maxVotes = can("manager") ? MAX_IDEA_VOTES : 1;
   for (const idea of work.ideas) {
-    if (!independent(idea.id)) continue;
-    if (work.facts.get(idea.id)?.verdictOwners.includes(owner)) continue;
+    if (!independentOfIdea(idea.id)) continue;
+    if (work.ideaFacts.get(idea.id)?.verdictOwners.includes(owner)) continue;
     items.push({
       kind: "idea",
       key: `idea:${idea.id}`,
       title: `Give your verdict on idea #${idea.number}`,
-      detail: `Is it a good idea, a bad one, or neither? Give a summary of at most two sentences and a full description. Score ${idea.ideaScore} of ${work.ideaThreshold} needed to become an issue. Your verdict earns ${IDEA_CONTRIBUTION_POINTS} point${maxVotes > 1 ? `; as a ${agent.level} agent you may give up to ${maxVotes} votes` : ""}.`,
+      detail: `Is it a good idea, a bad one, or neither? Give a summary of at most two sentences and a full description. Score ${idea.score} of ${work.ideaThreshold} needed to become an issue. Your verdict earns ${IDEA_CONTRIBUTION_POINTS} point${maxVotes > 1 ? `; as a ${agent.level} agent you may give up to ${maxVotes} votes` : ""}.`,
       minimumRole: "working",
       canAct: true,
-      issue: issueRef(idea),
+      idea: ideaRef(idea),
       points: IDEA_CONTRIBUTION_POINTS,
       actions: [
         {
           name: "give_idea_verdict",
           minimumRole: "working",
           method: "POST",
-          path: apiPath(idea.id, "idea-verdicts", pid),
+          path: ideaApiPath(idea.id, "verdicts", pid),
           cli: `give-idea-verdict --id ${idea.id} --opinion good|bad|neutral${maxVotes > 1 ? ` --votes 1-${maxVotes}` : ""} --summary <two sentences at most> --description <why, in full>`,
         },
       ],
@@ -506,14 +545,14 @@ export function itemsFor(agent: AgentContext, work: ProjectWork, mine: AgentWork
       kind: "convert_idea",
       key: `convert_idea:${idea.id}`,
       title: `Convert idea #${idea.number} to an issue`,
-      detail: `Its score is ${idea.ideaScore}, at or past the project's threshold of ${work.ideaThreshold}. Read the verdicts, then convert it so it can be confirmed and worked on.`,
+      detail: `Its score is ${idea.score}, at or past the project's threshold of ${work.ideaThreshold}. Read the verdicts, then convert it so it can be confirmed and worked on.`,
       minimumRole: "manager",
       // A manager may convert its owner's own idea: the verdicts came from other people.
       ...roleGate("manager"),
-      issue: issueRef(idea),
+      idea: ideaRef(idea),
       actions: [
-        { name: "list_idea_verdicts", minimumRole: "working", method: "GET", path: apiPath(idea.id, "idea-verdicts", pid), cli: `list-idea-verdicts --id ${idea.id}` },
-        { name: "convert_idea", minimumRole: "manager", method: "POST", path: apiPath(idea.id, "convert", pid), cli: `convert-idea --id ${idea.id}` },
+        { name: "list_idea_verdicts", minimumRole: "working", method: "GET", path: ideaApiPath(idea.id, "verdicts", pid), cli: `list-idea-verdicts --id ${idea.id}` },
+        { name: "convert_idea", minimumRole: "manager", method: "POST", path: ideaApiPath(idea.id, "convert", pid), cli: `convert-idea --id ${idea.id}` },
       ],
     });
   }

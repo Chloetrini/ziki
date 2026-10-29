@@ -48,6 +48,7 @@ vi.mock("@/lib/prisma", () => {
     comment: { create: vi.fn(async () => ({ id: "comment-new" })) },
     bugActivity: { create: vi.fn() },
     bug: { update: vi.fn() },
+    idea: { create: vi.fn() },
   };
   return {
     prisma: {
@@ -117,13 +118,6 @@ describe("addCommentAction (#502)", () => {
     expect(JSON.stringify(events)).not.toContain(dave);
   });
 
-  it("refuses a comment on an idea, which takes only verdicts (#idea-verdicts)", async () => {
-    db.bug.findUnique.mockResolvedValueOnce({ id: "bug-1", isDeleted: false, title: "An idea", reporterId: "carol", assigneeId: null, tenantId: "tenant-zedu", convertedToIssueAt: null });
-    const result = await addCommentAction("bug-1", form({ body: "A plain comment" }));
-    expect(result).toEqual({ error: expect.stringContaining("Ideas take verdicts") });
-    expect(db.__tx.comment.create).not.toHaveBeenCalled();
-  });
-
   it("sends no mention at all when the only tag is outside the tenant", async () => {
     await addCommentAction("bug-1", form({ body: `ping @[Dave Acme](${dave})` }));
     const events = notifyMock.mock.calls[0]!;
@@ -134,7 +128,8 @@ describe("addCommentAction (#502)", () => {
 
 describe("createBugAction (#502)", () => {
   it("resolves description mentions against the reporter's tenant", async () => {
-    db.bug.create.mockRejectedValue(new Error("stop after create"));
+    const ideaCreate = (prisma as unknown as { __tx: { idea: { create: ReturnType<typeof vi.fn> } } }).__tx.idea.create;
+    ideaCreate.mockRejectedValue(new Error("stop after create"));
     await createBugAction(
       form({
         title: "Bug list filter resets after navigation",
@@ -143,8 +138,8 @@ describe("createBugAction (#502)", () => {
       }),
     ).catch(() => undefined);
 
-    expect(db.bug.create).toHaveBeenCalledTimes(1);
-    expect(db.bug.create.mock.calls[0][0].data.description).toBe(
+    expect(ideaCreate).toHaveBeenCalledTimes(1);
+    expect(ideaCreate.mock.calls[0][0].data.description).toBe(
       `Filters reset when I go back to the list. cc @Dave Acme @[Bob](${bob})`,
     );
     expect(db.user.findMany.mock.calls[0][0].where.memberships).toEqual({ some: { tenantId: "tenant-zedu" } });

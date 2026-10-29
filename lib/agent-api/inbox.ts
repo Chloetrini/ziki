@@ -120,10 +120,11 @@ export async function inboxRecipients(db: Db, event: InboxEvent): Promise<InboxD
         : [];
       return [...reply, ...await mentionDeliveries(db, event.tenantId, comment.body, comment.agentId, commentId)];
     }
-    case "issue.created": {
-      if (!event.bugId) return [];
-      const bug = await db.bug.findUnique({ where: { id: event.bugId }, select: { description: true } });
-      return bug ? mentionDeliveries(db, event.tenantId, bug.description, event.actorAgentId ?? null, null) : [];
+    case "idea.created": {
+      const ideaId = text(payload.ideaId);
+      if (!ideaId) return [];
+      const idea = await db.idea.findUnique({ where: { id: ideaId }, select: { description: true } });
+      return idea ? mentionDeliveries(db, event.tenantId, idea.description, event.actorAgentId ?? null, null) : [];
     }
     default: {
       if (!REDESIGN_DECISIONS.has(event.type)) return [];

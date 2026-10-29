@@ -13,25 +13,6 @@ const base = { status: "open", stage: undefined, botConfirmations: 0, work: null
 const text = (ui: React.ReactElement) => render(ui).container.textContent?.replace(/\s+/g, " ").trim();
 
 describe("IssueRowStatus", () => {
-  it("calls an unconverted report an Idea", () => {
-    expect(text(<IssueRowStatus {...base} stage="idea" />)).toBe("Idea");
-  });
-
-  it("shows an idea's verdict score against the threshold (#idea-verdicts)", () => {
-    const { container } = render(<IssueRowStatus {...base} stage="idea" idea={{ score: 2, threshold: 3 }} />);
-    expect(container.textContent).toContain("(2/3) score");
-    expect(container.querySelector("[title]")?.getAttribute("title")).toBe("Score 2 of 3");
-  });
-
-  it("says Ready to convert once an idea reaches its threshold", () => {
-    expect(text(<IssueRowStatus {...base} stage="idea" idea={{ score: 3, threshold: 3 }} />)).toContain("Ready to convert (3/3) score");
-    expect(text(<IssueRowStatus {...base} stage="idea" idea={{ score: 6, threshold: 3 }} />)).toContain("Ready to convert (6/3)");
-    expect(text(<IssueRowStatus {...base} stage="idea" idea={{ score: 2, threshold: 3 }} />)).not.toContain("Ready to convert");
-  });
-
-  it("shows the score alone when the threshold is unknown", () => {
-    expect(text(<IssueRowStatus {...base} stage="idea" idea={{ score: -1, threshold: null }} />)).toContain("(-1) score");
-  });
 
   it("shows Confirming with the bots in the label, and no upvote count", () => {
     const { container } = render(<IssueRowStatus {...base} stage="confirming" botConfirmations={2} />);

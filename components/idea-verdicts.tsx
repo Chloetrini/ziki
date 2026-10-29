@@ -76,13 +76,13 @@ export function IdeaVoteTotals({ votes, className = "" }: { votes: Record<IdeaOp
  * toggle. "Add verdict" opens the form.
  */
 export function IdeaVerdictsPanel({
-  bugId,
+  ideaId,
   data,
   viewerId,
   block,
   summaryMaxChars,
 }: {
-  bugId: string;
+  ideaId: string;
   data: IdeaVerdictsData;
   viewerId: string | null;
   block: IdeaVerdictBlock;
@@ -123,7 +123,7 @@ export function IdeaVerdictsPanel({
           </span>
           {block ? null : viewerId ? (
             <AddVerdictDialog
-              bugId={bugId}
+              ideaId={ideaId}
               summaryMaxChars={summaryMaxChars}
               mine={mine ? { opinion: mine.opinion, summary: mine.summary, description: mine.description } : null}
             />

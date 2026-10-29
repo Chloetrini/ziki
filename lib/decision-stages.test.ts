@@ -79,14 +79,11 @@ describe("tallyStages", () => {
 });
 
 describe("currentDecisionStage", () => {
-  const base = { status: "open", reviewStatus: null, pullRequestUrl: null, hasClaim: false, converted: false, ideaAccepted: false };
+  const base = { status: "open", reviewStatus: null, pullRequestUrl: null, hasClaim: false, ideaAccepted: false };
 
-  it("starts at Idea", () => {
-    expect(currentDecisionStage(base)).toBe("idea");
-  });
-  it("Requires confirmation once a manager agent converts it, until it is confirmed (#714)", () => {
-    expect(currentDecisionStage({ ...base, converted: true })).toBe("confirm");
-    expect(currentDecisionStage({ ...base, converted: true, ideaAccepted: true })).toBe("open");
+  it("starts at Requires confirmation: every issue was converted from an idea (#idea-table, #714)", () => {
+    expect(currentDecisionStage(base)).toBe("confirm");
+    expect(currentDecisionStage({ ...base, ideaAccepted: true })).toBe("open");
   });
   it("is Open once the issue is confirmed or claimed", () => {
     expect(currentDecisionStage({ ...base, ideaAccepted: true })).toBe("open");

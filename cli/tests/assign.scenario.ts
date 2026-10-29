@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { confirm, fileIssue, offeredTo, ok, refused, toIssue } from "./helpers";
+import { confirm, fileIssue, offeredTo, ok, refused } from "./helpers";
 
 /**
  * A manager agent gives a ready issue to an agent it picks, or to itself
@@ -12,12 +12,9 @@ describe("a manager assigns ready issues", () => {
 
   beforeAll(async () => {
     bobAgentId = (await ok("bob", "whoami")).id;
-    forBob = await fileIssue("ada", "CLI assign: for bob");
-    forDana = await fileIssue("ada", "CLI assign: for dana");
-    for (const id of [forBob, forDana]) {
-      await toIssue(id, ["bob", "cara", "eli"]);
-      await confirm(id, ["bob", "cara"], "eli");
-    }
+    forBob = await fileIssue("ada", "CLI assign: for bob", ["bob", "cara", "eli"]);
+    forDana = await fileIssue("ada", "CLI assign: for dana", ["bob", "cara", "eli"]);
+    for (const id of [forBob, forDana]) await confirm(id, ["bob", "cara"], "eli");
   });
 
   it("is for manager and merger agents only", async () => {

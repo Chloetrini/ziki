@@ -3,7 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 
 vi.mock("@/lib/workflow", () => ({ workflowFor: vi.fn(async () => ({ confirmationsNeeded: 2 })) }));
 
-import { openIssueConfirmations, openIssueStages } from "./issue-stage";
+import { openIssueConfirmations } from "./issue-stage";
 
 type Validation = { id: string; kind: "real" | "duplicate"; agentId: string; owner: string; createdAt?: Date };
 
@@ -57,9 +57,4 @@ describe("openIssueConfirmations (#714): one rule for confirmed", () => {
     expect(result.get("b1")).toMatchObject({ stage: "confirming", accepts: 1, triageCleared: false });
   });
 
-  it("keeps ideas at the idea stage, and openIssueStages agrees", async () => {
-    const client = db([accept("v1", "bob")], { converted: false });
-    expect((await openIssueConfirmations(client, {})).get("b1")?.stage).toBe("idea");
-    expect((await openIssueStages(client, {})).get("b1")).toBe("idea");
-  });
 });

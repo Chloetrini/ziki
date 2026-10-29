@@ -1,5 +1,5 @@
 import { expectNoA11yViolations } from "./axe";
-import { reportIssue, test } from "./fixtures";
+import { fileIssue, test } from "./fixtures";
 
 /**
  * Real-browser accessibility gate (#A11Y). The jsdom unit tests cover the
@@ -34,7 +34,7 @@ test.describe("accessibility", () => {
     });
 
     test("an issue page", async ({ page, uniq }) => {
-      await reportIssue(page, uniq("A11y target"));
+      await fileIssue(page, uniq("A11y target"));
       await expectNoA11yViolations(page);
     });
 

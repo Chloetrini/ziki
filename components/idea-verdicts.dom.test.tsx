@@ -59,7 +59,7 @@ const data: IdeaVerdictsData = {
 const panel = (props: Partial<React.ComponentProps<typeof IdeaVerdictsPanel>> = {}) =>
   render(
     <IdeaVerdictsPanel
-      bugId="bug-1"
+      ideaId="bug-1"
       data={data}
       viewerId="cy"
       block={null}
@@ -147,8 +147,8 @@ describe("IdeaVerdictsPanel (#idea-verdicts)", () => {
     fireEvent.change(screen.getByLabelText("Summary"), { target: { value: "Worth doing." } });
     fireEvent.click(screen.getByRole("button", { name: "Give verdict" }));
     await waitFor(() => expect(giveIdeaVerdictAction).toHaveBeenCalledTimes(1));
-    const [bugId, sent] = giveIdeaVerdictAction.mock.calls[0] as [string, FormData];
-    expect(bugId).toBe("bug-1");
+    const [ideaId, sent] = giveIdeaVerdictAction.mock.calls[0] as [string, FormData];
+    expect(ideaId).toBe("bug-1");
     expect(Object.fromEntries(sent)).toEqual({ opinion: "good", summary: "Worth doing.", description: "Because." });
     // Saved, so the dialog closes.
     await waitFor(() => expect(document.querySelector("dialog")).not.toHaveAttribute("open"));

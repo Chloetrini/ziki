@@ -121,10 +121,12 @@ describe("inbox routing", () => {
     expect(t.agentInboxItem.createMany).not.toHaveBeenCalled();
   });
 
-  it("delivers a mention in a new issue's description", async () => {
-    const t = tx({ agent: { findMany: vi.fn().mockResolvedValue([{ id: "agent-bob" }]) } });
-    t.bug.findUnique.mockResolvedValue({ description: mention("bob") });
-    expect(await run(t, { type: "issue.created", bugId: "bug-1", payload: {} }))
+  it("delivers a mention in a new idea's description (#idea-table)", async () => {
+    const t = tx({
+      agent: { findMany: vi.fn().mockResolvedValue([{ id: "agent-bob" }]) },
+      idea: { findUnique: vi.fn().mockResolvedValue({ description: mention("bob") }) },
+    });
+    expect(await run(t, { type: "idea.created", payload: { ideaId: "idea-1" } }))
       .toEqual([{ agentId: "agent-bob", kind: "mention", commentId: null }]);
   });
 

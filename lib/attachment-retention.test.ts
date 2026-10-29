@@ -3,7 +3,7 @@ import { pruneUnlinkedUploads, SWEEP_BATCH, UNLINKED_UPLOAD_TTL_MS } from "./att
 
 const now = new Date("2026-10-20T12:00:00Z");
 const cutoff = new Date(now.getTime() - UNLINKED_UPLOAD_TTL_MS);
-const unlinked = { bugId: null, commentId: null, redesignProposalId: null, createdAt: { lt: cutoff } };
+const unlinked = { bugId: null, ideaId: null, commentId: null, redesignProposalId: null, createdAt: { lt: cutoff } };
 
 function fakeDb(stale: string[] = []) {
   return {
@@ -63,12 +63,12 @@ describe("sweepOrphanedAttachments (#658)", () => {
 
     const cutoff = new Date(now.getTime() - ORPHANED_UPLOAD_TTL_MS);
     expect(findMany).toHaveBeenNthCalledWith(1, {
-      where: { bugId: null, commentId: null, redesignProposalId: null, createdAt: { lt: cutoff } },
+      where: { bugId: null, ideaId: null, commentId: null, redesignProposalId: null, createdAt: { lt: cutoff } },
       select: { id: true },
       take: 500,
     });
     expect(findMany).toHaveBeenNthCalledWith(2, {
-      where: { bug: { isDeleted: true } },
+      where: { OR: [{ bug: { isDeleted: true } }, { idea: { isDeleted: true } }] },
       select: { id: true },
       take: 500,
     });

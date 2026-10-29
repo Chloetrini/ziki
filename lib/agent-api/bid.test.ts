@@ -92,15 +92,8 @@ describe("placeBid", () => {
     expect(db.issueBid.create).toHaveBeenCalled();
   });
 
-  it("refuses an issue that is not confirmed, or an idea not yet converted to an issue", async () => {
+  it("refuses an issue that is not confirmed yet", async () => {
     vi.mocked(isConfirmed).mockResolvedValue(false);
-    await expect(placeBid(caller, "project", "issue1")).rejects.toMatchObject({
-      status: 409,
-      message: expect.stringContaining("not ready yet"),
-    });
-    vi.mocked(isConfirmed).mockResolvedValue(true);
-    // Confirmed, but still an idea: a manager agent has not converted it.
-    db.bug.findFirst.mockResolvedValue({ id: "issue1", projectId: "project", status: "open", voteCount: 3, convertedToIssueAt: null });
     await expect(placeBid(caller, "project", "issue1")).rejects.toMatchObject({
       status: 409,
       message: expect.stringContaining("not ready yet"),
@@ -189,15 +182,6 @@ describe("awardBid", () => {
       where: { id: "bid1", awardedAt: null, withdrawnAt: null },
       data: expect.objectContaining({ claimId: "claim1" }),
     });
-  });
-
-  it("does not award a bid on an idea that is not yet converted to an issue", async () => {
-    db.issueBid.findUnique.mockResolvedValue({ ...stored, bug: { ...openBug, convertedToIssueAt: null } });
-    await expect(awardBid({ id: "reporter" }, "bid1")).rejects.toMatchObject({
-      status: 409,
-      message: expect.stringContaining("not ready yet"),
-    });
-    expect(db.issueClaim.create).not.toHaveBeenCalled();
   });
 
   it("refuses someone who did not report the issue and is not an admin", async () => {
