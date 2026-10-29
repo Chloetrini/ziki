@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { assertKeyProject, type AgentContext } from "@/lib/agents/require-agent";
 import { requireLevel } from "@/lib/agents/levels";
 import { isTenantAdmin } from "@/lib/agents/membership";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 import { isConfirmed } from "@/lib/agent-api/validation";
 import { publish } from "@/lib/agent-api/events";
 import { workflowFor } from "@/lib/workflow";
@@ -15,8 +15,6 @@ import { assigneeChangedSummary, statusChangedSummary } from "@/lib/activity-log
 import { ensureWatching } from "@/lib/watch";
 import type { AppRole } from "@/lib/roles";
 import { parseIssueRef } from "@/lib/issue-ref";
-import { openIssueStages } from "@/lib/issue-stage";
-import type { PrismaClient } from "@prisma/client";
 
 export const BID_NOTE_MAX = 280;
 const id = z.string().trim().min(1).max(191);
@@ -32,15 +30,19 @@ function openBidWhere(bugId: string) {
   return { bugId, withdrawnAt: null, awardedAt: null };
 }
 
-/** A live offer or an active claim already has this task. An expired offer does not. */
+/**
+ * A live offer or an active claim already has this task. An expired offer does
+ * not; "expired" uses the project's offer window, like every other offer path.
+ */
 async function competingClaim(tx: Tx, bugId: string) {
   const current = await tx.issueClaim.findFirst({
     where: { bugId, releasedAt: null },
     orderBy: { createdAt: "desc" },
-    select: { id: true, status: true, offeredAt: true, agentId: true, beneficiaryUserId: true, bug: { select: { tenantId: true } } },
+    select: { id: true, status: true, offeredAt: true, agentId: true, beneficiaryUserId: true, bug: { select: { tenantId: true, projectId: true } } },
   });
   if (!current) return null;
-  if (current.status === "offered" && isOfferExpired(current.offeredAt)) return { expired: current };
+  const { offerWindowSeconds } = await workflowFor(current.bug.projectId, tx);
+  if (current.status === "offered" && isOfferExpired(current.offeredAt, Date.now(), offerWindowSeconds * 1000)) return { expired: current };
   if (current.status === "offered") throw new IssueApiError(409, "This issue has a pending offer.");
   if (current.status === "active") throw new IssueApiError(409, "This issue is already being worked.");
   return null;
@@ -72,14 +74,8 @@ export async function placeBid(caller: AgentContext, projectId: string, issueRef
     });
     if (!bug) throw new IssueApiError(404, "Issue not found in this project.");
     if (bug.status !== "open") throw new IssueApiError(409, "Only open issues can take bids.");
-    const confirmed = await isConfirmed(bugId, tx);
-    let isReady = confirmed;
-    if (!isReady && typeof (tx as unknown as { bug?: { findMany?: unknown } }).bug?.findMany === "function") {
-      try {
-        const stage = (await openIssueStages(tx as unknown as PrismaClient, { id: bugId })).get(bugId);
-        isReady = stage === "ready";
-      } catch {}
-    }
+    // One rule for ready: confirmed under isConfirmed(), no second check (#714).
+    const isReady = await isConfirmed(bugId, tx);
     if (!isReady || !bug.convertedToIssueAt) {
       throw new IssueApiError(409, "This is not ready yet. A manager agent converts an idea to an issue, then reviewers confirm it, before it can be passed on.");
     }
@@ -202,14 +198,8 @@ export async function awardBid(actor: Actor, bidId: string, dispatcher?: AgentCo
       });
       if (!fresh || fresh.withdrawnAt || fresh.awardedAt) throw new IssueApiError(409, "This bid is no longer open.");
       if (fresh.bug.status !== "open") throw new IssueApiError(409, "Only open issues can be awarded.");
-      const confirmed = await isConfirmed(fresh.bugId, tx);
-      let isReady = confirmed;
-      if (!isReady && typeof (tx as unknown as { bug?: { findMany?: unknown } }).bug?.findMany === "function") {
-        try {
-          const stage = (await openIssueStages(tx as unknown as PrismaClient, { id: fresh.bugId })).get(fresh.bugId);
-          isReady = stage === "ready";
-        } catch {}
-      }
+      // One rule for ready: confirmed under isConfirmed(), no second check (#714).
+      const isReady = await isConfirmed(fresh.bugId, tx);
       if (!isReady || !fresh.bug.convertedToIssueAt) {
         throw new IssueApiError(409, "This is not ready yet. A manager agent converts an idea to an issue, then reviewers confirm it, before it can be passed on.");
       }

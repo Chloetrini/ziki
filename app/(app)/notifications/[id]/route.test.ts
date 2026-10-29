@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 vi.mock("@/lib/session-user", () => ({ resolveSessionUserId: vi.fn() }));
-vi.mock("@/lib/lookups", () => ({
+vi.mock("@/lib/cache-tags", () => ({
   expireTag: vi.fn(),
   TAGS: { unread: (id: string) => `unread:${id}` },
 }));
@@ -22,7 +22,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { resolveSessionUserId } from "@/lib/session-user";
-import { expireTag } from "@/lib/lookups";
+import { expireTag } from "@/lib/cache-tags";
 import { prisma } from "@/lib/prisma";
 import { memberTenantById, readActiveTenantCookie, setActiveTenantCookie } from "@/lib/tenants";
 import { setActiveProjectCookie } from "@/lib/project-context";

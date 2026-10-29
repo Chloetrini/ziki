@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/auth-helpers", () => ({ requireUser: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({ prisma: { notification: { findMany: vi.fn() } } }));
-vi.mock("@/lib/lookups", () => ({ expireTag: vi.fn(), TAGS: {} }));
+vi.mock("@/lib/cache-tags", () => ({ expireTag: vi.fn(), TAGS: {} }));
 vi.mock("@/lib/tenant-context", () => ({
   currentTenantIdFor: vi.fn(),
   notificationInTenant: vi.fn(() => ({ OR: [{ tenantId: null }, { tenantId: "t1" }, { kind: "tenant_invite" }] })),

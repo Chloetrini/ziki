@@ -26,16 +26,21 @@ export function IdeaVerdictForm({
   summaryMaxChars,
   initialOpinion = null,
   initialSummary = "",
+  initialDescription = "",
+  onSaved,
 }: {
   bugId: string;
   summaryMaxChars: number;
   initialOpinion?: Opinion | null;
   initialSummary?: string;
+  initialDescription?: string;
+  /** Called once the verdict is saved, so a dialog can close. */
+  onSaved?: () => void;
 }) {
   const id = useId();
   const [opinion, setOpinion] = useState<Opinion | null>(initialOpinion);
   const [summary, setSummary] = useState(initialSummary);
-  const [description, setDescription] = useState("");
+  const [description, setDescription] = useState(initialDescription);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -60,8 +65,8 @@ export function IdeaVerdictForm({
         setError(result.error);
         return;
       }
-      setDescription("");
       setSaved(result.replaced ? "Your verdict was updated." : "Your verdict was saved.");
+      onSaved?.();
     });
   };
 

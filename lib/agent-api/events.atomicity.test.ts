@@ -124,6 +124,18 @@ describe("event broadcast waits for the committed row (#524)", () => {
     warn.mockRestore();
   });
 
+  it("gives up at once when the lookup can't be made at all", async () => {
+    // A TypeError (a client without the model) won't fix itself by waiting.
+    db.agentEvent.findUnique.mockRejectedValue(new TypeError("findUnique is not a function"));
+    const broadcast = vi.spyOn(eventStreamBus, "broadcast");
+
+    const sent = await broadcastWhenCommitted(streamEvent("evt-no-client"), { attempts: 3, delayMs: 1 });
+
+    expect(sent).toBe(false);
+    expect(broadcast).not.toHaveBeenCalled();
+    expect(db.agentEvent.findUnique).toHaveBeenCalledTimes(1);
+  });
+
   it("retries a failed lookup and broadcasts once the row becomes readable", async () => {
     db.agentEvent.findUnique
       .mockRejectedValueOnce(new Error("connection lost"))

@@ -5,7 +5,7 @@ vi.mock("@/lib/tenant-context", () => ({ currentTenantIdFor: mocks.tenant }));
 vi.mock("@/lib/project-notes", () => ({ humanNotesActor: mocks.actor, saveProjectNotes: mocks.save, restoreProjectNotes: mocks.restore }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate, unstable_cache: (fn: unknown) => fn }));
 import { saveNotesAction, restoreNotesAction } from "./actions";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 beforeEach(() => { vi.resetAllMocks(); mocks.user.mockResolvedValue({ id: "u" }); mocks.tenant.mockResolvedValue("t"); mocks.actor.mockResolvedValue({ projectId: "p" }); mocks.save.mockResolvedValue({ version: 2 }); mocks.restore.mockResolvedValue({ version: 3 }); });
 describe("human project-notes actions", () => {
   it("checks session and current workspace membership on each save", async () => {

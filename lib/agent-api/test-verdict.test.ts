@@ -19,6 +19,8 @@ const db = vi.hoisted(() => ({
   membership: { findUnique: vi.fn() },
   testVerdict: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
   agentAuditEvent: { create: vi.fn() },
+  comment: { create: vi.fn() },
+  bugActivity: { create: vi.fn() },
   agentEvent: { create: vi.fn() },
   webhookSubscription: { findMany: vi.fn() },
   webhookDelivery: { createMany: vi.fn() },
@@ -28,6 +30,27 @@ vi.mock("@/lib/prisma", () => ({ prisma: db }));
 
 const tested = vi.hoisted(() => ({ refreshTestedStatus: vi.fn() }));
 vi.mock("@/lib/agent-api/tested-status", () => ({ refreshTestedStatus: tested.refreshTestedStatus }));
+
+const gh = vi.hoisted(() => ({ client: vi.fn() }));
+vi.mock("@/lib/agent-api/pr-readiness", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/agent-api/pr-readiness")>()),
+  readinessClient: gh.client,
+}));
+const notify = vi.hoisted(() => ({ notifyMergeFailed: vi.fn() }));
+vi.mock("@/lib/agent-notifications", () => ({ notifyMergeFailed: notify.notifyMergeFailed }));
+
+import type { GitHubClient } from "@/lib/github/merge-pr";
+
+/** A pull request that is ready: no conflict, checks green, no open CodeRabbit threads. */
+function readyClient(overrides: Partial<GitHubClient> = {}): GitHubClient {
+  return {
+    getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: true, headSha: "abc1234" })),
+    checksGreen: vi.fn(async () => true),
+    unresolvedCodeRabbitThreads: vi.fn(async () => 0),
+    mergePullRequest: vi.fn(async () => ({ merged: true })),
+    ...overrides,
+  };
+}
 
 import { submitTestVerdict } from "./test-verdict";
 
@@ -39,6 +62,9 @@ function bugRow(overrides: Record<string, unknown> = {}) {
     status: "in_progress",
     pullRequestUrl: "https://github.com/Zedu-Endor/issue-tracker/pull/42",
     pullRequestHeadSha: null as string | null,
+    title: "A fix",
+    assigneeId: "ada",
+    project: { githubInstallationId: "app-1" },
     severity: "medium",
     beneficiaryUserId: "ada",
     createdByAgentId: null,
@@ -60,6 +86,9 @@ beforeEach(() => {
   db.$transaction.mockImplementation((fn: (tx: unknown) => unknown) => fn(db));
   db.bug.findFirst.mockResolvedValue(bugRow());
   db.membership.findUnique.mockResolvedValue({ id: "m1" });
+  db.comment.create.mockResolvedValue({ id: "c1" });
+  db.bugActivity.create.mockResolvedValue({});
+  gh.client.mockReturnValue(readyClient());
   db.agentEvent.create.mockResolvedValue({ id: "e1" });
   db.webhookSubscription.findMany.mockResolvedValue([]);
   db.testVerdict.findFirst.mockImplementation(async ({ where }: { where: Record<string, string> }) => {
@@ -303,6 +332,80 @@ describe("submitTestVerdict: the head commit it tested (#489)", () => {
     });
     expect(result).toMatchObject({ status: 400, field: "headSha" });
     expect(db.testVerdict.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("submitTestVerdict: good to merge needs a ready pull request (#255)", () => {
+  const tester = () => reviewer("r1", "rob");
+  const recorded = () => db.testVerdict.create.mock.calls.length + db.testVerdict.update.mock.calls.length;
+  const commentBodies = () => db.comment.create.mock.calls.map((call) => call[0].data.body as string);
+
+  it("records the verdict when checks are green, CodeRabbit is resolved and there is no conflict", async () => {
+    expect(await submitTestVerdict(tester(), "bug1", good)).toMatchObject({ status: 201 });
+    expect(db.comment.create).not.toHaveBeenCalled();
+  });
+
+  it("records nothing while the checks are red, and says what the author has to do", async () => {
+    gh.client.mockReturnValue(readyClient({ checksGreen: vi.fn(async () => false) }));
+
+    const result = await submitTestVerdict(tester(), "bug1", good);
+
+    expect(result).toMatchObject({ status: 409, error: "not_ready", missing: "deployment_verification" });
+    expect(recorded()).toBe(0);
+    expect(commentBodies()[0]).toMatch(/^Good-to-merge verdict not recorded: GitHub Actions CI\/CD checks.*What to do: The author opens the pull request's Checks tab/);
+    expect(notify.notifyMergeFailed).toHaveBeenCalledWith(expect.objectContaining({ recipientId: "ada" }));
+  });
+
+  it("records nothing while CodeRabbit has unresolved threads", async () => {
+    gh.client.mockReturnValue(readyClient({ unresolvedCodeRabbitThreads: vi.fn(async () => 2) }));
+
+    expect(await submitTestVerdict(tester(), "bug1", good)).toMatchObject({ status: 409, missing: "review_threads" });
+    expect(recorded()).toBe(0);
+    expect(commentBodies()[0]).toContain("2 unresolved review threads");
+  });
+
+  it("records nothing while the pull request conflicts with its base branch", async () => {
+    gh.client.mockReturnValue(
+      readyClient({ getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: false, headSha: "abc1234" })) }),
+    );
+
+    expect(await submitTestVerdict(tester(), "bug1", good)).toMatchObject({ status: 409, missing: "merge_conflict" });
+    expect(recorded()).toBe(0);
+    expect(commentBodies()[0]).toMatch(/don't resolve conflicts.*come and resolve it/);
+  });
+
+  it("lists every reason in one comment when more than one thing is wrong", async () => {
+    gh.client.mockReturnValue(
+      readyClient({
+        getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: false, headSha: "abc1234" })),
+        checksGreen: vi.fn(async () => false),
+        unresolvedCodeRabbitThreads: vi.fn(async () => 1),
+      }),
+    );
+
+    await submitTestVerdict(tester(), "bug1", good);
+
+    expect(recorded()).toBe(0);
+    expect(commentBodies()).toHaveLength(1);
+    expect(commentBodies()[0]).toMatch(/for 3 reasons: \(1\) .*merge conflicts.*\(2\) GitHub Actions.*\(3\) CodeRabbit has 1 unresolved review thread/);
+    expect(commentBodies()[0]).toMatch(/What to do: \(1\) .*\(2\) .*\(3\) /);
+  });
+
+  it("records nothing when GitHub can't be asked", async () => {
+    gh.client.mockReturnValue(null);
+    expect(await submitTestVerdict(tester(), "bug1", good)).toMatchObject({ status: 409, missing: "github_app" });
+    expect(recorded()).toBe(0);
+
+    gh.client.mockReturnValue(readyClient({ getPullRequest: vi.fn(async () => { throw new Error("boom"); }) }));
+    expect(await submitTestVerdict(tester(), "bug1", good)).toMatchObject({ status: 409, missing: "deployment_verification" });
+    expect(recorded()).toBe(0);
+  });
+
+  it("always records a not-good-to-merge verdict, even when the pull request isn't ready", async () => {
+    gh.client.mockReturnValue(readyClient({ checksGreen: vi.fn(async () => false) }));
+
+    expect(await submitTestVerdict(tester(), "bug1", { goodToMerge: false, notes: "It breaks the tab bar." })).toMatchObject({ status: 201 });
+    expect(db.comment.create).not.toHaveBeenCalled();
   });
 });
 

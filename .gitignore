@@ -54,3 +54,7 @@ next-env.d.ts
 
 # Local CLI keyring: agent keys for the local sandbox (pnpm ziki setup)
 .ziki-cli/
+
+# Saved test output (AGENTS.md: test once at the end)
+.test-output.txt
+.verify-output.txt

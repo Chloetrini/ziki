@@ -9,7 +9,7 @@ import {
 } from "@/lib/notifications";
 import { shouldNotify } from "@/lib/notification-prefs";
 import { mutedUsersFor, watchersFor } from "@/lib/watch";
-import { expireUnreadCounts } from "@/lib/lookups";
+import { expireUnreadCounts } from "@/lib/cache-tags";
 import { logger } from "@/lib/logger";
 
 /**

@@ -3,7 +3,7 @@ import type { AgentContext } from "@/lib/agents/require-agent";
 
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 
-import { itemsFor, workEtag, type AgentWork, type ProjectWork, type WorkFeed } from "./work";
+import { itemsFor, waitingForOthers, workEtag, type AgentWork, type ProjectWork, type WorkFeed } from "./work";
 
 const agent = (level: AgentContext["level"], ownerId = "owner-bob"): AgentContext => ({
   agentId: `agent-${ownerId}`,
@@ -35,6 +35,7 @@ function work(overrides: Partial<ProjectWork> = {}): ProjectWork {
     tenantId: "t1",
     project: { id: "p1", slug: "ziki", name: "Ziki" },
     ideas: [],
+    toConvert: [],
     toConfirm: [],
     ideaThreshold: 3,
     tests: [],
@@ -91,7 +92,12 @@ describe("itemsFor", () => {
   });
 
   it("lists an idea at the threshold as a manager task to convert", () => {
-    const project = work({ ideas: [{ id: "b1", number: 7, title: "x", ideaScore: 3 }, { id: "b2", number: 8, title: "y", ideaScore: 2 }], facts: new Map([["b1", facts()], ["b2", facts()]]) });
+    // The convert list comes from its own query, so ideas past the top of the verdict list still reach managers.
+    const project = work({
+      ideas: [{ id: "b2", number: 8, title: "y", ideaScore: 2 }],
+      toConvert: [{ id: "b1", number: 7, title: "x", ideaScore: 3 }],
+      facts: new Map([["b1", facts()], ["b2", facts()]]),
+    });
     const forWorking = itemsFor(agent("working"), project, nothingMine).filter((item) => item.kind === "convert_idea");
     expect(forWorking).toHaveLength(1);
     expect(forWorking[0]).toMatchObject({ key: "convert_idea:b1", minimumRole: "manager", canAct: false, blockedReason: "Needs a manager agent." });
@@ -143,6 +149,39 @@ describe("itemsFor", () => {
     const items = itemsFor(agent("working"), work({ ready: [{ id: "b1", number: 1, title: "x", voteCount: 3, severity: "high" }] }), mine);
     expect(items[0]).toMatchObject({ kind: "offer", key: "offer:o1", dueAt: "2026-10-29T10:30:00.000Z" });
     expect(items[0].actions[0]).toMatchObject({ name: "accept_offer", path: "/api/v1/offers/o1/accept", cli: "accept-offer --id o1" });
+  });
+});
+
+describe("waitingForOthers", () => {
+  const project = work({
+    toConvert: [{ id: "b1", number: 7, title: "x", ideaScore: 4 }, { id: "b4", number: 9, title: "w", ideaScore: 3 }],
+    toAccept: [{ id: "b2", number: 2, title: "y" }],
+    toMerge: [{ id: "b3", number: 3, title: "z", reviewStatus: "ready_to_merge" }],
+    facts: new Map([["b1", facts()], ["b2", facts()], ["b3", facts()], ["b4", facts()]]),
+  });
+
+  it("tells a working agent what waits for managers and mergers, though it can't do it", () => {
+    const { waiting, lines } = waitingForOthers("working", itemsFor(agent("working"), project, nothingMine));
+    expect(waiting).toEqual([
+      { kind: "convert_idea", count: 2, minimumRole: "manager", what: "2 ideas to convert to issues" },
+      { kind: "accept_fix", count: 1, minimumRole: "manager", what: "1 tested fix to accept or reject" },
+      { kind: "merge_fix", count: 1, minimumRole: "merger", what: "1 accepted fix to merge" },
+    ]);
+    expect(lines).toEqual([
+      "Also open in this project, for a manager agent: 2 ideas to convert to issues and 1 tested fix to accept or reject. You can't do these as a working agent, but they are work waiting to be done.",
+      "Also open in this project, for a merger agent: 1 accepted fix to merge. You can't do it as a working agent, but it is work waiting to be done.",
+    ]);
+  });
+
+  it("tells a manager only about merger work, and a merger about nothing", () => {
+    expect(waitingForOthers("manager", itemsFor(agent("manager"), project, nothingMine)).waiting.map((w) => w.kind)).toEqual(["merge_fix"]);
+    expect(waitingForOthers("merger", itemsFor(agent("merger"), project, nothingMine))).toEqual({ waiting: [], lines: [] });
+  });
+
+  it("lets a manager convert its owner's own idea", () => {
+    const own = work({ toConvert: [{ id: "b1", number: 7, title: "x", ideaScore: 4 }], facts: new Map([["b1", facts({ reporterId: "owner-bob", beneficiaryUserId: "owner-bob" })]]) });
+    const item = itemsFor(agent("manager"), own, nothingMine).find((i) => i.kind === "convert_idea");
+    expect(item).toMatchObject({ canAct: true });
   });
 });
 

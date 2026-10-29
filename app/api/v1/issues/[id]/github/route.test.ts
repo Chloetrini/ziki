@@ -322,6 +322,44 @@ describe("POST /api/v1/issues/[id]/github (#452)", () => {
     });
   });
 
+  it("refuses to link a closed pull request (#255)", async () => {
+    mocks.clientForInstallation.mockReturnValue({
+      getPullRequest: vi.fn(async () => ({ state: "closed", merged: false, mergeable: false, headSha: "abc123" })),
+    });
+
+    const response = await POST(request({ pullRequestUrl: PR_URL }), params);
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({ error: "pull_request_closed" });
+    expect(db.bug.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses to link a pull request that is already merged (#255)", async () => {
+    mocks.clientForInstallation.mockReturnValue({
+      getPullRequest: vi.fn(async () => ({ state: "closed", merged: true, mergeable: false, headSha: "abc123" })),
+    });
+
+    const response = await POST(request({ pullRequestUrl: PR_URL }), params);
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({ error: "pull_request_merged" });
+    expect(db.bug.update).not.toHaveBeenCalled();
+  });
+
+  it("links an open pull request (#255)", async () => {
+    mocks.clientForInstallation.mockReturnValue({
+      getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: true, headSha: "abc123" })),
+    });
+    mocks.merge.mockResolvedValue({ status: 409, merged: false, reason: "not_accepted", message: "no" });
+
+    const response = await POST(request({ pullRequestUrl: PR_URL }), params);
+
+    expect(response.status).toBe(200);
+    expect(db.bug.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ pullRequestUrl: PR_URL }) }),
+    );
+  });
+
   it("refuses to link an empty pull request (Ziki #713)", async () => {
     mocks.clientForInstallation.mockReturnValue({
       getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: true, headSha: "abc123", changedFiles: 0 })),

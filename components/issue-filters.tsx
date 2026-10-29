@@ -140,12 +140,12 @@ function IssuesSort({ value, onChange }: { value: ReturnType<typeof parseBugSort
  * #1054: the intake stage used to be a sidebar beside the list. It is a
  * filter now. An idea takes verdicts until a manager agent converts it to an
  * issue; the issue is then confirmed, then ready (#idea-verdicts). The old
- * `reported` and `confirmed` values still pick Ideas and Confirming.
+ * `reported` and `confirmed` values still pick Ideas and Requires confirmation.
  */
 const STAGE_PARAM = "stage";
 const STAGE_OPTIONS = [
   { value: "idea", label: "Ideas" },
-  { value: "confirming", label: "Confirming" },
+  { value: "confirming", label: "Requires confirmation" },
   { value: "ready", label: "Ready" },
 ] as const;
 type StageFilter = (typeof STAGE_OPTIONS)[number]["value"];

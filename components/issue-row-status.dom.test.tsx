@@ -23,13 +23,19 @@ describe("IssueRowStatus", () => {
     expect(container.querySelector("[title]")?.getAttribute("title")).toBe("Score 2 of 3");
   });
 
+  it("says Ready to convert once an idea reaches its threshold", () => {
+    expect(text(<IssueRowStatus {...base} stage="idea" idea={{ score: 3, threshold: 3 }} />)).toContain("Ready to convert (3/3) score");
+    expect(text(<IssueRowStatus {...base} stage="idea" idea={{ score: 6, threshold: 3 }} />)).toContain("Ready to convert (6/3)");
+    expect(text(<IssueRowStatus {...base} stage="idea" idea={{ score: 2, threshold: 3 }} />)).not.toContain("Ready to convert");
+  });
+
   it("shows the score alone when the threshold is unknown", () => {
     expect(text(<IssueRowStatus {...base} stage="idea" idea={{ score: -1, threshold: null }} />)).toContain("(-1) score");
   });
 
   it("shows Confirming with the bots in the label, and no upvote count", () => {
     const { container } = render(<IssueRowStatus {...base} stage="confirming" botConfirmations={2} />);
-    expect(container.textContent).toContain("Confirming…");
+    expect(container.textContent).toContain("Requires confirmation…");
     expect(container.textContent).toContain("Confirmed by 2 bots");
     expect(container.textContent).not.toMatch(/upvote|\(\d\/\d\)/);
     expect(container.querySelector("[title]")?.getAttribute("title")).toBe("Confirmed by 2 bots so far");

@@ -1,5 +1,5 @@
 import { LocalTime } from "@/components/local-time";
-import { IdeaVerdictForm } from "@/components/idea-verdict-form";
+import { AddVerdictDialog } from "@/components/add-verdict-dialog";
 
 export type IdeaOpinionName = "good" | "bad" | "neutral";
 
@@ -70,8 +70,10 @@ export function IdeaVoteTotals({ votes, className = "" }: { votes: Record<IdeaOp
 }
 
 /**
- * The idea stage (#idea-verdicts): the score against the threshold, the vote
- * totals, every verdict and, for a signed-in person, a form to give theirs.
+ * The idea stage (#idea-verdicts), in the place an issue's conversation takes:
+ * ideas take only verdicts. The score against the threshold, the vote totals
+ * and every verdict, each with its summary and its full description behind a
+ * toggle. "Add verdict" opens the form.
  */
 export function IdeaVerdictsPanel({
   bugId,
@@ -95,34 +97,61 @@ export function IdeaVerdictsPanel({
       aria-labelledby="idea-verdicts-heading"
       className="scroll-mt-24 rounded-[20px] border border-zk-border bg-zk-surface p-5 sm:p-[22px]"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 id="idea-verdicts-heading" className="text-xs font-bold uppercase tracking-[0.08em] text-zk-muted">
-            Idea verdicts
-          </h2>
-          <p className="mt-1 text-[13px] leading-normal text-zk-text2">
-            {reached
-              ? "It has reached the threshold. A manager agent can convert it to an issue."
-              : "Good adds a vote, bad takes one away. A manager agent converts it at the threshold."}
-          </p>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1 text-right" aria-label="Idea score">
+      {/* Links to an issue's conversation land here on an idea. */}
+      <span id="conversation" className="sr-only" aria-hidden="true" />
+      <span id="comments" className="sr-only" aria-hidden="true" />
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <h2 id="idea-verdicts-heading" className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.08em] text-zk-muted">
+          {reached ? (
+            <span data-testid="idea-passed" className="text-zk-ok-fg" title="It has passed the threshold">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path fillRule="evenodd" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm4.7 7.7a1 1 0 0 0-1.4-1.4L10.5 13l-1.8-1.8a1 1 0 0 0-1.4 1.4l2.5 2.5a1 1 0 0 0 1.4 0l5.5-5.4Z" clipRule="evenodd" />
+              </svg>
+              <span className="sr-only">Passed the threshold.</span>
+            </span>
+          ) : null}
+          Idea verdicts
+          <span className="font-mono font-normal normal-case tracking-normal">{data.verdicts.length}</span>
+        </h2>
+        <div className="flex items-center gap-2">
           <span
             data-testid="idea-score"
+            aria-label="Idea score"
             className={`rounded-full px-2.5 py-0.5 text-xs font-bold tabular-nums ${reached ? "bg-zk-ok-bg text-zk-ok-fg" : "bg-zk-tint text-zk-accent"}`}
           >
             {ideaScoreText(data.ideaScore, data.ideaThreshold)}
           </span>
-          <IdeaVoteTotals votes={data.votes} />
+          {block ? null : viewerId ? (
+            <AddVerdictDialog
+              bugId={bugId}
+              summaryMaxChars={summaryMaxChars}
+              mine={mine ? { opinion: mine.opinion, summary: mine.summary, description: mine.description } : null}
+            />
+          ) : null}
         </div>
       </div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-[13px] text-zk-text2">
+        <span>
+          {reached
+            ? "It has reached the threshold. A manager agent can convert it to an issue."
+            : "Good adds a vote, bad takes one away. A manager agent converts it at the threshold."}
+        </span>
+        <IdeaVoteTotals votes={data.votes} />
+      </div>
+      {block ? (
+        <p className="mb-3 text-[13px] text-zk-muted" data-testid="idea-verdict-blocked">
+          {BLOCK_REASON[block]}
+        </p>
+      ) : !viewerId ? (
+        <p className="mb-3 text-[13px] text-zk-muted">Sign in to give a verdict.</p>
+      ) : null}
 
       {data.verdicts.length === 0 ? (
-        <p className="mt-3 text-[13px] text-zk-muted">No verdicts yet.</p>
+        <p className="m-0 text-[13px] text-zk-muted">No verdicts yet.</p>
       ) : (
-        <ul className="m-0 mt-3 flex list-none flex-col gap-2.5 p-0">
+        <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
           {data.verdicts.map((verdict) => (
-            <li key={verdict.id} className="rounded-xl border border-zk-divider px-3 py-2.5">
+            <li key={verdict.id} id={`verdict-${verdict.id}`} className="rounded-xl border border-zk-divider px-3 py-2.5">
               <p className="m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
                 <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${opinionChipClass[verdict.opinion]}`}>
                   {opinionLabels[verdict.opinion]}
@@ -134,29 +163,18 @@ export function IdeaVerdictsPanel({
                   · <LocalTime compact date={verdict.updatedAt} />
                 </span>
               </p>
-              <p className="mb-0 mt-1 break-words text-[13px] font-semibold leading-[1.5] text-zk-text">{verdict.summary}</p>
-              <p className="mb-0 mt-1 whitespace-pre-line break-words text-[13px] leading-[1.5] text-zk-text2">{verdict.description}</p>
+              <p className="mb-0 mt-1 break-words text-[13px] leading-[1.5] text-zk-text">{verdict.summary}</p>
+              <details className="group mt-1">
+                <summary className="cursor-pointer list-none text-xs font-bold text-zk-accent hover:underline [&::-webkit-details-marker]:hidden">
+                  <span className="group-open:hidden">Show full description</span>
+                  <span className="hidden group-open:inline">Hide full description</span>
+                </summary>
+                <p className="mb-0 mt-1.5 whitespace-pre-line break-words text-[13px] leading-[1.5] text-zk-text2">{verdict.description}</p>
+              </details>
             </li>
           ))}
         </ul>
       )}
-
-      <div className="mt-4 border-t border-zk-divider pt-3.5 print:hidden">
-        {block ? (
-          <p className="m-0 text-[13px] text-zk-muted" data-testid="idea-verdict-blocked">
-            {BLOCK_REASON[block]}
-          </p>
-        ) : viewerId ? (
-          <IdeaVerdictForm
-            bugId={bugId}
-            summaryMaxChars={summaryMaxChars}
-            initialOpinion={mine?.opinion ?? null}
-            initialSummary={mine?.summary ?? ""}
-          />
-        ) : (
-          <p className="m-0 text-[13px] text-zk-muted">Sign in to give a verdict.</p>
-        )}
-      </div>
     </section>
   );
 }
@@ -166,13 +184,16 @@ export function IdeaVerdictsPanel({
  * labelled "score". Ideas take verdicts, not upvotes.
  */
 export function IdeaScoreBadge({ score, threshold = null }: { score: number; threshold?: number | null }) {
-  const label = threshold === null ? `Idea score ${score}` : `Idea score ${score} of ${threshold}`;
+  const passed = threshold !== null && score >= threshold;
+  const label = threshold === null ? `Idea score ${score}` : `Idea score ${score} of ${threshold}${passed ? ", ready to convert" : ""}`;
   return (
     <span
       data-testid="idea-score-badge"
       aria-label={label}
       title={label}
-      className="inline-flex min-w-[2.75rem] flex-col items-center justify-center rounded-lg border border-dashed border-zk-border px-2 py-1 text-xs font-semibold text-zk-text"
+      className={`inline-flex min-w-[2.75rem] flex-col items-center justify-center rounded-lg border px-2 py-1 text-xs font-semibold ${
+        passed ? "border-transparent bg-zk-ok-bg text-zk-ok-fg" : "border-dashed border-zk-border text-zk-text"
+      }`}
     >
       <span className="tabular-nums leading-tight">{score}</span>
       <span className="text-[10px] font-medium leading-tight text-zk-muted">score</span>

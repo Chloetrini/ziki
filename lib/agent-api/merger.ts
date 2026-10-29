@@ -2,7 +2,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { AgentContext } from "@/lib/agents/require-agent";
 import { requireLevel } from "@/lib/agents/levels";
-import { isConfirmed } from "@/lib/agent-api/validation";
+import { confirmedIssueIds } from "@/lib/issue-stage";
+import { countedMergeVerdicts } from "@/lib/agent-api/merge-verdicts";
 import { reviewerConflict } from "@/lib/agents/independence";
 import { workflowFor } from "@/lib/workflow";
 import { MERGE_BLOCKED, MERGE_FAILED } from "@/lib/merge-status";
@@ -53,8 +54,20 @@ export async function findReadyToMergeIssues(
     reviewStatusCondition = { reviewStatus: { not: "rejected" } };
   }
 
+  // Confirmation from one bulk read, not one isConfirmed() per row (#714).
+  const confirmed = await confirmedIssueIds(prisma, {
+    tenantId: agent.tenantId,
+    projectId,
+    status: { in: ["open", "in_progress"] },
+    pullRequestUrl: { not: null },
+  });
+  if (confirmed.size === 0) return [];
+
+  // Fixes in review are few, so read them all and filter before limiting:
+  // taking `limit` rows first and filtering after could return a short page.
   const candidates = await prisma.bug.findMany({
     where: {
+      id: { in: [...confirmed] },
       tenantId: agent.tenantId,
       projectId,
       isDeleted: false,
@@ -73,8 +86,7 @@ export async function findReadyToMergeIssues(
         },
       ],
     },
-    take: limit * 2,
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: {
       id: true,
       number: true,
@@ -85,21 +97,26 @@ export async function findReadyToMergeIssues(
       reviewStatus: true,
       reporterId: true,
       beneficiaryUserId: true,
+      assigneeId: true,
       createdByAgentId: true,
+      createdByAgent: { select: { ownerUserId: true } },
       createdAt: true,
       claims: {
-        where: { status: "active", releasedAt: null },
-        take: 1,
         select: {
+          status: true,
+          releasedAt: true,
           agentId: true,
           beneficiaryUserId: true,
+          dispatcherUserId: true,
           agent: { select: { ownerUserId: true } },
         },
       },
       testVerdicts: {
         where: { goodToMerge: true },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: {
           id: true,
+          headSha: true,
           onBehalfOfUserId: true,
           pullRequestUrl: true,
           agent: { select: { id: true, ownerUserId: true } },
@@ -111,38 +128,15 @@ export async function findReadyToMergeIssues(
   const ready: ReadyToMergeIssue[] = [];
   for (const bug of candidates) {
     if (ready.length >= limit) break;
-    if (!(await isConfirmed(bug.id))) continue;
 
-    const claim = bug.claims[0];
-    const owners = new Set<string>();
-    for (const verdict of bug.testVerdicts) {
-      if (bug.pullRequestUrl && verdict.pullRequestUrl !== bug.pullRequestUrl) continue;
-      if (claim && (verdict.agent.id === claim.agentId || verdict.agent.ownerUserId === claim.agent.ownerUserId)) {
-        continue;
-      }
-      if (owners.has(verdict.agent.ownerUserId)) continue;
-      owners.add(verdict.agent.ownerUserId);
-    }
+    const claim = bug.claims.find((c) => c.status === "active" && !c.releasedAt) ?? null;
+    // The same verdict rule as the merge gate (merge.ts), on the linked PR only.
+    const onLinkedPr = bug.testVerdicts.filter((verdict) => verdict.pullRequestUrl === bug.pullRequestUrl);
+    const { reviewers } = countedMergeVerdicts(onLinkedPr, claim, bug);
 
-    if (!AWAITING_MERGE.includes(bug.reviewStatus ?? "") && owners.size < verdictsNeeded) continue;
+    if (!AWAITING_MERGE.includes(bug.reviewStatus ?? "") && reviewers.length < verdictsNeeded) continue;
 
-    const reviewed = {
-      reporterId: bug.reporterId,
-      beneficiaryUserId: bug.beneficiaryUserId,
-      createdByAgentId: bug.createdByAgentId,
-      claims: claim
-        ? [
-            {
-              status: "active" as const,
-              releasedAt: null,
-              agentId: claim.agentId,
-              beneficiaryUserId: claim.beneficiaryUserId,
-              agent: claim.agent,
-            },
-          ]
-        : [],
-    };
-    if (reviewerConflict({ id: agent.agentId, ownerUserId: agent.ownerId }, reviewed)) continue;
+    if (reviewerConflict({ id: agent.agentId, ownerUserId: agent.ownerId }, bug)) continue;
 
     ready.push({
       id: bug.id,
@@ -153,7 +147,7 @@ export async function findReadyToMergeIssues(
       pullRequestHeadSha: bug.pullRequestHeadSha,
       reviewStatus: bug.reviewStatus,
       claim: claim ? { agentId: claim.agentId, beneficiaryUserId: claim.beneficiaryUserId } : null,
-      verdictsCount: owners.size,
+      verdictsCount: reviewers.length,
       createdAt: bug.createdAt,
     });
   }

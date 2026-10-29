@@ -5,7 +5,7 @@ import {
   countVolunteers,
   listVolunteers,
 } from "./interest";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 
 const db = vi.hoisted(() => ({
   bug: { findFirst: vi.fn(), findUnique: vi.fn() },

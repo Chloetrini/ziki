@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 import { assertKeyProject, type AgentContext } from "@/lib/agents/require-agent";
 import { audit } from "@/lib/agents/audit";
 import { isOrganizationAdmin } from "@/lib/organization-role";

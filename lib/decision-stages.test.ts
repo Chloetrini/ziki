@@ -14,8 +14,8 @@ import {
 
 describe("stageOfDecision and decisionTone (#1446)", () => {
   const cases: [DecisionLike, string, string][] = [
-    [{ kind: "confirmed" }, "idea", "positive"],
-    [{ kind: "rejected" }, "idea", "negative"],
+    [{ kind: "confirmed" }, "confirm", "positive"],
+    [{ kind: "rejected" }, "confirm", "negative"],
     [{ kind: "claimed" }, "open", "positive"],
     [{ kind: "claim_released" }, "open", "negative"],
     [{ kind: "verdict", goodToMerge: true }, "done", "positive"],
@@ -68,7 +68,8 @@ describe("tallyStages", () => {
       { kind: "verdict", goodToMerge: false, count: 2 },
     ]);
     expect(tallies).toEqual({
-      idea: { positive: 8, negative: 1 },
+      idea: { positive: 0, negative: 0 },
+      confirm: { positive: 8, negative: 1 },
       open: { positive: 1, negative: 1 },
       done: { positive: 7, negative: 2 },
       ready: { positive: 0, negative: 0 },
@@ -78,12 +79,16 @@ describe("tallyStages", () => {
 });
 
 describe("currentDecisionStage", () => {
-  const base = { status: "open", reviewStatus: null, pullRequestUrl: null, hasClaim: false, ideaAccepted: false };
+  const base = { status: "open", reviewStatus: null, pullRequestUrl: null, hasClaim: false, converted: false, ideaAccepted: false };
 
   it("starts at Idea", () => {
     expect(currentDecisionStage(base)).toBe("idea");
   });
-  it("is Open once the idea is accepted or claimed", () => {
+  it("Requires confirmation once a manager agent converts it, until it is confirmed (#714)", () => {
+    expect(currentDecisionStage({ ...base, converted: true })).toBe("confirm");
+    expect(currentDecisionStage({ ...base, converted: true, ideaAccepted: true })).toBe("open");
+  });
+  it("is Open once the issue is confirmed or claimed", () => {
     expect(currentDecisionStage({ ...base, ideaAccepted: true })).toBe("open");
     expect(currentDecisionStage({ ...base, hasClaim: true })).toBe("open");
     expect(currentDecisionStage({ ...base, status: "in_progress" })).toBe("open");
@@ -110,6 +115,7 @@ describe("stageStarts and stageAt", () => {
 
   it("starts each stage at its earliest decision and leaves unreached ones null", () => {
     expect(starts).toEqual({
+      confirm: Date.parse("2026-10-21T21:00:00.000Z"),
       open: Date.parse("2026-10-22T16:00:00.000Z"),
       done: Date.parse("2026-10-22T20:00:00.000Z"),
       ready: Date.parse("2026-10-25T09:40:00.000Z"),
@@ -117,7 +123,8 @@ describe("stageStarts and stageAt", () => {
     });
   });
   it("finds the stage the issue was in at a time", () => {
-    expect(stageAt("2026-10-21T22:00:00.000Z", starts)).toBe("idea");
+    expect(stageAt("2026-10-21T20:00:00.000Z", starts)).toBe("idea");
+    expect(stageAt("2026-10-21T22:00:00.000Z", starts)).toBe("confirm");
     expect(stageAt("2026-10-22T16:00:00.000Z", starts)).toBe("open");
     expect(stageAt("2026-10-24T00:00:00.000Z", starts)).toBe("done");
     expect(stageAt("2026-10-26T00:00:00.000Z", starts)).toBe("ready");
@@ -141,5 +148,12 @@ describe("stageOfComment", () => {
     expect(stageOfComment("review", "2026-10-21T10:00:00.000Z", starts)).toBe("idea");
     expect(stageOfComment("review", "2026-10-23T10:00:00.000Z", starts)).toBe("done");
     expect(stageOfComment("review", "2026-10-23T10:00:00.000Z", none)).toBe("idea");
+  });
+  it("starts Requires confirmation when the idea is converted (#714)", () => {
+    const converted = stageStarts([{ kind: "claimed", at: "2026-10-22T16:00:00.000Z" }], "2026-10-21T12:00:00.000Z");
+    expect(converted.confirm).toBe(Date.parse("2026-10-21T12:00:00.000Z"));
+    expect(stageOfComment("comment", "2026-10-21T10:00:00.000Z", converted)).toBe("idea");
+    expect(stageOfComment("comment", "2026-10-21T13:00:00.000Z", converted)).toBe("confirm");
+    expect(stageOfComment("review", "2026-10-21T13:00:00.000Z", converted)).toBe("confirm");
   });
 });

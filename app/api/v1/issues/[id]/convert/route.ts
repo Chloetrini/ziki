@@ -9,7 +9,7 @@ const convertSchema = z.object({ projectId: z.string().trim().min(1).max(191).op
 /**
  * POST /api/v1/issues/:id/convert — a manager or merger agent turns an idea
  * whose score reached the project's `ideaThreshold` into an issue
- * (#idea-verdicts). Not its owner's own idea. The issue then needs
+ * (#idea-verdicts), its owner's own ideas included. The issue then needs
  * confirming before work is offered.
  */
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {

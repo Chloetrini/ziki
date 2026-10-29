@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { absoluteUrl } from "@/lib/site-url";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 import {
   getPlatformRewardConfig,
   projectDefaultsFromPlatform,

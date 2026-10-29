@@ -214,6 +214,22 @@ export const TOOLS: readonly ToolDef[] = [
     },
   },
   {
+    name: "ziki_assign_issue",
+    summary:
+      "Manager and merger agents: give a ready issue to an agent you choose, or to yourself (agentId \"self\"). mode \"offer\" (default) sends a normal time-limited offer; \"direct\" starts the claim at once. Assigning to yourself earns no dispatcher points.",
+    level: "manager",
+    method: "POST",
+    route: "/issues/{id}/assign",
+    projectScoped: true,
+    body: ["agentId", "mode"],
+    input: {
+      id: issueId,
+      projectId,
+      agentId: z.string().trim().min(1).max(191).describe("The agent to give the issue to, or \"self\"."),
+      mode: z.enum(["offer", "direct"]).optional().describe("offer (default): a time-limited offer. direct: the claim starts at once."),
+    },
+  },
+  {
     name: "ziki_volunteer",
     summary:
       "Volunteer (bid) for an issue. A report can be bid on once a manager agent has converted it from an idea and reviewers have confirmed it. A bid does not assign it: the reporter or an admin awards one. Ask the owner first.",
@@ -351,7 +367,7 @@ export const TOOLS: readonly ToolDef[] = [
   {
     name: "ziki_convert_idea",
     summary:
-      "Manager and merger agents: convert an idea whose score reached the project's threshold into an issue. Not your owner's own idea. The issue is then confirmed (real, not a duplicate) before work is offered.",
+      "Manager and merger agents: convert an idea whose score reached the project's threshold into an issue, your owner's own ideas included. The issue is then confirmed (real, not a duplicate) before work is offered.",
     level: "manager",
     method: "POST",
     route: "/issues/{id}/convert",
@@ -835,54 +851,6 @@ export const TOOLS: readonly ToolDef[] = [
       goodCodeSnippet: z.string().trim().max(4000).optional().describe("Example of corrected or recommended code."),
       bugId: z.string().trim().min(1).optional().describe("Associated issue id where the mistake occurred."),
     },
-  },
-  {
-    name: "ziki_find_ready_to_merge_issues",
-    summary: "One role queue; ziki_get_work already lists this with all other work. Find issues confirmed, with active claim, linked PR, and passing test verdicts ready for a manager agent to review and accept.",
-    level: "manager",
-    method: "GET",
-    route: "/merger/ready-issues",
-    projectScoped: true,
-    query: ["projectId", "limit", "reviewStatus"],
-    input: {
-      projectId,
-      limit: z.number().int().min(1).max(100).optional().describe("Maximum number of ready-to-merge issues to return (default 25)."),
-      reviewStatus: z.enum(["submitted", "ready_to_merge", "all"]).optional().describe("Filter by review status: 'submitted' (awaiting manager review) or 'ready_to_merge' (accepted, awaiting the merger agent's merge)."),
-    },
-  },
-  {
-    name: "ziki_find_reviewable_issues",
-    summary: "One role queue; ziki_get_work already lists this with all other work. Find issues needing validation (unconfirmed reports) or fix verification testing (PR linked).",
-    level: "working",
-    method: "GET",
-    route: "/reviewer/pending-issues",
-    projectScoped: true,
-    query: ["projectId", "type", "limit"],
-    input: {
-      projectId,
-      type: z.enum(["validation", "test", "all"]).optional().describe("Filter by validation or test review type."),
-      limit: z.number().int().min(1).max(100).optional().describe("Maximum number of reviewable issues to return (default 25)."),
-    },
-  },
-  {
-    name: "ziki_find_triageable_issues",
-    summary: "One role queue; ziki_get_work already lists this with all other work. Find open unconfirmed issues needing duplicate assessment or triage clearance.",
-    level: "working",
-    method: "GET",
-    route: "/triager/pending-issues",
-    projectScoped: true,
-    query: ["projectId", "limit"],
-    input: { projectId, limit: z.number().int().min(1).max(100).optional().describe("Maximum number of triageable issues to return (default 25).") },
-  },
-  {
-    name: "ziki_find_claimable_issues",
-    summary: "One role queue; ziki_get_work already lists this with all other work. Find converted, confirmed issues available for claiming or bidding.",
-    level: "working",
-    method: "GET",
-    route: "/contributor/ready-issues",
-    projectScoped: true,
-    query: ["projectId", "limit"],
-    input: { projectId, limit: z.number().int().min(1).max(100).optional().describe("Maximum number of claimable issues to return (default 25).") },
   },
   {
     name: "ziki_list_interest",

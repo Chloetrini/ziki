@@ -35,7 +35,7 @@ Calling the API:
 Examples:
   pnpm ziki create-issue --title "Save fails" --description "Steps: ..." --as ada
   pnpm ziki validate-issue --id <issueId> --kind real --verdict accept --as bob
-  pnpm ziki find-ready-to-merge-issues --as dana
+  pnpm ziki work --as dana
 
 Global flags: --as <agent>, --server <local server> (default http://localhost:3001, or ZIKI_CLI_URL).
 Output is JSON on stdout. Exit codes: 0 ok, 1 API error, 2 usage, 3 environment.`;

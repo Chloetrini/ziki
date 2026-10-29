@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth-helpers";
 import { bugInTenant, currentTenantIdFor } from "@/lib/tenant-context";
 import { giveIdeaVerdict, ideaVerdictSchema } from "@/lib/agent-api/idea-verdicts";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 import { ACTION_RATE_LIMITS, consumeRateLimit, RATE_LIMIT_MESSAGE } from "@/lib/rate-limit";
 
 export type IdeaVerdictActionResult = {

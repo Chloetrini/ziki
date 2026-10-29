@@ -251,6 +251,7 @@ describe("agent issue reads", () => {
   });
 
   it("treats a converted, confirmed issue as ready, whatever its upvotes", async () => {
+    // Confirmed = two independent real accepts AND a not-a-duplicate clearance (#714).
     const open = {
       id: "issue-a",
       status: "open",
@@ -266,6 +267,7 @@ describe("agent issue reads", () => {
     db.issueValidation.findMany.mockResolvedValueOnce([
       { id: "v1", bugId: "issue-a", createdAt: new Date("2026-10-20T00:00:00Z"), agentId: "r1", agent: { ownerUserId: "rev-1" } },
       { id: "v2", bugId: "issue-a", createdAt: new Date("2026-10-20T00:00:00Z"), agentId: "r2", agent: { ownerUserId: "rev-2" } },
+      { id: "v3", bugId: "issue-a", kind: "duplicate", createdAt: new Date("2026-10-20T00:00:00Z"), agentId: "r3", agent: { ownerUserId: "rev-3" } },
     ]);
     const response = await list(request("GET", undefined, "?projectId=project-a&stage=ready"));
     expect(response.status).toBe(200);

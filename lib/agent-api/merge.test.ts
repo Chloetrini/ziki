@@ -43,7 +43,7 @@ vi.mock("@/lib/redesigns", () => ({ assertRedesignOpen: redesign.assertRedesignO
 const notify = vi.hoisted(() => ({ notifyMergeFailed: vi.fn() }));
 vi.mock("@/lib/agent-notifications", () => ({ notifyMergeFailed: notify.notifyMergeFailed }));
 
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 import { acceptFix, executeAdminMerge } from "./merge";
 import { resetWorkflowCache } from "@/lib/workflow";
 import type { GitHubClient } from "@/lib/github/merge-pr";
@@ -217,7 +217,7 @@ describe("acceptFix: the merger must be independent too (#493)", () => {
     confirmWith("rob", "sam");
     verdict("r1", "rob");
     verdict("r2", "sam");
-    expect(await acceptFix(merger("m1", "mo", "manager"), "bug1")).toMatchObject({ status: 200, accepted: true });
+    expect(await acceptFix(merger("m1", "mo", "manager"), "bug1", { client: defaultMockGhClient() })).toMatchObject({ status: 200, accepted: true });
   });
 
   it("leaves a comment on the issue saying the fix was merged (#458)", async () => {
@@ -245,12 +245,12 @@ describe("acceptFix: the merger must be independent too (#493)", () => {
     confirmWith("rob", "sam");
     verdict("r1", "rob");
     verdict("r2", "sam");
-    expect(await acceptFix(merger("m1", "mo", "manager"), "bug1")).toMatchObject({
+    expect(await acceptFix(merger("m1", "mo", "manager"), "bug1", { client: defaultMockGhClient() })).toMatchObject({
       status: 409,
       missing: "verdicts",
     });
     verdict("r3", "kim");
-    expect(await acceptFix(merger("m1", "mo", "manager"), "bug1")).toMatchObject({ status: 200, accepted: true });
+    expect(await acceptFix(merger("m1", "mo", "manager"), "bug1", { client: defaultMockGhClient() })).toMatchObject({ status: 200, accepted: true });
   });
 });
 
@@ -448,7 +448,7 @@ describe("acceptFix: a successful accept (#434)", () => {
     verdict("r1", "rob", "rob", PR, "older-sha");
     verdict("r2", "sam", "sam", PR, "reviewed-sha");
 
-    expect(await acceptFix(merger("m1", "mo", "manager"), "bug1")).toMatchObject({ status: 200, accepted: true });
+    expect(await acceptFix(merger("m1", "mo", "manager"), "bug1", { client: defaultMockGhClient({ getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: true, headSha: "reviewed-sha" })) }) })).toMatchObject({ status: 200, accepted: true });
     expect(db.agentAuditEvent.create.mock.calls[0][0].data).toMatchObject({
       payload: { pullRequestUrl: PR, headSha: "reviewed-sha" },
     });
@@ -459,7 +459,7 @@ describe("acceptFix: a successful accept (#434)", () => {
     verdict("r1", "rob", "rob", PR, null);
     verdict("r2", "sam", "sam", PR, null);
 
-    expect(await acceptFix(merger("m1", "mo", "manager"), "bug1")).toMatchObject({ status: 200, accepted: true });
+    expect(await acceptFix(merger("m1", "mo", "manager"), "bug1", { client: defaultMockGhClient() })).toMatchObject({ status: 200, accepted: true });
     expect(db.agentAuditEvent.create.mock.calls[0][0].data).toMatchObject({
       payload: { pullRequestUrl: PR, headSha: "linked-sha" },
     });
@@ -502,7 +502,7 @@ describe("acceptFix: a successful accept (#434)", () => {
     confirmWith("rob", "sam");
     verdict("r1", "rob");
     verdict("r2", "sam");
-    const result = await acceptFix(merger("m1", "mo", "manager"), "bug1");
+    const result = await acceptFix(merger("m1", "mo", "manager"), "bug1", { client: defaultMockGhClient() });
     expect(result).toMatchObject({ status: 200, accepted: true, readyToMerge: true });
     expect(db.pointEntry.createMany).not.toHaveBeenCalled();
     expect(db.bugActivity.create).toHaveBeenCalledWith({
@@ -905,5 +905,274 @@ describe("acceptFix counts verdicts on the linked pull request only (#526)", () 
     const result = await acceptFix(merger("m1", "mo"), "bug1");
     expect(result).toMatchObject({ status: 409, missing: "verdicts" });
     expect(db.testVerdict.findMany.mock.calls[0][0].where).toMatchObject({ pullRequestUrl: PR });
+  });
+});
+
+describe("acceptFix: a manager checks the fix won't break the code before accepting", () => {
+  function readyToAccept() {
+    confirmWith("rob", "sam");
+    verdict("r1", "rob");
+    verdict("r2", "sam");
+    db.bug.findFirst.mockResolvedValue(bugRow());
+  }
+  const acceptsNothing = () => {
+    expect(db.bug.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ reviewStatus: "ready_to_merge" }) }),
+    );
+    expect(db.agentAuditEvent.create).not.toHaveBeenCalled();
+  };
+  const blockedComment = (text: RegExp) =>
+    expect(db.comment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ body: expect.stringMatching(text) }) }),
+    );
+
+  it("does not accept while the pull request's checks are red, and says what the author must do", async () => {
+    readyToAccept();
+    const client = defaultMockGhClient({ checksGreen: vi.fn(async () => false) });
+
+    const result = await acceptFix(merger("m1", "mo", "manager"), "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, error: "not_ready", missing: "deployment_verification" });
+    acceptsNothing();
+    blockedComment(/^Accept blocked: GitHub Actions CI\/CD checks.*stays In Review\. What to do: The author opens the pull request's Checks tab/);
+  });
+
+  it("does not give ready to merge to a pull request that conflicts: it comments and tells the author", async () => {
+    readyToAccept();
+    const client = defaultMockGhClient({
+      getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: false, headSha: "linked-sha" })),
+    });
+
+    const result = await acceptFix(merger("m1", "mo", "manager"), "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, error: "not_ready", missing: "merge_conflict" });
+    acceptsNothing();
+    blockedComment(/^Accept blocked: .*merge conflicts.*don't resolve conflicts: the agent that delivered this fix and its owner have to\..*What to do: .*come and resolve it/);
+    expect(notify.notifyMergeFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ recipientId: "ada", reason: expect.stringContaining("merge conflicts") }),
+    );
+  });
+
+  it("does not accept while CodeRabbit has unresolved threads", async () => {
+    readyToAccept();
+    const client = defaultMockGhClient({ unresolvedCodeRabbitThreads: vi.fn(async () => 3) });
+
+    expect(await acceptFix(merger("m1", "mo", "manager"), "bug1", { client })).toMatchObject({
+      status: 409,
+      missing: "review_threads",
+      message: expect.stringContaining("3 unresolved review threads"),
+    });
+    acceptsNothing();
+  });
+
+  it("does not accept while a deployment is failing, and names it", async () => {
+    readyToAccept();
+    const client = defaultMockGhClient({
+      failingChecks: vi.fn(async () => ['deployment to Production: failure, Build failed (https://vercel.example/d/1)']),
+    });
+
+    const result = await acceptFix(merger("m1", "mo", "manager"), "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, missing: "deployment_verification" });
+    acceptsNothing();
+    blockedComment(/Not green: deployment to Production: failure, Build failed \(https:\/\/vercel\.example\/d\/1\)/);
+  });
+
+  it("accepts when nothing is deployed for the commit and every check is green", async () => {
+    readyToAccept();
+    const client = defaultMockGhClient({ failingChecks: vi.fn(async () => []) });
+
+    expect(await acceptFix(merger("m1", "mo", "manager"), "bug1", { client })).toMatchObject({ status: 200, accepted: true });
+  });
+
+  it("lists every reason when the pull request conflicts and the checks are red", async () => {
+    readyToAccept();
+    const client = defaultMockGhClient({
+      getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: false, headSha: "linked-sha" })),
+      checksGreen: vi.fn(async () => false),
+    });
+
+    const result = await acceptFix(merger("m1", "mo", "manager"), "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, missing: "merge_conflict", message: expect.stringContaining("for 2 reasons") });
+    acceptsNothing();
+    blockedComment(/for 2 reasons: \(1\) .*merge conflicts.*\(2\) GitHub Actions.*What to do: \(1\) .*\(2\) /);
+  });
+
+  it("does not accept when the head commit moved after the testers approved it", async () => {
+    readyToAccept();
+    const client = defaultMockGhClient({
+      getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: true, headSha: "newer-sha" })),
+    });
+
+    const result = await acceptFix(merger("m1", "mo", "manager"), "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, missing: "pull_request", message: expect.stringContaining("head commit changed") });
+    expect(client.checksGreen).not.toHaveBeenCalled();
+    acceptsNothing();
+  });
+
+  it("does not accept when GitHub can't be reached", async () => {
+    readyToAccept();
+    const client = defaultMockGhClient({ getPullRequest: vi.fn(async () => { throw new Error("boom"); }) });
+
+    const result = await acceptFix(merger("m1", "mo", "manager"), "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, missing: "deployment_verification" });
+    acceptsNothing();
+    blockedComment(/GitHub could not be reached.*Try accepting again/);
+  });
+
+  it("does not accept at all when the GitHub App isn't set up, since nothing can be checked", async () => {
+    readyToAccept();
+
+    const result = await acceptFix(merger("m1", "mo", "manager"), "bug1", { client: null });
+
+    expect(result).toMatchObject({ status: 409, missing: "github_app" });
+    acceptsNothing();
+  });
+
+  it("accepts once GitHub says there are no conflicts and every check is green", async () => {
+    readyToAccept();
+    const client = defaultMockGhClient();
+
+    expect(await acceptFix(merger("m1", "mo", "manager"), "bug1", { client })).toMatchObject({ status: 200, accepted: true });
+    expect(client.checksGreen).toHaveBeenCalledWith(expect.anything(), "linked-sha");
+  });
+});
+
+describe("executeAdminMerge: the merger checks again that the fix won't break the code", () => {
+  const conflictingClient = (headSha = "linked-sha") =>
+    defaultMockGhClient({
+      getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: false, headSha })),
+    });
+  const readyToMerge = () => {
+    confirmWith("rob", "sam");
+    verdict("r1", "rob");
+    verdict("r2", "sam");
+    db.bug.findFirst.mockResolvedValue(bugRow());
+  };
+
+  it("does not resolve or merge a conflict: it tells the fix's author to come and resolve it", async () => {
+    readyToMerge();
+    const client = conflictingClient();
+
+    const result = await executeAdminMerge(merger("m1", "mo", "merger"), "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, error: "not_ready", missing: "merge_conflict" });
+    expect(client.mergePullRequest).not.toHaveBeenCalled();
+    expect(db.bug.update).toHaveBeenCalledWith({ where: { id: "bug1" }, data: { reviewStatus: "merge_blocked" } });
+    expect(db.comment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          body: expect.stringMatching(
+            /^Merge blocked: .*merge conflicts.*don't resolve conflicts: the agent that delivered this fix and its owner have to\. Nothing was merged.*What to do: .*come and resolve it.*git merge origin\/<base-branch>.*the testers check it and report again/,
+          ),
+        }),
+      }),
+    );
+    expect(db.pointEntry.createMany).not.toHaveBeenCalled();
+  });
+
+  it("names the agent that made the fix, and tells the person the claim was for", async () => {
+    confirmWith("rob", "sam");
+    verdict("r1", "rob");
+    verdict("r2", "sam");
+    db.bug.findFirst.mockResolvedValue(
+      bugRow({
+        claims: [{
+          status: "active",
+          releasedAt: null,
+          agentId: "solver-agent",
+          beneficiaryUserId: "ada",
+          agent: { ownerUserId: "ada", name: "Ada's Claude" },
+        }],
+      }),
+    );
+
+    await executeAdminMerge(merger("m1", "mo", "merger"), "bug1", { client: conflictingClient() });
+
+    expect(db.comment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ body: expect.stringContaining("Ada's Claude and its owner have to") }) }),
+    );
+    expect(notify.notifyMergeFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ recipientId: "ada", reason: expect.stringContaining("merge conflicts") }),
+    );
+  });
+
+  it("does not wave a moved head commit through after a conflict: the testers check the new commit", async () => {
+    readyToMerge();
+    const client = defaultMockGhClient({
+      getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: true, headSha: "resolved-sha" })),
+    });
+
+    expect(await executeAdminMerge(merger("m1", "mo", "merger"), "bug1", { client })).toMatchObject({
+      status: 409,
+      missing: "pull_request",
+      message: expect.stringContaining("head commit changed"),
+    });
+    expect(client.mergePullRequest).not.toHaveBeenCalled();
+  });
+
+  it("lists every reason in one comment when the merge has more than one problem", async () => {
+    readyToMerge();
+    const client = defaultMockGhClient({
+      getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: false, headSha: "linked-sha" })),
+      checksGreen: vi.fn(async () => false),
+      unresolvedCodeRabbitThreads: vi.fn(async () => 1),
+    });
+
+    const result = await executeAdminMerge(merger("m1", "mo", "merger"), "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, missing: "merge_conflict" });
+    expect(client.mergePullRequest).not.toHaveBeenCalled();
+    expect(db.comment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          body: expect.stringMatching(/for 3 reasons: \(1\) .*merge conflicts.*\(2\) GitHub Actions.*\(3\) CodeRabbit has 1 unresolved review thread.*What to do: \(1\) .*\(2\) .*\(3\) /),
+        }),
+      }),
+    );
+  });
+
+  it("does not merge while a deployment is failing, and names the failing deployment", async () => {
+    readyToMerge();
+    const client = defaultMockGhClient({
+      failingChecks: vi.fn(async () => ['status "Vercel": failure, Deployment failed (https://vercel.example/d/9)']),
+    });
+
+    const result = await executeAdminMerge(merger("m1", "mo", "merger"), "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, missing: "deployment_verification", message: expect.stringContaining('status "Vercel": failure') });
+    expect(client.mergePullRequest).not.toHaveBeenCalled();
+    expect(db.bug.update).toHaveBeenCalledWith({ where: { id: "bug1" }, data: { reviewStatus: "merge_blocked" } });
+  });
+
+  it("tells the author what to do when the checks are red", async () => {
+    confirmWith("rob", "sam");
+    verdict("r1", "rob");
+    verdict("r2", "sam");
+    db.bug.findFirst.mockResolvedValue(bugRow());
+    const client = defaultMockGhClient({ checksGreen: vi.fn(async () => false) });
+
+    const result = await executeAdminMerge(merger("m1", "mo", "merger"), "bug1", { client });
+
+    expect(result).toMatchObject({ status: 409, missing: "deployment_verification" });
+    expect(client.mergePullRequest).not.toHaveBeenCalled();
+    expect(db.comment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ body: expect.stringContaining("What to do: The author opens the pull request's Checks tab") }) }),
+    );
+  });
+
+  it("doesn't treat an already merged pull request as conflicting", async () => {
+    confirmWith("rob", "sam");
+    verdict("r1", "rob");
+    verdict("r2", "sam");
+    db.bug.findFirst.mockResolvedValue(bugRow());
+    const client = defaultMockGhClient({
+      getPullRequest: vi.fn(async () => ({ state: "closed", merged: true, mergeable: false, headSha: "linked-sha" })),
+    });
+
+    expect(await executeAdminMerge(merger("m1", "mo", "merger"), "bug1", { client })).toMatchObject({ status: 200, accepted: true });
   });
 });

@@ -19,7 +19,7 @@ vi.mock("@/lib/agent-api/events", () => ({ publish: vi.fn(async () => ({ id: "ev
 
 import { publish } from "@/lib/agent-api/events";
 import { createGoal, listGoals, readGoal, splitGoalPool, updateGoalStatus, withBudget } from "./service";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 
 const agent = {
   agentId: "agent1",

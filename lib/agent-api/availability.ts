@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSuperAdmin } from "@/lib/auth-helpers";
 import type { AgentContext } from "@/lib/agents/require-agent";
 import { audit, type AuditAgent } from "@/lib/agents/audit";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 import { publish } from "@/lib/agent-api/events";
 import { notifyAgentQuestion, notifyClaimOffered } from "@/lib/agent-notifications";
 import { offerNext, scheduleOfferExpiry } from "@/lib/agent-api/offer";

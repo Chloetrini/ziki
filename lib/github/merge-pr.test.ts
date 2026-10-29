@@ -775,3 +775,81 @@ describe("unresolvedCodeRabbitThreads against the GitHub API", () => {
     await expect(createInstallationClient("123", env).unresolvedCodeRabbitThreads(ref)).rejects.toThrow();
   });
 });
+
+describe("failingChecks against the GitHub API: names what is not green, deployments included (#255)", () => {
+  const ref = { owner: "zedu", repo: "web", number: 7 };
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const env: NodeJS.ProcessEnv = {
+    NODE_ENV: "test",
+    GITHUB_APP_ID: "123456",
+    GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: "pkcs1", format: "pem" }).toString(),
+  };
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const json = (data: unknown, ok = true): Response =>
+    ({ ok, status: ok ? 200 : 403, json: async () => data, headers: new Headers() }) as unknown as Response;
+
+  type Routes = { checks?: unknown[]; statuses?: unknown[]; deployments?: unknown[] | "forbidden"; deploymentStatus?: unknown };
+  function stub(routes: Routes) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/access_tokens")) return json({ token: "ghs_test" });
+        if (url.includes("/check-runs")) return json({ check_runs: routes.checks ?? [], total_count: (routes.checks ?? []).length });
+        if (url.endsWith("/status")) return json({ statuses: routes.statuses ?? [] });
+        if (url.includes("/deployments?")) return routes.deployments === "forbidden" ? json({}, false) : json(routes.deployments ?? []);
+        if (url.includes("/deployments/") && url.includes("/statuses")) return json([routes.deploymentStatus]);
+        return json({}, false);
+      }),
+    );
+  }
+  const client = () => createInstallationClient("123", env);
+
+  it("is empty when everything is green, and when nothing is deployed for the commit", async () => {
+    stub({ checks: [{ name: "build", status: "completed", conclusion: "success" }] });
+    await expect(client().failingChecks!(ref, "sha1")).resolves.toEqual([]);
+  });
+
+  it("names a failing check run with its link", async () => {
+    stub({ checks: [{ name: "build", status: "completed", conclusion: "failure", html_url: "https://gh/run/1" }] });
+    await expect(client().failingChecks!(ref, "sha1")).resolves.toEqual(['check "build": failure (https://gh/run/1)']);
+  });
+
+  it("names a failing Vercel commit status even when check runs exist", async () => {
+    stub({
+      checks: [{ name: "build", status: "completed", conclusion: "success" }],
+      statuses: [{ context: "Vercel", state: "failure", description: "Deployment failed", target_url: "https://vercel.example/d/1" }],
+    });
+    await expect(client().failingChecks!(ref, "sha1")).resolves.toEqual([
+      'status "Vercel": failure, Deployment failed (https://vercel.example/d/1)',
+    ]);
+  });
+
+  it("names a deployment that failed, with its environment", async () => {
+    stub({
+      deployments: [{ id: 5, environment: "Production" }],
+      deploymentStatus: { state: "failure", description: "Build failed", log_url: "https://vercel.example/log/5" },
+    });
+    await expect(client().failingChecks!(ref, "sha1")).resolves.toEqual([
+      "deployment to Production: failure, Build failed (https://vercel.example/log/5)",
+    ]);
+  });
+
+  it("counts a deployment that is still running as not green", async () => {
+    stub({ deployments: [{ id: 5, environment: "Preview" }], deploymentStatus: { state: "in_progress" } });
+    await expect(client().failingChecks!(ref, "sha1")).resolves.toEqual(["deployment to Preview: in_progress"]);
+  });
+
+  it("ignores a deployment that succeeded", async () => {
+    stub({ deployments: [{ id: 5, environment: "Preview" }], deploymentStatus: { state: "success" } });
+    await expect(client().failingChecks!(ref, "sha1")).resolves.toEqual([]);
+  });
+
+  it("skips deployments the app isn't allowed to read instead of failing everything", async () => {
+    stub({ checks: [{ name: "build", status: "completed", conclusion: "success" }], deployments: "forbidden" });
+    await expect(client().failingChecks!(ref, "sha1")).resolves.toEqual([]);
+  });
+});

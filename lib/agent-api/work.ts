@@ -7,7 +7,7 @@ import type { AgentLevel } from "@prisma/client";
 import { findClaimableIssues } from "@/lib/agent-api/contributor";
 import { findReadyToMergeIssues } from "@/lib/agent-api/merger";
 import { findReviewableIssues } from "@/lib/agent-api/reviewer";
-import { findTriageableIssues } from "@/lib/agent-api/triager";
+import { openIssueConfirmations } from "@/lib/issue-stage";
 import { REVIEW_OFFER_TTL_MS } from "@/lib/agent-api/review-offer";
 import { MAX_IDEA_VOTES } from "@/lib/agent-api/idea-verdicts";
 import { listJobs } from "@/lib/jobs/create";
@@ -33,6 +33,8 @@ import { eventStreamBus, TENANT_WRITE, type StreamEvent } from "@/lib/events/str
 
 const SNAPSHOT_TTL_MS = 20_000;
 const PER_KIND_LIMIT = 25;
+/** Every idea at the threshold reaches the managers, not just the top of the verdict list. */
+const CONVERT_LIMIT = 100;
 export const WORK_POLL_SECONDS = 30;
 
 export type WorkKind =
@@ -85,7 +87,21 @@ export type WorkFeed = {
   ask: string[];
   inbox: { unread: number; path: string };
   counts: Partial<Record<WorkKind, number>>;
+  /**
+   * Open work this agent's class can't do, by kind and the class it needs.
+   * The items are in `items` with `canAct: false`; this says it in one place
+   * so no agent mistakes "nothing for me" for "nothing to do".
+   */
+  waiting: { kind: WorkKind; count: number; minimumRole: AgentLevel; what: string }[];
   items: WorkItem[];
+};
+
+/** How each kind of class-gated work reads in a sentence, for one item and for several. */
+const WAITING_WORDS: Partial<Record<WorkKind, [string, string]>> = {
+  convert_idea: ["idea to convert to an issue", "ideas to convert to issues"],
+  accept_fix: ["tested fix to accept or reject", "tested fixes to accept or reject"],
+  dispatch: ["dispatch to hand out ready issues", "dispatches to hand out ready issues"],
+  merge_fix: ["accepted fix to merge", "accepted fixes to merge"],
 };
 
 type IssueRef = { id: string; number: number; title: string };
@@ -108,6 +124,8 @@ export type ProjectWork = {
   project: { id: string; slug: string; name: string };
   /** Open ideas, with their verdict score. */
   ideas: (IssueRef & { ideaScore: number })[];
+  /** Open ideas at or past the project's threshold, waiting for a manager agent to convert them. */
+  toConvert: (IssueRef & { ideaScore: number })[];
   /** Converted issues still being confirmed. */
   toConfirm: (IssueRef & { needs: ConfirmNeed[] })[];
   ideaThreshold: number;
@@ -160,11 +178,12 @@ function neutralCaller(tenantId: string, projectId: string): AgentContext {
 
 async function buildProjectWork(tenantId: string, project: { id: string; slug: string; name: string }): Promise<ProjectWork> {
   const caller = neutralCaller(tenantId, project.id);
-  const [toValidate, toTriage, tests, ready, toAccept, toMerge, ideas, jobs, workflow] = await Promise.all([
-    findReviewableIssues(caller, project.id, "validation", PER_KIND_LIMIT),
-    findTriageableIssues(caller, project.id, PER_KIND_LIMIT),
+  // One read decides every converted issue's stage: which still require
+  // confirmation, and for what, and which are ready (#714).
+  const confirmations = await openIssueConfirmations(prisma, { tenantId, projectId: project.id, convertedToIssueAt: { not: null } });
+  const [tests, ready, toAccept, toMerge, ideas, jobs, workflow] = await Promise.all([
     findReviewableIssues(caller, project.id, "test", PER_KIND_LIMIT),
-    findClaimableIssues(caller, project.id, PER_KIND_LIMIT),
+    findClaimableIssues(caller, project.id, PER_KIND_LIMIT, confirmations),
     findReadyToMergeIssues(caller, project.id, PER_KIND_LIMIT, "submitted"),
     findReadyToMergeIssues(caller, project.id, PER_KIND_LIMIT, "ready_to_merge"),
     openIdeas(tenantId, project.id),
@@ -172,23 +191,32 @@ async function buildProjectWork(tenantId: string, project: { id: string; slug: s
     workflowFor(project.id),
   ]);
 
-  // The confirmation queues only list converted issues; a ready one needs nothing more.
-  const toConfirm = new Map<string, IssueRef & { needs: ConfirmNeed[] }>();
-  const addNeed = (issue: IssueRef, need: ConfirmNeed) => {
-    const entry = toConfirm.get(issue.id) ?? { id: issue.id, number: issue.number, title: issue.title, needs: [] };
-    if (!entry.needs.includes(need)) entry.needs.push(need);
-    toConfirm.set(issue.id, entry);
-  };
-  const readyIds = new Set(ready.map((issue) => issue.id));
-  for (const issue of toValidate) addNeed(issue, "validation");
-  for (const issue of toTriage) if (!readyIds.has(issue.id)) addNeed(issue, "duplicate_check");
+  // Issues that require confirmation: the reviews they still lack, oldest first.
+  const confirmingIds = [...confirmations].filter(([, c]) => c.stage === "confirming").map(([id]) => id);
+  const confirmingRows = confirmingIds.length
+    ? await prisma.bug.findMany({
+      where: { id: { in: confirmingIds } },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: PER_KIND_LIMIT,
+      select: { id: true, number: true, title: true },
+    })
+    : [];
+  const toConfirm = confirmingRows.map((bug): IssueRef & { needs: ConfirmNeed[] } => {
+    const confirmation = confirmations.get(bug.id)!;
+    const needs: ConfirmNeed[] = [];
+    if (confirmation.accepts < confirmation.needed) needs.push("validation");
+    if (!confirmation.triageCleared) needs.push("duplicate_check");
+    return { ...bug, needs };
+  });
 
-  const ids = new Set([...ideas.map((i) => i.id), ...toConfirm.keys(), ...tests.map((t) => t.id), ...toAccept.map((t) => t.id), ...toMerge.map((t) => t.id)]);
+  const toConvert = await convertibleIdeas(tenantId, project.id, workflow.ideaThreshold);
+  const ids = new Set([...ideas.map((i) => i.id), ...toConvert.map((i) => i.id), ...toConfirm.map((i) => i.id), ...tests.map((t) => t.id), ...toAccept.map((t) => t.id), ...toMerge.map((t) => t.id)]);
   return {
     tenantId,
     project,
     ideas,
-    toConfirm: [...toConfirm.values()].slice(0, PER_KIND_LIMIT),
+    toConvert,
+    toConfirm,
     ideaThreshold: workflow.ideaThreshold,
     tests: tests.map((t) => ({ id: t.id, number: t.number, title: t.title, pullRequestUrl: t.pullRequestUrl ?? null })),
     ready: ready.map((r) => ({ id: r.id, number: r.number, title: r.title, voteCount: r.voteCount, severity: r.severity })),
@@ -206,6 +234,16 @@ async function openIdeas(tenantId: string, projectId: string): Promise<ProjectWo
     where: { tenantId, projectId, isDeleted: false, status: "open", convertedToIssueAt: null },
     orderBy: [{ ideaScore: "desc" }, { createdAt: "asc" }],
     take: PER_KIND_LIMIT,
+    select: { id: true, number: true, title: true, ideaScore: true },
+  });
+}
+
+/** Open ideas whose score reached the threshold, highest first. */
+async function convertibleIdeas(tenantId: string, projectId: string, threshold: number): Promise<ProjectWork["toConvert"]> {
+  return prisma.bug.findMany({
+    where: { tenantId, projectId, isDeleted: false, status: "open", convertedToIssueAt: null, ideaScore: { gte: threshold } },
+    orderBy: [{ ideaScore: "desc" }, { createdAt: "asc" }],
+    take: CONVERT_LIMIT,
     select: { id: true, number: true, title: true, ideaScore: true },
   });
 }
@@ -463,15 +501,15 @@ export function itemsFor(agent: AgentContext, work: ProjectWork, mine: AgentWork
     if (id && !independent(id)) return { canAct: false, blockedReason: "Your owner filed, claimed or is credited on this issue." };
     return { canAct: true };
   };
-  for (const idea of work.ideas) {
-    if (idea.ideaScore < work.ideaThreshold) continue;
+  for (const idea of work.toConvert) {
     items.push({
       kind: "convert_idea",
       key: `convert_idea:${idea.id}`,
       title: `Convert idea #${idea.number} to an issue`,
       detail: `Its score is ${idea.ideaScore}, at or past the project's threshold of ${work.ideaThreshold}. Read the verdicts, then convert it so it can be confirmed and worked on.`,
       minimumRole: "manager",
-      ...roleGate("manager", idea.id),
+      // A manager may convert its owner's own idea: the verdicts came from other people.
+      ...roleGate("manager"),
       issue: issueRef(idea),
       actions: [
         { name: "list_idea_verdicts", minimumRole: "working", method: "GET", path: apiPath(idea.id, "idea-verdicts", pid), cli: `list-idea-verdicts --id ${idea.id}` },
@@ -484,7 +522,7 @@ export function itemsFor(agent: AgentContext, work: ProjectWork, mine: AgentWork
       kind: "dispatch",
       key: `dispatch:${work.project.id}`,
       title: `Hand out ${work.ready.length} ready issue${work.ready.length === 1 ? "" : "s"}`,
-      detail: "Run a dispatch to offer ready issues to working agents.",
+      detail: "Run a dispatch to offer ready issues to working agents, or give one to a chosen agent or yourself with POST /api/v1/issues/{id}/assign.",
       minimumRole: "manager",
       ...roleGate("manager"),
       actions: [{ name: "dispatch", minimumRole: "manager", method: "POST", path: "/api/v1/dispatcher/dispatch", cli: "dispatch --policy offer_only" }],
@@ -517,6 +555,35 @@ export function itemsFor(agent: AgentContext, work: ProjectWork, mine: AgentWork
   return items;
 }
 
+/**
+ * Open work this agent's class can't do, grouped by kind, with one plain line
+ * per class that can. A working agent learns that ideas wait to be converted
+ * and fixes wait to be accepted or merged, even though it can't do it.
+ */
+export function waitingForOthers(level: AgentLevel, items: readonly WorkItem[]): { waiting: WorkFeed["waiting"]; lines: string[] } {
+  const byKind = new Map<WorkKind, { kind: WorkKind; count: number; minimumRole: AgentLevel }>();
+  for (const item of items) {
+    if (item.canAct || !WAITING_WORDS[item.kind] || hasLevel(level, item.minimumRole)) continue;
+    const entry = byKind.get(item.kind) ?? { kind: item.kind, count: 0, minimumRole: item.minimumRole };
+    entry.count += 1;
+    byKind.set(item.kind, entry);
+  }
+  const waiting = [...byKind.values()].map((entry) => {
+    const [one, many] = WAITING_WORDS[entry.kind]!;
+    return { ...entry, what: `${entry.count} ${entry.count === 1 ? one : many}` };
+  });
+  const lines: string[] = [];
+  for (const role of ["manager", "merger"] as const) {
+    const forRole = waiting.filter((entry) => entry.minimumRole === role);
+    if (!forRole.length) continue;
+    const list = forRole.map((entry) => entry.what);
+    const joined = list.length === 1 ? list[0] : `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
+    const single = forRole.length === 1 && forRole[0].count === 1;
+    lines.push(`Also open in this project, for a ${role} agent: ${joined}. You can't do ${single ? "it" : "these"} as a ${level} agent, but ${single ? "it is" : "they are"} work waiting to be done.`);
+  }
+  return { waiting, lines };
+}
+
 /** The whole feed for one agent. */
 export async function workFeed(agent: AgentContext, project: { id: string; slug: string; name: string }, now = Date.now()): Promise<WorkFeed> {
   const work = await projectWork(agent.tenantId, project, now);
@@ -533,8 +600,13 @@ export async function workFeed(agent: AgentContext, project: { id: string; slug:
     ask.push(`${newIdeas} idea${newIdeas === 1 ? " needs" : "s need"} your verdict: good, bad or neutral, with a summary of at most two sentences and a full description. Each earns ${IDEA_CONTRIBUTION_POINTS} point.`);
   }
   const toConvert = items.filter((item) => item.kind === "convert_idea" && item.canAct).length;
-  if (toConvert) ask.push(`${toConvert} idea${toConvert === 1 ? " has" : "s have"} reached the threshold. As a manager agent, read the verdicts and convert ${toConvert === 1 ? "it" : "them"} to issues.`);
-  if (!items.some((item) => item.canAct)) ask.push(`Nothing for you right now. Check again in ${WORK_POLL_SECONDS} seconds.`);
+  if (toConvert) ask.push(`${toConvert} idea${toConvert === 1 ? " has" : "s have"} reached the threshold. As a manager agent, read the verdicts and convert ${toConvert === 1 ? "it to an issue" : "them to issues"}.`);
+
+  // Work above this agent's class is still open work: say what it is and who can do it.
+  const { waiting, lines } = waitingForOthers(agent.level, items);
+  ask.push(...lines);
+
+  if (!items.some((item) => item.canAct)) ask.push(`Nothing you can do right now. Check again in ${WORK_POLL_SECONDS} seconds.`);
 
   return {
     project,
@@ -544,6 +616,7 @@ export async function workFeed(agent: AgentContext, project: { id: string; slug:
     ask,
     inbox: { unread: mine.unread, path: "/api/v1/inbox?unread=1" },
     counts,
+    waiting,
     items,
   };
 }

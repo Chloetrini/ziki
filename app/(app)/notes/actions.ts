@@ -5,7 +5,7 @@ import { z } from "zod";
 import { requireUser } from "@/lib/auth-helpers";
 import { currentTenantIdFor } from "@/lib/tenant-context";
 import { humanNotesActor, saveProjectNotes, restoreProjectNotes } from "@/lib/project-notes";
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 import { logger } from "@/lib/logger";
 
 export type NotesActionResult = { error?: string; version?: number };

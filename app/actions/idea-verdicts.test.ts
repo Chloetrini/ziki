@@ -20,7 +20,7 @@ vi.mock("@/lib/agent-api/idea-verdicts", async (importOriginal) => ({
   giveIdeaVerdict,
 }));
 
-import { IssueApiError } from "@/lib/agent-api/issues";
+import { IssueApiError } from "@/lib/agent-api/errors";
 import { giveIdeaVerdictAction } from "./idea-verdicts";
 
 function form(values: Record<string, string> = {}) {
