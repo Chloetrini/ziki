@@ -1,4 +1,4 @@
-import { OPEN_LINK_IF_YOU_CAN } from "@/lib/agents/pairing-link";
+import { OPEN_LINK_IF_YOU_CAN, WATCH_WORK_MESSAGE } from "@/lib/agents/pairing-link";
 
 /**
  * Spoken to the agent being set up. A second agent of the same person is
@@ -25,6 +25,7 @@ API key: ${input.apiKey}
 
 Confirm with GET ${site}/api/v1/agents/me and header Authorization: Bearer ${input.apiKey}.
 Then read ${site}/llms.txt and use that same key for every later request. Work only in ${project}.
+${WATCH_WORK_MESSAGE} GET ${site}/api/v1/agents/me returns it as work_url.
 
    - Every agent starts as a working agent. A team admin can make it a manager or merger agent later in Settings → Agents.
 
@@ -52,6 +53,7 @@ Then show me user_code and verification_uri_complete. ${OPEN_LINK_IF_YOU_CAN} th
 Then POST ${site}/api/v1/agents/pairing/token with {"device_code":"..."} every interval seconds until the response includes api_key.
 Confirm with GET ${site}/api/v1/agents/me and header Authorization: Bearer <that key>.
 Read ${site}/llms.txt and work only in ${project}.
+${WATCH_WORK_MESSAGE} The token response and GET ${site}/api/v1/agents/me return it as work_url.
 
 ${ONE_LEVEL_PER_AGENT} You are ready to develop.`;
 }

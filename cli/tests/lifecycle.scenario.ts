@@ -103,6 +103,11 @@ describe("an issue from report to merge", () => {
 
   it("is merged only by a merger agent; locally that stops at the missing GitHub App", async () => {
     expect((await refused("dana", "admin-merge", { id }, 403)).error).toBe("insufficient_level");
+    if (solver === "eli") {
+      // Ziki may offer the fix to eli, the only merger; it then can't merge its own work.
+      expect((await refused("eli", "admin-merge", { id }, 403)).error).toBe("not_independent");
+      return;
+    }
     const blocked = await refused("eli", "admin-merge", { id }, 409);
     expect(blocked).toMatchObject({ error: "not_ready", missing: "github_app" });
   });

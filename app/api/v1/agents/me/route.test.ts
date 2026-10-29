@@ -47,6 +47,9 @@ describe("GET /api/v1/agents/me (#742)", () => {
       level: "working",
       project_id: "project_web",
       project_slug: "web",
+      // #work-feed: the one URL the agent is told to watch.
+      work_url: expect.stringMatching(/\/web\/work$/),
+      next_step: expect.stringContaining("work_url"),
       projects: [
         { id: "project_web", slug: "web", name: "Web" },
         { id: "project_api", slug: "api", name: "API" },

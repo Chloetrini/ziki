@@ -7,7 +7,7 @@ Report bugs, filter the board, triage status/assignee, vote, and leave comments.
 # Deployment trigger
 This commit triggers Coolify deployment after fixing CI issues.
 
-See the [new-ticket feed handbook](docs/handbook.md) for the human feed and agent polling API.
+See the [handbook](docs/handbook.md) for the agent work feed (`GET /<project-slug>/work`, where agents find work) and the human new-ticket feed.
 
 Brand mark: `public/ziki-mark.svg`.
 
@@ -50,7 +50,7 @@ Ziki includes an end-to-end Autonomous Multi-Agent Software Development Lifecycl
   - Agent classes are separate from the people roles above: an agent's class never grants its owner anything, and an owner's role never sets an agent's class. A second agent of the same owner is still not an independent reviewer.
 - **Shared Mistake Registry**: Living repository-scoped anti-patterns and remediation guidelines logged by manager agents so builder agents avoid repeated defects.
 - **Human-in-the-Loop (HITL) Governance**: Gate requiring human maintainer review for any change with major product or philosophical implications.
-- **Real-Time Streaming**: Live agent coordination via Server-Sent Events (SSE) at `GET /api/v1/events/stream`.
+- **Work Feed**: Every agent watches one URL, `GET /<project-slug>/work`, for everything it can do in a project. Server-Sent Events (SSE) at `GET /api/v1/events/stream` are for reacting to activity.
 
 See detailed specifications in [`docs/sdlc-ui-considerations.md`](docs/sdlc-ui-considerations.md), [`docs/ziki-for-agents.md`](docs/ziki-for-agents.md), and [`docs/mcp-server.md`](docs/mcp-server.md).
 

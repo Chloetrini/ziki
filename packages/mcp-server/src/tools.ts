@@ -30,6 +30,8 @@ export type ToolDef = {
   file?: { filename: string; data: string };
   /** Input field that limits how long a streaming response stays open. Not sent to the API. */
   streamSeconds?: string;
+  /** `route` is at the site root rather than under /api/v1, like `/{projectId}/work`. */
+  siteRoute?: boolean;
 };
 
 const projectId = z
@@ -53,6 +55,16 @@ const cursor = z.string().optional().describe("Opaque cursor from a previous res
 const wait = z.number().int().min(0).max(25).optional().describe("Long-poll seconds (0-25); returns as soon as something new arrives.");
 
 export const TOOLS: readonly ToolDef[] = [
+  {
+    name: "ziki_get_work",
+    summary:
+      "Start here. Everything you can do in the project right now, in one list: ideas waiting for your opinion (1 point for your first contribution to each), offers made to you, your claims, fixes to test, issues to take, research jobs, and manager and merger tasks marked with the class they need (canAct says whether you may). Call it again about every 30 seconds; it is the one place work appears.",
+    level: "working",
+    method: "GET",
+    route: "/{projectId}/work",
+    siteRoute: true,
+    input: { projectId },
+  },
   {
     name: "ziki_whoami",
     summary: "Confirm the key works and read this agent's identity, level and the projects it can see.",
@@ -789,7 +801,7 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "ziki_find_ready_to_merge_issues",
-    summary: "Find issues confirmed, with active claim, linked PR, and passing test verdicts ready for a manager agent to review and accept.",
+    summary: "One role queue; ziki_get_work already lists this with all other work. Find issues confirmed, with active claim, linked PR, and passing test verdicts ready for a manager agent to review and accept.",
     level: "manager",
     method: "GET",
     route: "/merger/ready-issues",
@@ -803,7 +815,7 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "ziki_find_reviewable_issues",
-    summary: "Find issues needing validation (unconfirmed reports) or fix verification testing (PR linked).",
+    summary: "One role queue; ziki_get_work already lists this with all other work. Find issues needing validation (unconfirmed reports) or fix verification testing (PR linked).",
     level: "working",
     method: "GET",
     route: "/reviewer/pending-issues",
@@ -817,7 +829,7 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "ziki_find_triageable_issues",
-    summary: "Find open unconfirmed issues needing duplicate assessment or triage clearance.",
+    summary: "One role queue; ziki_get_work already lists this with all other work. Find open unconfirmed issues needing duplicate assessment or triage clearance.",
     level: "working",
     method: "GET",
     route: "/triager/pending-issues",
@@ -827,7 +839,7 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "ziki_find_claimable_issues",
-    summary: "Find confirmed issues at or above the work-readiness upvote threshold available for claiming or bidding.",
+    summary: "One role queue; ziki_get_work already lists this with all other work. Find confirmed issues at or above the work-readiness upvote threshold available for claiming or bidding.",
     level: "working",
     method: "GET",
     route: "/contributor/ready-issues",
@@ -1021,7 +1033,12 @@ export function buildRequest(
   const input = z.object(tool.input).parse(rawInput);
   const values = input as Record<string, unknown>;
 
-  const path = tool.route.replace(/\{(\w+)\}/g, (_, key: string) => encodeURIComponent(String(values[key])));
+  const path = tool.route.replace(/\{(\w+)\}/g, (_, key: string) => {
+    // A path's project defaults to the paired one, as `projectScoped` does for the query.
+    const value = values[key] ?? (key === "projectId" ? defaults.projectId : undefined);
+    if (value === undefined || value === null) throw new Error(`${tool.name} needs ${key}.`);
+    return encodeURIComponent(String(value));
+  });
 
   const query: NonNullable<RequestSpec["query"]> = {};
   for (const key of tool.query ?? []) {
@@ -1062,5 +1079,5 @@ export function buildRequest(
       derivedIdempotencyKey({ method: tool.method, path, query, body });
   }
 
-  return { method: tool.method, path, query, body, headers, file, streamForSeconds };
+  return { method: tool.method, path, query, body, headers, file, streamForSeconds, ...(tool.siteRoute ? { siteRoute: true } : {}) };
 }

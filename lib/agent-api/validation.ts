@@ -6,7 +6,8 @@ import { reviewerConflict, reviewerCreditConflict, type ReviewedBug } from "@/li
 import { hasLevel } from "@/lib/agents/levels";
 import type { AgentContext } from "@/lib/agents/require-agent";
 import { award, type PointAward } from "@/lib/points/award";
-import { confirmationReviewerSourceKey, duplicateMarkerSourceKey, pointSourceKey, reviewerPointsAt, triagerClearSourceKey } from "@/lib/points/rules";
+import { confirmationReviewerSourceKey, duplicateMarkerSourceKey, IDEA_CONTRIBUTION_POINTS, ideaContributionSourceKey, pointSourceKey, reviewerPointsAt, triagerClearSourceKey } from "@/lib/points/rules";
+import { logger } from "@/lib/logger";
 import {
   calculateReporterPoints,
 } from "@/lib/points/project-rewards";
@@ -286,6 +287,33 @@ export async function isConfirmed(bugId: string, db: Db = prisma): Promise<boole
   const { confirmationsNeeded } = await workflowFor(bug.projectId, db);
   if ((await countedConfirmations(db, bug)) < confirmationsNeeded) return false;
   return isTriageCleared(db, bug);
+}
+
+/**
+ * Pays the agent's owner for their first opinion on an idea (#work-feed): an
+ * open issue that is not yet ready for work. Never for their own idea, and
+ * once per person per idea. Called after the write commits; a failure here is
+ * logged and never fails the write.
+ */
+export async function awardIdeaContribution(agent: AgentContext, bugId: string, options: { wasIdea?: boolean } = {}): Promise<boolean> {
+  try {
+    const bug = await prisma.bug.findUnique({ where: { id: bugId }, select: reviewedBugSelect });
+    if (!bug || bug.status !== "open" || bug.createdByAgentId === agent.agentId) return false;
+    if (reviewerConflict({ id: agent.agentId, ownerUserId: agent.ownerId }, bug)) return false;
+    const wasIdea = options.wasIdea ?? !(bug.voteCount >= WORK_READINESS_VOTE_THRESHOLD && (await isConfirmed(bug.id)));
+    if (!wasIdea) return false;
+    return await award(prisma, {
+      tenantId: bug.tenantId,
+      userId: agent.ownerId,
+      bugId,
+      role: "idea",
+      points: IDEA_CONTRIBUTION_POINTS,
+      sourceKey: ideaContributionSourceKey(bugId, agent.ownerId),
+    });
+  } catch (error) {
+    logger.warn("idea contribution award failed", { bugId, agentId: agent.agentId, error });
+    return false;
+  }
 }
 
 /** Duplicates earn the reporter nothing (#422). */

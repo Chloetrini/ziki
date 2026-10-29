@@ -23,7 +23,7 @@ import { attachmentIdsInMarkdown, linkAttachments } from "@/lib/attachment-link"
 import { MAX_ATTACHMENTS_PER_ITEM } from "@/lib/attachments";
 import { publish } from "@/lib/agent-api/events";
 import { pullRequestAttachment } from "@/lib/github/pr-mention";
-import { isConfirmed } from "@/lib/agent-api/validation";
+import { awardIdeaContribution, isConfirmed } from "@/lib/agent-api/validation";
 import { notifyLater } from "@/lib/notify";
 import type { NotificationEvent } from "@/lib/notifications";
 import { logger } from "@/lib/logger";
@@ -420,6 +420,9 @@ export async function createAgentIssue(agent: AgentContext, request: NextRequest
   return NextResponse.json({ issue, replayed: result.replayed }, { status: result.status });
 }
 
+/** Shorter comments ("+1", "agreed") are welcome but earn no idea point. */
+export const IDEA_COMMENT_MIN_LENGTH = 40;
+
 export async function commentOnAgentIssue(agent: AgentContext, request: NextRequest, bugId: string) {
   const input = agentCommentSchema.parse(await issueJson(request));
   const scope = await issueProject(agent, request.nextUrl.searchParams, input.projectId);
@@ -532,6 +535,8 @@ export async function commentOnAgentIssue(agent: AgentContext, request: NextRequ
     return { created, attachedPrUrl };
   });
   notifyAgentComment(agent, bug, comment.created, parentAuthorId);
+  // An opinion on an idea earns its owner a point, once per idea (#work-feed).
+  if (input.body.trim().length >= IDEA_COMMENT_MIN_LENGTH) await awardIdeaContribution(agent, bugId);
   return NextResponse.json(
     {
       comment: comment.created,

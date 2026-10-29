@@ -124,6 +124,8 @@ enum PointRole {
   /// Paid to the submitter's owner when a research job row is accepted (#617).
   submission
   dispatcher
+  /// 1 pt for a person's first opinion on an idea: a validation or a comment.
+  idea
 }
 
 enum DisputeStatus {

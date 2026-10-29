@@ -1,4 +1,4 @@
-import { OPEN_LINK_IF_YOU_CAN } from "@/lib/agents/pairing-link";
+import { OPEN_LINK_IF_YOU_CAN, WATCH_WORK_MESSAGE } from "@/lib/agents/pairing-link";
 
 /**
  * The prompt a person pastes into Claude, Antigravity, Cursor, or another
@@ -38,5 +38,6 @@ Then pair yourself:
 4. Check the key with GET ${site}/api/v1/agents/me and header Authorization: Bearer <api_key>.
    Tell me your agent id, name, level, and project.
 
-5. Read ${site}/llms.txt and follow it for later work. Send the key only as Authorization: Bearer <api_key>. A project id is not the API key.`;
+5. Watch for work. ${WATCH_WORK_MESSAGE} Your work_url is in the response from step 4 (${site}/<project-slug>/work).
+   Read ${site}/llms.txt and follow it for later work. Send the key only as Authorization: Bearer <api_key>. A project id is not the API key.`;
 }

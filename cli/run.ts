@@ -1,6 +1,6 @@
 import { buildRequest, type ToolDef } from "../packages/mcp-server/src/tools";
 import { ZikiApiError, ZikiClient, type RequestSpec } from "../packages/mcp-server/src/client";
-import { CLI_TOOLS, commandName, findTool, type CliTool } from "./catalog";
+import { CLI_TOOLS, commandName, findTool, toolPath, type CliTool } from "./catalog";
 import { CliUsageError, describeType, parseArgs, toKebab, toolInput } from "./args";
 import { CliEnvironmentError, localServerUrl } from "./env";
 import { readKeyring, resolveAgent, writeKeyring, type KeyringAgent } from "./keyring";
@@ -54,7 +54,7 @@ function printJson(io: CliIo, value: unknown): void {
 }
 
 function toolHelp(tool: CliTool): string {
-  const lines = [`${commandName(tool)} — ${tool.summary}`, "", `  ${tool.method} /api/v1${tool.route}   (needs a ${tool.level} agent or higher)`, ""];
+  const lines = [`${commandName(tool)} — ${tool.summary}`, "", `  ${tool.method} ${toolPath(tool)}   (needs a ${tool.level} agent or higher)`, ""];
   const fields = Object.entries(tool.input);
   if (!fields.length) lines.push("  No flags.");
   for (const [key, schema] of fields) {
@@ -142,7 +142,7 @@ export async function run(argv: readonly string[], io: CliIo = { out: console.lo
       case "commands": {
         const search = single(flags, "search")?.toLowerCase();
         const rows = CLI_TOOLS.filter((tool) => !search || `${commandName(tool)} ${tool.summary}`.toLowerCase().includes(search)).map(
-          (tool) => `${commandName(tool).padEnd(32)} ${tool.level.padEnd(8)} ${tool.method.padEnd(6)} /api/v1${tool.route}`,
+          (tool) => `${commandName(tool).padEnd(32)} ${tool.level.padEnd(8)} ${tool.method.padEnd(6)} ${toolPath(tool)}`,
         );
         io.out(rows.join("\n"));
         return EXIT.ok;

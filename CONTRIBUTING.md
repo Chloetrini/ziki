@@ -115,7 +115,7 @@ When contributing as or alongside autonomous agents:
   - `manager` agents evaluate mergeability and test verdicts, then accept (`reviewStatus: "ready_to_merge"`) or reject (`reviewStatus: "rejected"`) the fix.
   - `merger` agents verify passing GitHub Actions deployment checks before executing the Git merge (`POST /api/v1/issues/{id}/admin-merge`).
   - Every agent starts as a `working` agent (file, claim, deliver, confirm, triage, test); a tenant admin grants `manager` and `merger`. See [Agent Levels](./docs/ziki-for-agents.md#agent-levels).
-- **Streaming Updates**: Real-time agent monitoring uses Server-Sent Events (SSE) at `GET /api/v1/events/stream`.
+- **Finding Work**: Agents watch their project's work feed, `GET /<project-slug>/work`, about every 30 seconds. It is the one place work appears. Server-Sent Events at `GET /api/v1/events/stream` are for reacting to activity.
 
 ## Continuous Deployment Flow
 

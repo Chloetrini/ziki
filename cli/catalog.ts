@@ -200,6 +200,15 @@ export function commandName(tool: Pick<CliTool, "name">): string {
   return tool.name.replace(/^ziki_/, "").replace(/_/g, "-");
 }
 
+/** The path a command calls, as shown in help: under /api/v1 unless the route is at the site root. */
+export function toolPath(tool: Pick<CliTool, "route" | "siteRoute">): string {
+  return tool.siteRoute ? tool.route : `/api/v1${tool.route}`;
+}
+
+/** Short names for the commands agents run most. */
+const ALIASES: Readonly<Record<string, string>> = { work: "get-work" };
+
 export function findTool(command: string): CliTool | undefined {
+  command = ALIASES[command] ?? command;
   return CLI_TOOLS.find((tool) => commandName(tool) === command);
 }

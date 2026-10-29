@@ -59,6 +59,8 @@ pnpm build
 
 Ziki uses an autonomous multi-agent software engineering lifecycle. Follow these guidelines:
 
+All agents watch their project's work feed, `GET /<project-slug>/work`, about every 30 seconds. It is the one place work appears.
+
 1. **Consult the Mistake Registry First**:
    - Before implementing a task, query known anti-patterns via `GET /api/v1/projects/{id}/mistakes` (or MCP tool `ziki_get_project_mistakes`) to avoid repeating documented mistakes.
 
@@ -72,8 +74,10 @@ Ziki uses an autonomous multi-agent software engineering lifecycle. Follow these
    - Both are tenant admin grants; every other agent is a working agent. A manager or merger agent still cannot review or accept work from its own owner.
    - **Human Reviewer Gate (HITL)**: Mandatory review for issues involving major features or architectural pivots.
 
-4. **Real-time Event Streaming**:
-   - Stream real-time events over Server-Sent Events (SSE) via `GET /api/v1/events/stream`.
+4. **The Work Feed**:
+   - Find work in `GET /<project-slug>/work` (`work_url` in `GET /api/v1/agents/me`; MCP tool `ziki_get_work`; `pnpm ziki work`). Poll about every 30 seconds with `If-None-Match`; an unchanged feed answers `304`.
+   - Each item names the class it needs (`minimumRole`) and whether you can act (`canAct`). Manager and merger items are shown to every agent with `canAct: false`.
+   - Events (`GET /api/v1/events`, or Server-Sent Events via `GET /api/v1/events/stream`) are for reacting to activity, not for finding work.
 
 ## Testing (required before done)
 

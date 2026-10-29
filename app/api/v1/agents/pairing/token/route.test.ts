@@ -6,6 +6,8 @@ const consumePairingLimit = vi.hoisted(() => vi.fn(async () => null as number | 
 vi.mock("@/lib/agents/rate-limit", () => ({ consumePairingLimit }));
 vi.mock("@/lib/agents/pairing", () => ({ collectPairing }));
 vi.mock("@/lib/feature-flags", () => ({ isAgentPlatformEnabled: () => true }));
+const findProject = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/prisma", () => ({ prisma: { project: { findUnique: findProject } } }));
 
 import { POST } from "./route";
 
@@ -17,6 +19,7 @@ describe("POST /api/v1/agents/pairing/token", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     consumePairingLimit.mockResolvedValue(null);
+    findProject.mockResolvedValue({ slug: "web" });
   });
 
   it("returns the key once, with the agent's level (#429)", async () => {
@@ -32,7 +35,21 @@ describe("POST /api/v1/agents/pairing/token", () => {
       api_key: "ziki_raw",
       agent: { id: "agent_1", name: "Ada's Claude", level: "working" },
       project_id: "project_1",
+      work_url: expect.stringMatching(/\/web\/work$/),
+      message: expect.stringContaining("work_url"),
     });
+  });
+
+  it("still returns the key when the project lookup fails", async () => {
+    collectPairing.mockResolvedValue({
+      status: "issued",
+      key: { agentId: "agent_1", name: "Ada's Claude", level: "working", rawKey: "ziki_raw", prefix: "ziki_raw" },
+      projectId: "project_1",
+    });
+    findProject.mockRejectedValue(new Error("db down"));
+    const response = await call(JSON.stringify({ device_code: "d".repeat(24) }));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ api_key: "ziki_raw", work_url: null });
   });
 
   it("treats a malformed body as an unknown device code", async () => {
