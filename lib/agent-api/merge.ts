@@ -20,8 +20,11 @@ import { workflowFor } from "@/lib/workflow";
 import {
   clientForInstallation,
   codeRabbitThreadsMessage,
-  fixBreakBlock,
+  checksBlock,
+  hasMergeConflicts,
   isPullRequestClosedUnmerged,
+  MERGE_CONFLICT_MESSAGE,
+  MERGE_CONFLICT_TODO,
   parseGitHubRepoUrl,
   parsePullRequestUrl,
   sameRepo,
@@ -351,9 +354,11 @@ export async function acceptFix(
 
   if (!isAdminMerge) {
     // Before a manager says yes, GitHub has to say the fix won't break the
-    // code: no conflicts with the base branch, checks green on the commit the
-    // testers approved. Nothing is accepted otherwise; a comment says why.
-    const block = await acceptBlock(githubClientFor(bug, deps), ref, acceptedHeadSha);
+    // code: checks green on the commit the testers approved. Nothing is
+    // accepted otherwise; a comment says why. A merge conflict does not stop
+    // the accept: the merger resolves it before merging, and the accept
+    // comment says so.
+    const { block, conflicts } = await acceptCheck(githubClientFor(bug, deps), ref, acceptedHeadSha);
     if (block) {
       await recordAcceptBlocked(prisma, { agent, bug, reason: block.message, todo: block.todo });
       return { status: 409 as const, error: "not_ready" as const, missing: block.missing, message: block.message };
@@ -364,7 +369,9 @@ export async function acceptFix(
         where: { id: bug.id },
         data: { reviewStatus: "ready_to_merge" },
       });
-      const acceptCommentBody = "Fix accepted by merger agent. Status changed to ready to merge.";
+      const acceptCommentBody = conflicts
+        ? `Fix accepted by merger agent. Status changed to ready to merge. ${MERGE_CONFLICT_MESSAGE} It does not block the accept: the merger resolves it before merging. What to do: ${MERGE_CONFLICT_TODO}`
+        : "Fix accepted by merger agent. Status changed to ready to merge.";
       await tx.comment.create({
         data: {
           bugId: bug.id,
@@ -488,10 +495,17 @@ export async function acceptFix(
     );
   }
 
-  // 2. The fix must not break the code: no conflicts with the base branch and
-  // every check on the head commit green. The same check a manager makes
-  // before accepting; it is repeated here because time has passed.
-  const breakBlock = await fixBreakBlock(ghClient, ref, pullRequest, headToVerify);
+  // 2. A conflict with the base branch is the merger's job to resolve, not a
+  // reason to turn the fix away: the merge waits as merge_blocked and the
+  // comment says how to resolve it.
+  if (hasMergeConflicts(pullRequest)) {
+    return stop(MERGE_BLOCKED, "pull_request", MERGE_CONFLICT_MESSAGE, MERGE_CONFLICT_TODO);
+  }
+
+  // 3. The fix must not break the code: every check on the head commit green.
+  // The same check a manager makes before accepting; it is repeated here
+  // because time has passed.
+  const breakBlock = await checksBlock(ghClient, ref, headToVerify);
   if (breakBlock) return stop(MERGE_BLOCKED, breakBlock.missing, breakBlock.message, breakBlock.todo);
 
   // The merge commit comes only from GitHub's answer, never from the request.
@@ -695,44 +709,54 @@ function githubClientFor(bug: LoadedBug, deps: AcceptFixDeps): GitHubClient | nu
 
 /**
  * What stops a manager from accepting a fix: GitHub can't be asked, the pull
- * request moved after the testers approved it, it conflicts with its base
- * branch, or its checks are not green. Null when the fix is safe to accept.
+ * request moved after the testers approved it, or its checks are not green.
+ * `block` is null when the fix is safe to accept. `conflicts` says the pull
+ * request conflicts with its base branch, which the merger resolves later.
  */
-async function acceptBlock(
+async function acceptCheck(
   client: GitHubClient | null,
   ref: ReturnType<typeof parsePullRequestUrl>,
   acceptedHeadSha: string | null,
-): Promise<{ missing: "pull_request" | "deployment_verification" | "github_app"; message: string; todo: string } | null> {
+): Promise<{
+  block: { missing: "pull_request" | "deployment_verification" | "github_app"; message: string; todo: string } | null;
+  conflicts: boolean;
+}> {
+  const blocked = (
+    missing: "pull_request" | "deployment_verification" | "github_app",
+    message: string,
+    todo: string,
+  ) => ({ block: { missing, message, todo }, conflicts: false });
   if (!client) {
-    return {
-      missing: "github_app",
-      message: "The GitHub App is not set up for this project, so Ziki can't check that the fix won't break the code.",
-      todo: GITHUB_APP_TODO,
-    };
+    return blocked(
+      "github_app",
+      "The GitHub App is not set up for this project, so Ziki can't check that the fix won't break the code.",
+      GITHUB_APP_TODO,
+    );
   }
   if (!ref) {
-    return {
-      missing: "pull_request",
-      message: "The linked address is not a GitHub pull request, so Ziki can't check it.",
-      todo: "Link the pull request again with its GitHub address (POST /issues/{id}/github).",
-    };
+    return blocked(
+      "pull_request",
+      "The linked address is not a GitHub pull request, so Ziki can't check it.",
+      "Link the pull request again with its GitHub address (POST /issues/{id}/github).",
+    );
   }
   let pullRequest: PullRequest;
   try {
     pullRequest = await client.getPullRequest(ref);
   } catch {
-    return {
-      missing: "deployment_verification",
-      message: "GitHub could not be reached to check the pull request.",
-      todo: "Nothing is wrong with the fix. Try accepting again in a few minutes.",
-    };
+    return blocked(
+      "deployment_verification",
+      "GitHub could not be reached to check the pull request.",
+      "Nothing is wrong with the fix. Try accepting again in a few minutes.",
+    );
   }
   if (pullRequest.headSha && acceptedHeadSha && pullRequest.headSha !== acceptedHeadSha) {
-    return {
-      missing: "pull_request",
-      message: "The pull request's head commit changed after the testers approved it.",
-      todo: "Testers check the new commit and report again. Then a manager can accept it.",
-    };
+    return blocked(
+      "pull_request",
+      "The pull request's head commit changed after the testers approved it.",
+      "Testers check the new commit and report again. Then a manager can accept it.",
+    );
   }
-  return fixBreakBlock(client, ref, pullRequest, acceptedHeadSha || pullRequest.headSha);
+  const block = await checksBlock(client, ref, acceptedHeadSha || pullRequest.headSha);
+  return { block, conflicts: !block && hasMergeConflicts(pullRequest) };
 }

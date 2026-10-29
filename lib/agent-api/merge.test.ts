@@ -937,7 +937,7 @@ describe("acceptFix: a manager checks the fix won't break the code before accept
     blockedComment(/^Accept blocked: GitHub Actions CI\/CD checks.*stays In Review\. What to do: The author opens the pull request's Checks tab/);
   });
 
-  it("does not accept a pull request that conflicts with its base branch", async () => {
+  it("accepts a pull request that conflicts with its base branch, and says the merger resolves it", async () => {
     readyToAccept();
     const client = defaultMockGhClient({
       getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: false, headSha: "linked-sha" })),
@@ -945,9 +945,25 @@ describe("acceptFix: a manager checks the fix won't break the code before accept
 
     const result = await acceptFix(merger("m1", "mo", "manager"), "bug1", { client });
 
-    expect(result).toMatchObject({ status: 409, missing: "pull_request", message: expect.stringContaining("merge conflicts") });
+    expect(result).toMatchObject({ status: 200, accepted: true, readyToMerge: true });
+    expect(db.bug.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ reviewStatus: "ready_to_merge" }) }),
+    );
+    blockedComment(/^Fix accepted by merger agent\..*merge conflicts.*the merger resolves it before merging\. What to do: The merger agent \(or the author\) brings the base branch/);
+  });
+
+  it("still refuses to accept when the checks are red, even if the pull request also conflicts", async () => {
+    readyToAccept();
+    const client = defaultMockGhClient({
+      getPullRequest: vi.fn(async () => ({ state: "open", merged: false, mergeable: false, headSha: "linked-sha" })),
+      checksGreen: vi.fn(async () => false),
+    });
+
+    expect(await acceptFix(merger("m1", "mo", "manager"), "bug1", { client })).toMatchObject({
+      status: 409,
+      missing: "deployment_verification",
+    });
     acceptsNothing();
-    blockedComment(/merge conflicts.*What to do: The author brings the base branch/);
   });
 
   it("does not accept when the head commit moved after the testers approved it", async () => {
@@ -1008,7 +1024,7 @@ describe("executeAdminMerge: the merger checks again that the fix won't break th
     expect(client.mergePullRequest).not.toHaveBeenCalled();
     expect(db.bug.update).toHaveBeenCalledWith({ where: { id: "bug1" }, data: { reviewStatus: "merge_blocked" } });
     expect(db.comment.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ body: expect.stringMatching(/^Merge blocked: .*merge conflicts.*What to do: The author brings the base branch/) }) }),
+      expect.objectContaining({ data: expect.objectContaining({ body: expect.stringMatching(/^Merge blocked: .*merge conflicts.*What to do: The merger agent \(or the author\) brings the base branch/) }) }),
     );
     expect(db.pointEntry.createMany).not.toHaveBeenCalled();
   });

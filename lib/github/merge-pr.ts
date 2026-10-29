@@ -122,44 +122,47 @@ export type FixBreakBlock = {
   todo: string;
 };
 
+/** True when GitHub reports the pull request can't merge into its base branch as it is. */
+export function hasMergeConflicts(pullRequest: PullRequest): boolean {
+  // A merged pull request is already in; GitHub no longer reports conflicts for it.
+  return !pullRequest.merged && !pullRequest.mergeable;
+}
+
+export const MERGE_CONFLICT_MESSAGE =
+  "The pull request has merge conflicts with its base branch, so GitHub can't merge it as it is.";
+
+/** What resolves a conflict. The merger agent can do it; the author can too. */
+export const MERGE_CONFLICT_TODO =
+  "The merger agent (or the author) brings the base branch into the pull request branch, resolves the conflicts and pushes: `git fetch origin && git checkout <pull-request-branch> && git merge origin/<base-branch>`, fix the conflicting files, commit, push. The checks run again on the new commit, testers check the new commit and report again (Ziki only merges the exact commit they approved), and then the merge can go ahead.";
+
 /**
  * Ziki does not build or run a project's code, so "this fix won't break
- * anything" rests on what GitHub reports for the pull request: it can merge
- * into its base branch without conflicts, and every check run on the head
- * commit (tests, build, lint) passed. A manager reads this before accepting
- * a fix and the merger reads it again before merging. Null means nothing
- * blocks the fix.
+ * anything" rests on what GitHub reports for the pull request: every check run
+ * on the head commit (tests, build, lint) passed. A manager reads this before
+ * accepting a fix and the merger reads it again before merging. Null means
+ * nothing blocks the fix.
+ *
+ * A merge conflict is not a reason to refuse a fix: it is a job for the
+ * merger to resolve (`hasMergeConflicts`), so it isn't part of this check.
  */
-export async function fixBreakBlock(
+export async function checksBlock(
   client: Pick<GitHubClient, "checksGreen">,
   ref: PullRequestRef,
-  pullRequest: PullRequest,
   headSha: string,
 ): Promise<FixBreakBlock | null> {
-  // A merged pull request is already in; GitHub no longer reports conflicts for it.
-  if (!pullRequest.merged && !pullRequest.mergeable) {
-    return {
-      missing: "pull_request",
-      message: "The pull request has merge conflicts with its base branch, so merging it could break the code.",
-      todo:
-        "The author brings the base branch into the pull request, resolves the conflicts and pushes. Testers then check the new commit and report again.",
-    };
-  }
   let green = false;
   try {
     green = await client.checksGreen(ref, headSha);
   } catch {
     green = false;
   }
-  if (!green) {
-    return {
-      missing: "deployment_verification",
-      message: CHECKS_NOT_GREEN_MESSAGE,
-      todo:
-        "The author opens the pull request's Checks tab on GitHub, fixes whatever failed (tests, build or lint) and pushes. The checks have to pass on the latest commit before the fix can be accepted or merged.",
-    };
-  }
-  return null;
+  if (green) return null;
+  return {
+    missing: "deployment_verification",
+    message: CHECKS_NOT_GREEN_MESSAGE,
+    todo:
+      "The author opens the pull request's Checks tab on GitHub, fixes whatever failed (tests, build or lint) and pushes. The checks have to pass on the latest commit before the fix can be accepted or merged.",
+  };
 }
 
 // Whether a review thread is resolved is only available through GraphQL.
