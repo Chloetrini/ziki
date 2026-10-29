@@ -129,6 +129,12 @@ describe("findReadyIssues", () => {
     }));
   });
 
+  it("clamps non-finite limits to MAX_READY_ISSUES_LIMIT (#637)", async () => {
+    db.bug.findMany.mockResolvedValueOnce([]);
+    await findReadyIssues(dispatcher, "project-1", Number.POSITIVE_INFINITY);
+    expect(db.bug.findMany).toHaveBeenCalledTimes(1);
+  });
+
   it("returns only confirmed issues at the upvote threshold", async () => {
     isConfirmed.mockResolvedValueOnce(false);
     expect(await findReadyIssues(dispatcher, "project-1")).toEqual([]);
